@@ -2,6 +2,10 @@
 
 Public, CORS-enabled, documented by the provider. Treat every shape below as fact; do not invent fields and do not write defensive code for fields that exist.
 
+**v1 scaffold builds against the committed fixtures in `public/fixtures/`, not the live host.** Same paths, same shapes, `sources[].type` is `link` there (outbound to a rights-holder player) and `iframe` on the live feed. The base URL is config, so swapping fixture → live is `NUXT_PUBLIC_FEED_BASE` alone and no component changes. Set it to `/fixtures` while developing.
+
+Live source, once `NUXT_PUBLIC_FEED_BASE` points at it:
+
 Base: `https://api.ppv.st/api`
 Mirror base: `https://api.ppv.cx/api` (host not always resolvable — try primary, fall back on network error only)
 
@@ -74,7 +78,7 @@ Single stream. Same object as above plus:
 }
 ```
 
-`sources[]` is the playback chain, in order. `type` is always `iframe` in v1; skip any entry whose `data` is empty.
+`sources[]` is the playback chain, in order. `type` is `iframe` when the entry is embeddable and `link` when it is a normal navigation; skip any entry whose `data` is empty.
 
 ## GET /vods and GET /vods/{slug}
 

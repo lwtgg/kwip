@@ -1,0 +1,107 @@
+{
+  "success": true,
+  "timestamp": 1794880670,
+  "performance": 0.05,
+  "streams": [
+    {
+      "category": "Basketball",
+      "id": 37,
+      "always_live": 0,
+      "streams": [
+        {
+          "id": 32235,
+          "name": "Houston Rockets vs. Miami Heat",
+          "tag": "NBA",
+          "source_tag": "HD | Home",
+          "poster": "/fixtures/poster-1.jpg",
+          "blurhash": "LH5r}%YRR*aKj[j@fQa}Dgivt6j[",
+          "colors": ["#0080c6", "#241773"],
+          "uri_name": "basketball/hou-mia",
+          "starts_at": 1794875400,
+          "ends_at": 1794886200,
+          "always_live": 0,
+          "locale": "en",
+          "category_name": "Basketball",
+          "iframe": "",
+          "substreams": [],
+          "viewers": "1737"
+        },
+        {
+          "id": 32236,
+          "name": "Denver Nuggets vs. Phoenix Suns",
+          "tag": "NBA",
+          "source_tag": "HD",
+          "poster": "/fixtures/poster-2.jpg",
+          "blurhash": "L6PZfSi_.AyE_3t7t7R**0o#DgR4",
+          "colors": ["#0e2240", "#f9a01b"],
+          "uri_name": "basketball/den-phx",
+          "starts_at": 1794880800,
+          "ends_at": 1794891600,
+          "always_live": 0,
+          "locale": "en",
+          "category_name": "Basketball",
+          "iframe": "",
+          "substreams": [],
+          "viewers": "904"
+        }
+      ]
+    },
+    {
+      "category": "Football",
+      "id": 12,
+      "always_live": 0,
+      "streams": [
+        {
+          "id": 30110,
+          "name": "Arsenal vs. Everton",
+          "tag": "EPL",
+          "source_tag": "HD | Away",
+          "poster": "/fixtures/poster-3.jpg",
+          "blurhash": "L9AS}j-;D%M{_3t7M{Rj00t7Rjxu",
+          "colors": ["#ef0107", "#063672"],
+          "uri_name": "football/ars-eve",
+          "starts_at": 1794884000,
+          "ends_at": 1794894800,
+          "always_live": 0,
+          "locale": "en",
+          "category_name": "Football",
+          "iframe": "",
+          "substreams": [
+            {
+              "id": 1032235,
+              "name": "Arsenal vs. Everton 540p",
+              "uri_name": "football/ars-eve_540p",
+              "iframe": ""
+            }
+          ],
+          "viewers": "5120"
+        }
+      ]
+    },
+    {
+      "category": "Motorsport",
+      "id": 44,
+      "always_live": 1,
+      "streams": [
+        {
+          "id": 20001,
+          "name": "Race Control",
+          "tag": "F1",
+          "source_tag": "SD",
+          "poster": "/fixtures/poster-4.jpg",
+          "blurhash": "L4HVC1of00M{00t700Rj00~qM{Rj",
+          "colors": ["#15151e", "#e10600"],
+          "uri_name": "motorsport/race-control",
+          "starts_at": 0,
+          "ends_at": 0,
+          "always_live": 1,
+          "locale": "en",
+          "category_name": "Motorsport",
+          "iframe": "",
+          "substreams": [],
+          "viewers": "233"
+        }
+      ]
+    }
+  ]
+}
