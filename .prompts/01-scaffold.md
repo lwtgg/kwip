@@ -13,8 +13,9 @@ You are setting up an empty Nuxt 3 repo. Nothing exists yet.
 5. `app/components/AdSlot.vue` — props `format` (`leaderboard` | `mobile` | `rail`), reserved dimensions from `SPEC.md`, `aria-hidden`, renders an empty labelled box.
 6. `app/app.vue` with `<NuxtLayout><NuxtPage />`, `definePageMeta`-free, plus skip link and `<html class="dark">` default.
 7. `server/routes/api/domains.get.ts` returning the mirror list from a `public/domains.json`.
-8. `.env.example` with `NUXT_PUBLIC_SITE_NAME` and `NUXT_PUBLIC_FEED_BASE`.
-9. `pnpm build` passing.
+8. Canonical-host enforcement from `DECISIONS.md` rule 13: a Nitro server middleware that 301s any request whose host is not `config.public.canonicalHost` to the canonical absolute URL (path + query intact), plus `app.vue`/`useHead` defaults emitting `link[rel=canonical]` and `og:url` from the current path against `canonicalHost`. No literal hostnames anywhere.
+9. `.env.example` with `NUXT_PUBLIC_SITE_NAME=kwip`, `NUXT_PUBLIC_CANONICAL_HOST=kwip.fyi`, and `NUXT_PUBLIC_FEED_BASE`.
+10. `pnpm build` passing.
 
 ## Don't
 

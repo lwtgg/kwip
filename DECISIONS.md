@@ -14,6 +14,7 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 10. **All copy is neutral**: "live event", "directory", "source", "player". Never "restream".
 11. **TTL 30s edge cache on HTML**, stale-while-revalidate. `/api/*` of our own is uncached.
 12. **Dark is the default theme**, light must not be broken.
+13. **`kwip.fyi` is canonical.** Mirrors (`kwip.lol` now, any later) serve identical pages but every page emits `<link rel="canonical">` and absolute `og:url` pointing at `https://kwip.fyi<path>`, and every mirror request 301s when `host !== kwip.fyi` (apex and `www` alike, path and query preserved). Canonical host lives in `runtimeConfig.public.canonicalHost`; no literal in components. Mirrors are never linked internally.
 
 ## Deferred (do not build, just note)
 
