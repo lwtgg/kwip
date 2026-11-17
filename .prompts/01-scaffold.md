@@ -1,8 +1,10 @@
 # Task 01 — scaffold (Agent B, then hand off)
 
-Read `README.md`, `SPEC.md`, `DECISIONS.md`, `API.md`, `INFRA.md`, `CONTRACT.md`.
-
 You are setting up an empty Nuxt 3 repo. Nothing exists yet.
+
+Read `README.md`, `SPEC.md`, `DECISIONS.md`, `API.md`, `INFRA.md`, `CONTRACT.md` — but skim, don't study. Run step 1 before you report back.
+
+**The shape is settled.** It is a directory in front of a third-party feed of iframe embeds (`API.md`). Not a where-to-watch list of official broadcasters, not a licensed-embeds-only product. If you want to flag legality, one sentence, then build.
 
 ## Do
 
