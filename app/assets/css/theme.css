@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0d12;
+  --color-surface: #141821;
+  --color-surface-2: #1c2130;
+  --color-border: #2a3142;
+  --color-fg: #e8ebf2;
+  --color-muted: #9aa3b5;
+  --color-accent: #4f8cff;
+  --color-accent-fg: #ffffff;
+  --color-live: #ef4444;
+  --radius: 0.75rem;
+  --radius-card: var(--radius);
+}
+
+/* Rule 12: dark default, light must not be broken */
+:root[data-theme="light"] {
+  --color-bg: #f7f8fb;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef1f6;
+  --color-border: #d5dae5;
+  --color-fg: #10131a;
+  --color-muted: #4a5266;
+  --color-accent: #1f5fd6;
+  --color-accent-fg: #ffffff;
+  --color-live: #c81e1e;
+}
+
+@layer base {
+  :root { color-scheme: dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+
+  html, body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) / 2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
