@@ -137,6 +137,40 @@ const hasVisibleStreams = computed(() =>
 const heroStream = computed(() => heroEntry.value?.stream ?? null)
 const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
 
+const nextUpStreams = computed(() => {
+  if (activeFilter.value !== 'all') return []
+
+  const liveByViewers = [...liveNowStreams.value, ...alwaysLiveStreams.value]
+    .sort((a, b) => viewerCount(b) - viewerCount(a))
+  const seen = new Set([heroStream.value?.uri_name])
+  return [...upcomingStreams.value, ...liveByViewers].filter((stream) => {
+    if (seen.has(stream.uri_name)) return false
+    seen.add(stream.uri_name)
+    return true
+  }).slice(0, 3)
+})
+
+const nextUpUris = computed(() => new Set(nextUpStreams.value.map((stream) => stream.uri_name)))
+
+function withoutNextUp(streams: FeedStreamItem[]) {
+  return streams.filter((stream) => !nextUpUris.value.has(stream.uri_name))
+}
+
+// Rails lose whatever the strip promoted, so a rail emptied by the hand-off is dropped entirely.
+const liveRailStreams = computed(() => withoutNextUp(liveNowStreams.value))
+const alwaysLiveRailStreams = computed(() => withoutNextUp(alwaysLiveStreams.value))
+const categoryRails = computed(() =>
+  categories.value
+    .map((cat) => ({ cat, streams: withoutNextUp(cat.streams) }))
+    .filter((rail) => rail.streams.length > 0),
+)
+
+// The hero is filtered out of the strip; keep it out of the grid below too.
+const upcomingBelowHero = computed(() =>
+  withoutNextUp(upcomingStreams.value).filter((stream) => stream.uri_name !== heroStream.value?.uri_name),
+)
+const failedNextUpPosters = reactive(new Set<string>())
+
 const heroImgRef = ref<HTMLImageElement | null>(null)
 const heroImgError = ref(false)
 const heroImgLoaded = ref(false)
@@ -310,47 +344,90 @@ useSeoMeta({
           </div>
         </section>
 
-        <!-- Reserved AdSlot between hero and first rail -->
+        <section v-if="nextUpStreams.length" aria-labelledby="next-up-heading" class="!mt-4 border-t border-border pt-3">
+          <h2 id="next-up-heading" class="mb-2 text-xs font-semibold text-muted">
+            Next up
+          </h2>
+          <ul class="grid grid-cols-1 gap-1 min-[641px]:grid-cols-3 min-[641px]:gap-3">
+            <li v-for="stream in nextUpStreams" :key="stream.uri_name" class="min-w-0">
+              <NuxtLink
+                :to="`/live/${stream.uri_name}`"
+                class="group flex min-h-11 items-center gap-2.5 rounded-[var(--radius)] p-1.5 hover:bg-surface"
+              >
+                <div class="relative h-10 w-[72px] shrink-0 overflow-hidden rounded bg-surface-2">
+                  <img
+                    v-if="stream.poster && !failedNextUpPosters.has(stream.poster)"
+                    :src="stream.poster"
+                    alt=""
+                    width="72"
+                    height="40"
+                    loading="lazy"
+                    decoding="async"
+                    class="h-full w-full object-cover"
+                    @error="failedNextUpPosters.add(stream.poster)"
+                  >
+                  <PosterFallback v-else :name="stream.name" :colors="stream.colors" />
+                </div>
+                <div class="min-w-0">
+                  <div class="line-clamp-2 break-words text-sm font-semibold leading-tight text-fg group-hover:text-accent">
+                    {{ stream.name }}
+                  </div>
+                  <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span class="min-w-0 truncate text-xs text-muted">{{ stream.category_name }}</span>
+                    <StatusPill
+                      :starts-at="stream.starts_at"
+                      :ends-at="stream.ends_at"
+                      :always-live="stream.always_live"
+                      :now="nowSeconds"
+                    />
+                  </div>
+                </div>
+              </NuxtLink>
+            </li>
+          </ul>
+        </section>
+
+        <!-- Reserved AdSlot before the rails -->
         <AdSlot format="leaderboard" />
 
         <!-- Live now rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && liveNowStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && liveRailStreams.length > 0"
           title="Live now"
-          :streams="liveNowStreams"
+          :streams="liveRailStreams"
           :now="nowSeconds"
         />
 
         <!-- 24/7 rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && alwaysLiveStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && alwaysLiveRailStreams.length > 0"
           title="24/7"
-          :streams="alwaysLiveStreams"
+          :streams="alwaysLiveRailStreams"
           :now="nowSeconds"
         />
 
         <!-- Per-category rails -->
         <Rail
-          v-for="cat in activeFilter === 'all' ? categories : []"
-          :key="cat.id"
-          :title="cat.category"
-          :category="cat.category"
-          :streams="cat.streams"
+          v-for="rail in activeFilter === 'all' ? categoryRails : []"
+          :key="rail.cat.id"
+          :title="rail.cat.category"
+          :category="rail.cat.category"
+          :streams="rail.streams"
           :now="nowSeconds"
         />
 
         <!-- Upcoming block with relative countdown -->
-        <section v-if="activeFilter !== 'live' && upcomingStreams.length > 0" class="space-y-3">
+        <section v-if="activeFilter !== 'live' && upcomingBelowHero.length > 0" class="space-y-3">
           <div class="flex items-baseline justify-between gap-3">
             <h2 class="text-lg font-semibold tracking-tight text-fg">
               Upcoming
             </h2>
-            <span class="text-xs text-muted">{{ upcomingStreams.length }} scheduled</span>
+            <span class="text-xs text-muted">{{ upcomingBelowHero.length }} scheduled</span>
           </div>
 
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StreamCard
-              v-for="stream in upcomingStreams"
+              v-for="stream in upcomingBelowHero"
               :key="stream.id"
               :stream="stream"
               :now="nowSeconds"
