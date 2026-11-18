@@ -9,6 +9,7 @@ Escape hatch kept working: `nitro.preset = "node-server"` on a Hetzner CX22 behi
 ## Requirements
 
 - `wrangler.toml` with `compatibility_date`, no secrets committed
+- `[assets] binding = "ASSETS"` stays: a Worker fetch of its own custom domain times out, so same-origin feed reads go through the binding
 - `NUXT_PUBLIC_SITE_NAME`, `NUXT_PUBLIC_FEED_BASE` from env; no literal feed URL in components
 - Cache headers come from `nuxt.config.ts` `routeRules`, not dashboard rules: HTML 30s + `stale-while-revalidate=300`, immutable hashed assets, `no-store` on `/api/*`
 - `/api/domains` returns our mirror list from the committed `public/domains.json`, sanitised against `NUXT_PUBLIC_CANONICAL_HOST` when set
