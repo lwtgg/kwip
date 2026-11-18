@@ -4,9 +4,12 @@
     "id": 32235,
     "name": "Houston Rockets vs. Miami Heat",
     "tag": "NBA",
-    "poster": "/fixtures/poster-1.jpg",
+    "poster": "https://{host}/fixtures/poster-1.jpg",
     "blurhash": "LH5r}%YRR*aKj[j@fQa}Dgivt6j[",
-    "colors": ["#0080c6", "#241773"],
+    "colors": [
+      "#0080c6",
+      "#241773"
+    ],
     "uri_name": "basketball/hou-mia",
     "starts_at": 1794875400,
     "ends_at": 1794886200,
@@ -16,8 +19,18 @@
     "m3u8": "",
     "source_type": "links",
     "sources": [
-      { "name": "League Pass", "default": true, "type": "link", "data": "https://www.nba.com/watch/league-pass-stream" },
-      { "name": "Team stream", "default": false, "type": "link", "data": "https://www.rockets.com/" }
+      {
+        "name": "League Pass",
+        "default": true,
+        "type": "link",
+        "data": "https://www.nba.com/watch/league-pass-stream"
+      },
+      {
+        "name": "Team stream",
+        "default": false,
+        "type": "link",
+        "data": "https://{host}/fixtures/away.html"
+      }
     ],
     "category": 37,
     "auth": false,
