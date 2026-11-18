@@ -24,16 +24,36 @@ const {
   refresh: refreshVodsList,
 } = useVods()
 
-const wallClockSeconds = ref(Math.floor(Date.now() / 1000))
-onMounted(() => {
-  wallClockSeconds.value = Math.floor(Date.now() / 1000)
+// Review #6: wall-clock at render + ticking interval so open pages age into stale.
+const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const fetchedAtSeconds = ref<number | null>(
+  vodResp.value || vodsListResp.value ? Math.floor(Date.now() / 1000) : null,
+)
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+watch([vodResp, vodsListResp], ([nextVod, nextList]) => {
+  if (nextVod || nextList) {
+    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  }
 })
 
-const feedNow = computed(() => vodsListResp.value?.timestamp || wallClockSeconds.value)
+onMounted(() => {
+  nowSeconds.value = Math.floor(Date.now() / 1000)
+  if ((vodResp.value || vodsListResp.value) && fetchedAtSeconds.value === null) {
+    fetchedAtSeconds.value = nowSeconds.value
+  }
+  clockTimer = setInterval(() => {
+    nowSeconds.value = Math.floor(Date.now() / 1000)
+  }, 15_000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
 
 const isStale = computed(() => {
-  const ts = vodsListResp.value?.timestamp
-  return Boolean(ts && wallClockSeconds.value - ts > 300)
+  const originTs = vodsListResp.value?.timestamp || fetchedAtSeconds.value
+  return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
 
 const matchedListContext = computed<{ item: FeedVodItem; category: string } | null>(() => {
@@ -69,6 +89,19 @@ const detail = computed<FeedVodDetail | null>(() => {
   return raw
 })
 
+function humanizeSlug(rawSlug: string): string {
+  const last = rawSlug.split('/').filter(Boolean).pop() || ''
+  if (!last) return 'Event Replay'
+  return last
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+}
+
+// Review #11: every state renders the page `h1`, including loading, error, and empty.
+const pageHeading = computed(
+  () => detail.value?.name || matchedListContext.value?.item.name || humanizeSlug(slug.value),
+)
+
 const categoryName = computed(() => matchedListContext.value?.category || detail.value?.tag || 'Archive')
 
 const frameFailed = ref(false)
@@ -99,9 +132,10 @@ function handleRetrySource() {
   retryNonce.value += 1
 }
 
-function handleRetryFeed() {
-  refreshVod()
-  refreshVodsList()
+async function handleRetryFeed() {
+  await Promise.all([refreshVod(), refreshVodsList()])
+  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  nowSeconds.value = fetchedAtSeconds.value
 }
 
 function parseEventDate(value: number | string | undefined): Date | null {
@@ -178,7 +212,7 @@ const recommendedDateMap = computed<Record<number, string>>(() => {
   return out
 })
 
-const seoTitle = computed(() => detail.value?.name || 'Event Replay')
+const seoTitle = computed(() => pageHeading.value)
 const seoDescription = computed(() =>
   detail.value
     ? `Watch ${detail.value.name} (${detail.value.tag}) replay in the ${siteName} archive.`
@@ -197,6 +231,38 @@ useSeoMeta({
 
 <template>
   <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
+    <StateBlock
+      v-if="isStale && detail"
+      variant="stale"
+      message="Archive data is older than 5 minutes."
+      @retry="handleRetryFeed"
+    />
+
+    <!-- Header rendered in all states so loading, error, and empty still expose the page h1 -->
+    <div class="space-y-3">
+      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+        <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
+        <span>/</span>
+        <NuxtLink to="/vods" class="hover:text-fg">Archive</NuxtLink>
+        <span>/</span>
+        <span class="truncate text-fg">{{ pageHeading }}</span>
+      </nav>
+
+      <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+        {{ pageHeading }}
+      </h1>
+
+      <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
+        <span v-if="detail.tag" class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-fg">
+          {{ detail.tag }}
+        </span>
+        <time v-if="formattedEventDate" :datetime="isoEventDate">
+          <span v-if="detail.tag">· </span>{{ formattedEventDate }}
+        </time>
+        <span>· {{ formatViews(detail.views) }} views</span>
+      </div>
+    </div>
+
     <StateBlock
       v-if="vodStatus === 'pending' && !detail"
       variant="skeleton"
@@ -217,38 +283,6 @@ useSeoMeta({
     />
 
     <template v-else>
-      <StateBlock
-        v-if="isStale"
-        variant="stale"
-        message="Archive data is older than 5 minutes."
-        @retry="handleRetryFeed"
-      />
-
-      <!-- Header: Breadcrumb, title, tag, event_date, view count -->
-      <div class="space-y-3">
-        <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-          <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
-          <span>/</span>
-          <NuxtLink to="/vods" class="hover:text-fg">Archive</NuxtLink>
-          <span>/</span>
-          <span class="truncate text-fg">{{ detail.name }}</span>
-        </nav>
-
-        <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
-          {{ detail.name }}
-        </h1>
-
-        <div class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
-          <span v-if="detail.tag" class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-fg">
-            {{ detail.tag }}
-          </span>
-          <time v-if="formattedEventDate" :datetime="isoEventDate">
-            <span v-if="detail.tag">· </span>{{ formattedEventDate }}
-          </time>
-          <span>· {{ formatViews(detail.views) }} views</span>
-        </div>
-      </div>
-
       <!-- VOD player -->
       <section aria-label="Replay player" class="space-y-2.5">
         <template v-if="detail.source?.type === 'playlist' && detail.source.data">
@@ -344,26 +378,19 @@ useSeoMeta({
         </div>
       </section>
 
+      <!-- Reserved AdSlot immediately below player -->
+      <AdSlot format="leaderboard" />
+
       <!-- Recommended VODs rail when non-empty -->
       <Rail
         v-if="recommendedItems.length > 0"
         title="Recommended replays"
         :streams="recommendedItems"
-        :now="feedNow"
+        :now="nowSeconds"
         link-base="/vods"
         metric-label="views"
         :countdown-map="recommendedDateMap"
       />
-
-      <!-- Reserved AdSlot -->
-      <div>
-        <div class="hidden md:block">
-          <AdSlot format="leaderboard" />
-        </div>
-        <div class="md:hidden">
-          <AdSlot format="mobile" />
-        </div>
-      </div>
     </template>
   </div>
 </template>

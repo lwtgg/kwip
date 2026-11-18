@@ -8,6 +8,7 @@
     "generate": "nuxt generate",
     "preview": "wrangler dev .output/server/index.mjs --assets .output/public",
     "deploy": "wrangler deploy",
+    "test": "node --test tests/*.test.ts",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {

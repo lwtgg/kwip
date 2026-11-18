@@ -7,15 +7,40 @@ const route = useRoute()
 const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useStreams()
 
-const wallClockSeconds = ref(Math.floor(Date.now() / 1000))
-onMounted(() => {
-  wallClockSeconds.value = Math.floor(Date.now() / 1000)
+// Review #6 & #9: wall-clock `Date.now()` at render + ticking interval.
+const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const fetchedAtSeconds = ref<number | null>(data.value ? Math.floor(Date.now() / 1000) : null)
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+watch(data, (next) => {
+  if (next) {
+    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  }
 })
 
-const feedNow = computed(() => data.value?.timestamp || wallClockSeconds.value)
+onMounted(() => {
+  nowSeconds.value = Math.floor(Date.now() / 1000)
+  if (data.value && fetchedAtSeconds.value === null) {
+    fetchedAtSeconds.value = nowSeconds.value
+  }
+  clockTimer = setInterval(() => {
+    nowSeconds.value = Math.floor(Date.now() / 1000)
+  }, 15_000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
+
+async function handleRefresh() {
+  await refresh()
+  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  nowSeconds.value = fetchedAtSeconds.value
+}
+
 const isStale = computed(() => {
-  const ts = data.value?.timestamp
-  return Boolean(ts && wallClockSeconds.value - ts > 300)
+  const originTs = data.value?.timestamp || fetchedAtSeconds.value
+  return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
 
 function slugifyCategory(name: string): string {
@@ -57,12 +82,12 @@ const categoryStreams = computed<FeedStreamItem[]>(() => {
 
 function isStreamLive(s: FeedStreamItem): boolean {
   if (s.always_live === 1) return true
-  return s.starts_at <= feedNow.value && s.ends_at > feedNow.value
+  return s.starts_at <= nowSeconds.value && s.ends_at > nowSeconds.value
 }
 
 function isStreamUpcoming(s: FeedStreamItem): boolean {
   if (s.always_live === 1) return false
-  return s.starts_at > feedNow.value
+  return s.starts_at > nowSeconds.value
 }
 
 function formatCountdown(startsAt: number, now: number): string {
@@ -147,7 +172,7 @@ useSeoMeta({
       v-else-if="error && !data"
       variant="error"
       :message="error.message"
-      @retry="refresh()"
+      @retry="handleRefresh"
     />
 
     <template v-else>
@@ -155,7 +180,7 @@ useSeoMeta({
         v-if="isStale"
         variant="stale"
         message="Directory data is older than 5 minutes."
-        @retry="refresh()"
+        @retry="handleRefresh"
       />
 
       <StateBlock
@@ -175,8 +200,8 @@ useSeoMeta({
           v-for="stream in filteredStreams"
           :key="stream.id"
           :stream="stream"
-          :now="feedNow"
-          :countdown="isStreamUpcoming(stream) ? formatCountdown(stream.starts_at, feedNow) : ''"
+          :now="nowSeconds"
+          :countdown="isStreamUpcoming(stream) ? formatCountdown(stream.starts_at, nowSeconds) : ''"
         />
       </div>
     </template>

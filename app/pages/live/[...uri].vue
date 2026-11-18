@@ -23,15 +23,36 @@ const {
   refresh: refreshList,
 } = useStreams()
 
-const wallClockSeconds = ref(Math.floor(Date.now() / 1000))
-onMounted(() => {
-  wallClockSeconds.value = Math.floor(Date.now() / 1000)
+// Review #6 & #9: wall-clock `Date.now()` at render + ticking interval so open pages age into stale.
+const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const fetchedAtSeconds = ref<number | null>(
+  streamResp.value || listResp.value ? Math.floor(Date.now() / 1000) : null,
+)
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+watch([streamResp, listResp], ([nextStream, nextList]) => {
+  if (nextStream || nextList) {
+    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  }
 })
 
-const feedNow = computed(() => listResp.value?.timestamp || wallClockSeconds.value)
+onMounted(() => {
+  nowSeconds.value = Math.floor(Date.now() / 1000)
+  if ((streamResp.value || listResp.value) && fetchedAtSeconds.value === null) {
+    fetchedAtSeconds.value = nowSeconds.value
+  }
+  clockTimer = setInterval(() => {
+    nowSeconds.value = Math.floor(Date.now() / 1000)
+  }, 15_000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
+
 const isStale = computed(() => {
-  const ts = listResp.value?.timestamp
-  return Boolean(ts && wallClockSeconds.value - ts > 300)
+  const originTs = listResp.value?.timestamp || fetchedAtSeconds.value
+  return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
 
 // Match stream metadata from the list feed when the single-file fixture returns a generic detail payload.
@@ -77,6 +98,19 @@ const detail = computed<FeedStreamDetail | null>(() => {
   return raw
 })
 
+function humanizeUri(uri: string): string {
+  const last = uri.split('/').filter(Boolean).pop() || ''
+  if (!last) return 'Live Event'
+  return last
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+}
+
+// Review #11: every state (loading, error, empty, content) renders the page `h1`.
+const pageHeading = computed(
+  () => detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value),
+)
+
 const sources = computed<SelectableSourceOption[]>(() => {
   const d = detail.value
   if (!d) return []
@@ -97,7 +131,6 @@ const defaultSourceIndex = computed(() => {
 })
 
 const selectedSourceIndex = ref<number | null>(null)
-const failedSourceIndices = ref<number[]>([])
 const lastFailedIndex = ref(-1)
 const retryGeneration = ref(0)
 const posterLoaded = ref(false)
@@ -105,7 +138,6 @@ const posterError = ref(false)
 
 watch(uriName, () => {
   selectedSourceIndex.value = null
-  failedSourceIndices.value = []
   lastFailedIndex.value = -1
   retryGeneration.value = 0
   posterLoaded.value = false
@@ -136,47 +168,33 @@ const currentSource = computed(() =>
 )
 
 const firstRemainingLink = computed<SelectableSourceOption | null>(() => {
-  const afterFailed = sources.value.find(
-    (s, idx) => idx > lastFailedIndex.value && s.kind === 'link',
+  return (
+    sources.value.find((s, idx) => idx > lastFailedIndex.value && s.kind === 'link') ??
+    sources.value.find((s) => s.kind === 'link') ??
+    null
   )
-  if (afterFailed) return afterFailed
-  return sources.value.find((s) => s.kind === 'link') ?? null
 })
 
+// Review #8: advance linearly in chain order without skipping `link` entries and without wrapping to earlier iframes.
 function handleFrameError() {
   const failedAt = activeSourceIndex.value
   lastFailedIndex.value = failedAt
-  if (!failedSourceIndices.value.includes(failedAt)) {
-    failedSourceIndices.value = [...failedSourceIndices.value, failedAt]
-  }
-  const nextAfter = sources.value.findIndex(
-    (s, idx) =>
-      idx > failedAt && s.kind === 'iframe' && !failedSourceIndices.value.includes(idx),
-  )
-  if (nextAfter !== -1) {
-    selectedSourceIndex.value = nextAfter
-    return
-  }
-  const anyRemainingIframe = sources.value.findIndex(
-    (s, idx) => s.kind === 'iframe' && !failedSourceIndices.value.includes(idx),
-  )
-  selectedSourceIndex.value =
-    anyRemainingIframe !== -1 ? anyRemainingIframe : sources.value.length
+  selectedSourceIndex.value = failedAt + 1
 }
 
 function handleRetryChain() {
   if (sources.value.length === 0) {
     refreshStream()
   }
-  failedSourceIndices.value = []
   lastFailedIndex.value = -1
   selectedSourceIndex.value = null
   retryGeneration.value += 1
 }
 
-function handleRetryFeed() {
-  refreshStream()
-  refreshList()
+async function handleRetryFeed() {
+  await Promise.all([refreshStream(), refreshList()])
+  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  nowSeconds.value = fetchedAtSeconds.value
 }
 
 function slugifyCategory(name: string): string {
@@ -195,8 +213,12 @@ function formatViewers(raw: string | number): string {
   return String(n)
 }
 
+const categoryLabel = computed(
+  () => detail.value?.category_name || matchingListItem.value?.category_name || '',
+)
+
 const categorySlug = computed(() =>
-  detail.value?.category_name ? slugifyCategory(detail.value.category_name) : '',
+  categoryLabel.value ? slugifyCategory(categoryLabel.value) : '',
 )
 
 const placeholderColor = computed(() => detail.value?.colors?.[0] || 'var(--color-surface-2)')
@@ -224,7 +246,7 @@ const relatedStreams = computed<FeedStreamItem[]>(() => {
 
 const canonicalPageUrl = computed(() => `https://${canonicalHost}/live/${uriName.value}`)
 
-const seoTitle = computed(() => detail.value?.name || 'Live Event')
+const seoTitle = computed(() => pageHeading.value)
 const seoDescription = computed(() =>
   detail.value
     ? `Watch ${detail.value.name} (${detail.value.category_name}) via available player sources on ${siteName}.`
@@ -240,38 +262,48 @@ useSeoMeta({
   ogImage: () => detail.value?.poster || undefined,
 })
 
-function parseCompetitors(name: string) {
+function parseMatchupCompetitors(name: string): { '@type': 'SportsTeam'; name: string }[] {
   const parts = name.split(/\s+(?:vs\.?|v\.?|@)\s+/i).map((p) => p.trim()).filter(Boolean)
-  if (parts.length >= 2) {
+  if (parts.length === 2) {
     return [
-      { '@type': 'SportsTeam', name: parts[0] },
-      { '@type': 'SportsTeam', name: parts[1] },
+      { '@type': 'SportsTeam', name: parts[0]! },
+      { '@type': 'SportsTeam', name: parts[1]! },
     ]
   }
-  return [{ '@type': 'SportsTeam', name }]
+  return []
 }
 
+// Review #12: omit `startDate` / `endDate` for 24/7 channels (`starts_at === 0`), and omit `competitor` when there is no matchup.
 const sportsEventJsonLd = computed(() => {
   const d = detail.value
   if (!d) return null
-  const baseTs = feedNow.value
-  const startSec = d.starts_at > 0 ? d.starts_at : baseTs
-  const endSec = d.ends_at > 0 ? d.ends_at : startSec + 10_800
-  return {
+  const is24x7 = d.always_live === 1
+  const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'SportsEvent',
     name: d.name,
-    sport: d.category_name,
-    startDate: new Date(startSec * 1000).toISOString(),
-    endDate: new Date(endSec * 1000).toISOString(),
+    url: canonicalPageUrl.value,
     eventAttendanceMode: 'https://schema.org/OnlineEventAttendanceMode',
     eventStatus: 'https://schema.org/EventScheduled',
     location: {
       '@type': 'VirtualLocation',
       url: canonicalPageUrl.value,
     },
-    competitor: parseCompetitors(d.name),
   }
+  if (d.category_name) {
+    ld.sport = d.category_name
+  }
+  if (!is24x7 && d.starts_at > 0) {
+    ld.startDate = new Date(d.starts_at * 1000).toISOString()
+  }
+  if (!is24x7 && d.ends_at > 0) {
+    ld.endDate = new Date(d.ends_at * 1000).toISOString()
+  }
+  const competitors = parseMatchupCompetitors(d.name)
+  if (competitors.length > 0) {
+    ld.competitor = competitors
+  }
+  return ld
 })
 
 useHead({
@@ -290,6 +322,56 @@ useHead({
 
 <template>
   <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
+    <StateBlock
+      v-if="isStale && detail"
+      variant="stale"
+      message="Directory data is older than 5 minutes."
+      @retry="handleRetryFeed"
+    />
+
+    <!-- Header rendered in every state so loading, error, and empty still expose the page h1 -->
+    <div class="space-y-4">
+      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
+        <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
+        <span>/</span>
+        <NuxtLink
+          v-if="categorySlug"
+          :to="`/c/${categorySlug}`"
+          class="hover:text-fg"
+        >
+          {{ categoryLabel }}
+        </NuxtLink>
+        <span v-if="categorySlug">/</span>
+        <span class="truncate text-fg">{{ pageHeading }}</span>
+      </nav>
+
+      <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div class="space-y-2">
+          <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+            {{ pageHeading }}
+          </h1>
+          <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
+            <NuxtLink
+              v-if="categorySlug"
+              :to="`/c/${categorySlug}`"
+              class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-fg hover:text-accent"
+            >
+              {{ detail.category_name }}
+            </NuxtLink>
+            <span v-if="detail.tag">· {{ detail.tag }}</span>
+            <span>· {{ formatViewers(detail.viewers) }} viewers</span>
+          </div>
+        </div>
+
+        <div v-if="detail" class="flex flex-wrap items-center gap-3">
+          <SourceSelect
+            v-model="activeSourceIndex"
+            :sources="sources"
+          />
+        </div>
+      </div>
+    </div>
+
     <StateBlock
       v-if="streamStatus === 'pending' && !detail"
       variant="skeleton"
@@ -310,56 +392,6 @@ useHead({
     />
 
     <template v-else>
-      <StateBlock
-        v-if="isStale"
-        variant="stale"
-        message="Directory data is older than 5 minutes."
-        @retry="handleRetryFeed"
-      />
-
-      <!-- Header: Breadcrumb, title, source select, viewer count, category -->
-      <div class="space-y-4">
-        <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-          <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
-          <span>/</span>
-          <NuxtLink
-            v-if="categorySlug"
-            :to="`/c/${categorySlug}`"
-            class="hover:text-fg"
-          >
-            {{ detail.category_name }}
-          </NuxtLink>
-          <span v-if="categorySlug">/</span>
-          <span class="truncate text-fg">{{ detail.name }}</span>
-        </nav>
-
-        <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div class="space-y-2">
-            <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
-              {{ detail.name }}
-            </h1>
-            <div class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
-              <NuxtLink
-                v-if="categorySlug"
-                :to="`/c/${categorySlug}`"
-                class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-fg hover:text-accent"
-              >
-                {{ detail.category_name }}
-              </NuxtLink>
-              <span v-if="detail.tag">· {{ detail.tag }}</span>
-              <span>· {{ formatViewers(detail.viewers) }} viewers</span>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-3">
-            <SourceSelect
-              v-model="activeSourceIndex"
-              :sources="sources"
-            />
-          </div>
-        </div>
-      </div>
-
       <!-- Player frame (iframe) or outbound link block or exhausted-chain fallback -->
       <section aria-label="Event player">
         <div
@@ -461,6 +493,9 @@ useHead({
         </div>
       </section>
 
+      <!-- Review #2: Reserved 970×90 / 320×100 AdSlot immediately below player, before related streams -->
+      <AdSlot format="leaderboard" />
+
       <!-- Related streams in same category -->
       <section class="space-y-3">
         <div class="flex items-baseline justify-between gap-3">
@@ -484,7 +519,7 @@ useHead({
             v-for="stream in relatedStreams"
             :key="stream.id"
             :stream="stream"
-            :now="feedNow"
+            :now="nowSeconds"
           />
         </div>
         <StateBlock
@@ -493,16 +528,6 @@ useHead({
           :message="`No other ${detail.category_name} events are listed right now.`"
         />
       </section>
-
-      <!-- Reserved AdSlot below -->
-      <div>
-        <div class="hidden md:block">
-          <AdSlot format="leaderboard" />
-        </div>
-        <div class="md:hidden">
-          <AdSlot format="mobile" />
-        </div>
-      </div>
     </template>
   </div>
 </template>
