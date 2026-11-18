@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { blurBackground } from '~/composables/usePosterBlur'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
@@ -24,6 +25,7 @@ const props = withDefaults(
 const imgRef = ref<HTMLImageElement | null>(null)
 const imgLoaded = ref(false)
 const imgError = ref(false)
+const background = blurBackground(() => props.stream?.blurhash)
 
 watch(
   () => props.stream?.poster,
@@ -83,6 +85,12 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
       class="relative aspect-video w-full overflow-hidden"
       :style="{ backgroundColor: placeholderColor }"
     >
+      <span
+        v-if="!imgLoaded && background && effectiveVariant === 'default' && !imgError"
+        aria-hidden="true"
+        class="absolute inset-0 scale-105 bg-cover bg-center blur-sm"
+        :style="{ backgroundImage: background }"
+      />
       <img
         v-if="effectiveVariant === 'default' && !imgError"
         ref="imgRef"
@@ -92,13 +100,13 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
         height="360"
         loading="lazy"
         decoding="async"
-        class="h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-300"
+        class="relative h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-300"
         :class="imgLoaded ? 'opacity-100' : 'opacity-0'"
         @load="imgLoaded = true"
         @error="imgError = true"
       >
 
-      <PosterFallback v-else :name="stream.name" :colors="stream.colors" />
+      <PosterFallback v-else :name="stream.name" :colors="stream.colors" :blurhash="stream.blurhash" />
 
       <div class="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-center justify-between gap-2">
         <StatusPill

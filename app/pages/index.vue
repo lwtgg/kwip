@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { blurBackground } from '~/composables/usePosterBlur'
 import { useStreams, type FeedStreamItem } from '~/composables/useFeed'
 import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
@@ -167,6 +168,7 @@ const failedNextUpPosters = reactive(new Set<string>())
 const heroImgRef = ref<HTMLImageElement | null>(null)
 const heroImgError = ref(false)
 const heroImgLoaded = ref(false)
+const heroBackground = blurBackground(() => heroStream.value?.blurhash)
 watch(
   () => heroStream.value?.poster,
   () => {
@@ -264,9 +266,15 @@ useSeoMeta({
         >
           <div class="grid grid-cols-1 lg:grid-cols-12">
             <div
-              class="relative aspect-video lg:col-span-7 lg:aspect-auto lg:min-h-[320px]"
+              class="relative aspect-video overflow-hidden lg:col-span-7 lg:aspect-auto lg:min-h-[320px]"
               :style="{ backgroundColor: heroStream.colors?.[0] || 'var(--color-surface-2)' }"
             >
+              <span
+                v-if="!heroImgLoaded && heroBackground && heroStream.poster && !heroImgError"
+                aria-hidden="true"
+                class="absolute inset-0 scale-105 bg-cover bg-center blur-sm"
+                :style="{ backgroundImage: heroBackground }"
+              />
               <img
                 v-if="heroStream.poster && !heroImgError"
                 ref="heroImgRef"
@@ -276,12 +284,12 @@ useSeoMeta({
                 height="540"
                 loading="eager"
                 decoding="async"
-                class="h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-300"
+                class="relative h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-300"
                 :class="heroImgLoaded ? 'opacity-100' : 'opacity-0'"
                 @load="heroImgLoaded = true"
                 @error="heroImgError = true"
               >
-              <PosterFallback v-else :name="heroStream.name" :colors="heroStream.colors" />
+              <PosterFallback v-else :name="heroStream.name" :colors="heroStream.colors" :blurhash="heroStream.blurhash" />
               <div v-if="heroStream.poster && !heroImgError" class="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/80 via-transparent to-transparent lg:bg-gradient-to-r lg:from-transparent lg:to-surface/90" />
             </div>
 
@@ -365,7 +373,7 @@ useSeoMeta({
                     class="h-full w-full object-cover"
                     @error="failedNextUpPosters.add(stream.poster)"
                   >
-                  <PosterFallback v-else :name="stream.name" :colors="stream.colors" />
+                  <PosterFallback v-else :name="stream.name" :colors="stream.colors" :blurhash="stream.blurhash" />
                 </div>
                 <div class="min-w-0">
                   <div class="line-clamp-2 break-words text-sm font-semibold leading-tight text-fg group-hover:text-accent">
