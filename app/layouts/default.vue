@@ -7,7 +7,8 @@ const { theme, toggleTheme } = useTheme()
 const { density, toggleDensity } = useDensity()
 const isCompact = computed(() => density.value === 'compact')
 const densityAction = computed(() => isCompact.value ? 'Switch to comfortable layout' : 'Switch to compact layout')
-const { data: streamsData } = useStreams()
+const error = useError()
+const streamsData = error.value ? undefined : useStreams().data
 
 function slugifyCategory(name: string): string {
   return name
@@ -21,7 +22,7 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
 
 const categories = computed(() => {
   const visible = []
-  for (const category of streamsData.value?.streams ?? []) {
+  for (const category of streamsData?.value?.streams ?? []) {
     const chip = {
       id: category.id,
       name: category.category,

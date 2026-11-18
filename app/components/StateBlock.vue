@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const props = withDefaults(
   defineProps<{
-    variant: 'skeleton' | 'empty' | 'error' | 'stale'
+    variant: 'skeleton' | 'empty' | 'error' | 'stale' | 'not-found'
     rows?: number
     message?: string
   }>(),
@@ -76,6 +76,25 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
     >
       Retry
     </button>
+  </div>
+
+  <div
+    v-else-if="variant === 'not-found'"
+    role="status"
+    class="flex flex-col items-start justify-between gap-4 rounded-[var(--radius)] border border-border bg-surface p-6 sm:flex-row sm:items-center"
+  >
+    <div>
+      <span class="error-glyph" aria-hidden="true" />
+      <p class="text-sm text-muted">
+        {{ message || 'That event is not listed any more.' }}
+      </p>
+    </div>
+    <NuxtLink
+      to="/"
+      class="inline-flex min-h-11 shrink-0 items-center rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:opacity-90"
+    >
+      All events
+    </NuxtLink>
   </div>
 
   <div
