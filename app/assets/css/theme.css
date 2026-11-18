@@ -15,6 +15,7 @@
 }
 
 /* Rule 12: dark default, light must not be broken */
+:root.light,
 :root[data-theme="light"] {
   --color-bg: #f7f8fb;
   --color-surface: #ffffff;
@@ -29,6 +30,7 @@
 
 @layer base {
   :root { color-scheme: dark; }
+  :root.light,
   :root[data-theme="light"] { color-scheme: light; }
 
   html, body {
