@@ -173,6 +173,7 @@ useSeoMeta({
           :category="rail.category"
           :streams="rail.items"
           :now="nowSeconds"
+          class="[--rail-gap:var(--grid-gap)]"
           link-base="/vods"
           metric-label="views"
           :countdown-map="rail.dateLabels"

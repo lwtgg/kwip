@@ -432,7 +432,7 @@ useSeoMeta({
             <span class="text-xs text-muted">{{ upcomingBelowHero.length }} scheduled</span>
           </div>
 
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">
             <StreamCard
               v-for="stream in upcomingBelowHero"
               :key="stream.id"

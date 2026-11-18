@@ -68,7 +68,7 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
     class="overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface"
   >
     <div class="aspect-video w-full bg-surface-2 motion-safe:animate-pulse" />
-    <div class="space-y-2.5 p-3.5">
+    <div class="space-y-[calc(var(--card-gap)+0.125rem)] p-(--card-pad)">
       <div class="h-3.5 w-20 rounded bg-surface-2 motion-safe:animate-pulse" />
       <div class="h-4 w-4/5 rounded bg-surface-2 motion-safe:animate-pulse" />
       <div class="h-4 w-3/5 rounded bg-surface-2 motion-safe:animate-pulse" />
@@ -134,7 +134,7 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
       </span>
     </div>
 
-    <div class="flex flex-1 flex-col justify-between gap-2 p-3.5">
+    <div class="flex flex-1 flex-col justify-between gap-(--card-gap) p-(--card-pad)">
       <LiveProgress
         v-if="now !== undefined"
         :starts-at="stream.starts_at"
@@ -151,7 +151,7 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
         </span>
       </div>
 
-      <h3 class="line-clamp-2 text-sm font-semibold leading-snug text-fg group-hover:text-accent">
+      <h3 class="line-clamp-2 text-sm [[data-density='compact']_&]:text-[13px] font-semibold leading-snug text-fg group-hover:text-accent">
         {{ stream.name }}
       </h3>
     </div>

@@ -4,6 +4,9 @@ import { useStreams } from '~/composables/useFeed'
 const { siteName } = useRuntimeConfig().public
 const route = useRoute()
 const { theme, toggleTheme } = useTheme()
+const { density, toggleDensity } = useDensity()
+const isCompact = computed(() => density.value === 'compact')
+const densityAction = computed(() => isCompact.value ? 'Switch to comfortable layout' : 'Switch to compact layout')
 const { data: streamsData } = useStreams()
 
 function slugifyCategory(name: string): string {
@@ -140,6 +143,27 @@ const categories = computed(() => {
               class="h-4 w-4"
             >
               <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79Z" />
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            :aria-pressed="isCompact"
+            aria-label="Compact layout"
+            :title="densityAction"
+            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
+            @click="toggleDensity"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              class="h-4 w-4"
+            >
+              <path d="M4 7h16M4 12h16M4 17h16" />
             </svg>
           </button>
         </div>

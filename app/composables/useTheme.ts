@@ -14,7 +14,19 @@ export function resolveTheme(cookieValue: string | null | undefined, _prefersLig
   return 'dark'
 }
 
-export const NO_FLASH_SCRIPT = `(function(){try{var m=document.cookie.match(/(?:^|;\\s*)theme=(dark|light)(?:;|$)/);var hasMedia=typeof window!=='undefined'&&typeof window.matchMedia==='function';var prefersDark=hasMedia?window.matchMedia('(prefers-color-scheme: dark)').matches:true;var t=m?m[1]:(prefersDark?'dark':'dark');var d=document.documentElement;d.classList.remove('dark','light');d.classList.add(t);d.setAttribute('data-theme',t);}catch(e){}})();`
+export const NO_FLASH_SCRIPT = `(function(){
+  try {
+    var root = document.documentElement;
+    var cookie = document.cookie;
+    var theme = cookie.match(/(?:^|;\\s*)theme=(dark|light)(?:;|$)/);
+    var mode = theme ? theme[1] : 'dark';
+    root.classList.remove('dark', 'light');
+    root.classList.add(mode);
+    root.setAttribute('data-theme', mode);
+    var compact = /(?:^|;\\s*)density=compact(?:;|$)/.test(cookie);
+    root.setAttribute('data-density', compact ? 'compact' : 'comfortable');
+  } catch (e) {}
+})();`
 
 function applyDomTheme(mode: ThemeMode) {
   if (!import.meta.client) return

@@ -59,7 +59,7 @@ const categoryHref = computed(() => {
     </div>
 
     <div
-      class="flex flex-col gap-4 md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:pb-2 md:has-[:focus-visible]:snap-none"
+      class="flex flex-col gap-(--rail-gap) md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:pb-2 md:has-[:focus-visible]:snap-none"
     >
       <div
         v-for="stream in streams"

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
+import { resolveDensity } from '../app/composables/useDensity.ts'
 import { resolveTheme, NO_FLASH_SCRIPT } from '../app/composables/useTheme.ts'
 
 function runBootScript({ cookie = '', prefersLight = false }: { cookie?: string; prefersLight?: boolean }) {
@@ -59,4 +60,15 @@ test('explicit dark cookie resolves to dark theme on a light OS', () => {
   assert.equal(classes.has('dark'), true)
   assert.equal(classes.has('light'), false)
   assert.equal(attrs.get('data-theme'), 'dark')
+})
+
+test('first paint and runtime agree on valid and invalid density values', () => {
+  for (const value of [undefined, 'comfortable', 'compact', 'compact-extra', 'invalid']) {
+    const expected = value === 'compact' ? 'compact' : 'comfortable'
+    const cookie = value === undefined ? 'theme=light' : `theme=light; density=${value}; other=1`
+    const { attrs } = runBootScript({ cookie })
+    assert.equal(resolveDensity(value), expected)
+    assert.equal(attrs.get('data-density'), expected)
+    assert.equal(attrs.get('data-theme'), 'light')
+  }
 })

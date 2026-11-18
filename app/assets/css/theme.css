@@ -16,6 +16,17 @@
 
 :root {
   --focus-ring: var(--color-accent);
+  --card-pad: 0.875rem;
+  --card-gap: 0.5rem;
+  --grid-gap: 1rem;
+  --rail-gap: 1rem;
+}
+
+[data-density='compact'] {
+  --card-pad: 0.625rem;
+  --card-gap: 0.25rem;
+  --grid-gap: 0.625rem;
+  --rail-gap: 0.625rem;
 }
 
 /* Rule 12: dark default, light must not be broken */
