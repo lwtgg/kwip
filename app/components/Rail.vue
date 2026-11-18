@@ -1,12 +1,24 @@
 <script setup lang="ts">
 import type { FeedStreamItem } from '~/composables/useFeed'
 
-const props = defineProps<{
-  title: string
-  category?: string
-  streams: FeedStreamItem[]
-  now?: number
-}>()
+const props = withDefaults(
+  defineProps<{
+    title: string
+    category?: string
+    streams: FeedStreamItem[]
+    now?: number
+    linkBase?: string
+    metricLabel?: 'viewers' | 'views'
+    countdownMap?: Record<number, string>
+  }>(),
+  {
+    category: undefined,
+    now: undefined,
+    linkBase: '/live',
+    metricLabel: 'viewers',
+    countdownMap: undefined,
+  },
+)
 
 function slugifyCategory(name: string): string {
   return name
@@ -52,7 +64,13 @@ const categoryHref = computed(() =>
         :key="stream.id"
         class="w-full md:w-72 md:shrink-0 md:snap-start xl:w-80"
       >
-        <StreamCard :stream="stream" :now="now" />
+        <StreamCard
+          :stream="stream"
+          :now="now"
+          :to="`${linkBase}/${stream.uri_name}`"
+          :metric-label="metricLabel"
+          :countdown="countdownMap?.[stream.id] || ''"
+        />
       </div>
     </div>
   </section>

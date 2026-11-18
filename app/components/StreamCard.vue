@@ -7,12 +7,16 @@ const props = withDefaults(
     variant?: 'default' | 'skeleton'
     now?: number
     countdown?: string
+    to?: string
+    metricLabel?: 'viewers' | 'views'
   }>(),
   {
     stream: undefined,
     variant: 'default',
     now: undefined,
     countdown: '',
+    to: '',
+    metricLabel: 'viewers',
   },
 )
 
@@ -35,6 +39,11 @@ onMounted(() => {
 })
 
 const placeholderColor = computed(() => props.stream?.colors?.[0] || 'var(--color-surface-2)')
+
+const targetHref = computed(() => {
+  if (props.to) return props.to
+  return props.stream ? `/live/${props.stream.uri_name}` : '/'
+})
 
 const isAlwaysLive = computed(() => props.stream?.always_live === 1)
 
@@ -73,7 +82,7 @@ const formattedViewers = computed(() => (props.stream ? formatViewers(props.stre
 
   <NuxtLink
     v-else
-    :to="`/live/${stream.uri_name}`"
+    :to="targetHref"
     class="group flex h-full flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface motion-safe:transition-colors hover:border-accent"
   >
     <div
@@ -117,9 +126,10 @@ const formattedViewers = computed(() => (props.stream ? formatViewers(props.stre
         <span
           class="inline-flex items-center gap-1 rounded-full bg-bg/85 px-2.5 py-0.5 text-[11px] font-medium text-fg backdrop-blur-xs"
         >
-          <span aria-hidden="true">●</span>
+          <span v-if="metricLabel === 'viewers'" aria-hidden="true">●</span>
           <span>{{ formattedViewers }}</span>
-          <span class="sr-only">viewers</span>
+          <span v-if="metricLabel === 'views'">views</span>
+          <span v-else class="sr-only">viewers</span>
         </span>
       </div>
     </div>
