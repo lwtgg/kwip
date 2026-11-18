@@ -71,17 +71,24 @@ const detail = computed<FeedVodDetail | null>(() => {
 
 const categoryName = computed(() => matchedListContext.value?.category || detail.value?.tag || 'Archive')
 
-const frameFailed = ref(false)
+const sourceFailed = ref(false)
 const retryNonce = ref(0)
 const posterLoaded = ref(false)
 const posterError = ref(false)
 
 watch(slug, () => {
-  frameFailed.value = false
+  sourceFailed.value = false
   retryNonce.value = 0
   posterLoaded.value = false
   posterError.value = false
 })
+
+watch(
+  [() => detail.value?.source?.type, () => detail.value?.source?.data],
+  () => {
+    sourceFailed.value = false
+  },
+)
 
 watch(
   () => detail.value?.poster,
@@ -95,7 +102,7 @@ function handleRetrySource() {
   if (!detail.value?.source?.data) {
     refreshVod()
   }
-  frameFailed.value = false
+  sourceFailed.value = false
   retryNonce.value += 1
 }
 
@@ -251,16 +258,17 @@ useSeoMeta({
 
       <!-- VOD player -->
       <section aria-label="Replay player" class="space-y-2.5">
-        <template v-if="detail.source?.type === 'playlist' && detail.source.data">
+        <template v-if="detail.source?.type === 'playlist' && detail.source.data && !sourceFailed">
           <div class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-black">
             <video
-              :key="detail.source.data"
+              :key="`${detail.source.data}-${retryNonce}`"
               :src="detail.source.data"
               :poster="detail.poster || undefined"
               controls
               playsinline
               preload="metadata"
               class="h-full w-full"
+              @error="sourceFailed = true"
             ></video>
           </div>
           <p class="text-xs text-muted">
@@ -314,11 +322,11 @@ useSeoMeta({
         </div>
 
         <PlayerFrame
-          v-else-if="detail.source?.data && !frameFailed"
+          v-else-if="detail.source?.data && !sourceFailed"
           :key="`${detail.source.data}-${retryNonce}`"
           :src="detail.source.data"
           :title="detail.name"
-          @error="frameFailed = true"
+          @error="sourceFailed = true"
         />
 
         <div
@@ -331,7 +339,7 @@ useSeoMeta({
               No working source available
             </p>
             <p class="text-sm text-muted">
-              The replay player source timed out or reported an error.
+              The replay source is missing or could not be loaded. For HLS replays, use Safari or an HLS-capable browser.
             </p>
           </div>
           <button

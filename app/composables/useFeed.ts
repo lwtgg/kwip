@@ -1,4 +1,7 @@
 import { toValue, type MaybeRefOrGetter } from 'vue'
+import { fetchFeed, type FeedEndpoint } from '../../server/utils/feed'
+
+export { FeedResponseError } from '../../server/utils/feed'
 
 export interface FeedErrorPayload {
   success: false
@@ -117,122 +120,7 @@ export interface FeedVodDetailResponse {
   data: FeedVodDetail
 }
 
-export class FeedResponseError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'FeedResponseError'
-  }
-}
-
 const FEED_CACHE_WINDOW_MS = 60_000
-
-type FeedEndpoint =
-  | { kind: 'ping' }
-  | { kind: 'streams' }
-  | { kind: 'stream'; uriName: string }
-  | { kind: 'vods' }
-  | { kind: 'vod'; slug: string }
-
-function resolveFeedBases(configuredBase: string, configuredMirrorBase: string): [string, string] {
-  const primary = (configuredBase || '/fixtures').replace(/\/+$/, '')
-  const mirror = (configuredMirrorBase || '').replace(/\/+$/, '') || primary
-  return [primary, mirror]
-}
-
-function encodePathSegments(value: string): string {
-  return value
-    .replace(/^\/+/, '')
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
-}
-
-function buildEndpointUrl(base: string, endpoint: FeedEndpoint): string {
-  const isFixtureBase = base === '/fixtures' || base.endsWith('/fixtures')
-  switch (endpoint.kind) {
-    case 'ping':
-      return isFixtureBase ? `${base}/ping.json` : `${base}/ping`
-    case 'streams':
-      return isFixtureBase ? `${base}/streams.json` : `${base}/streams`
-    case 'stream':
-      return isFixtureBase
-        ? `${base}/stream.json`
-        : `${base}/streams/${encodePathSegments(endpoint.uriName)}`
-    case 'vods':
-      return isFixtureBase ? `${base}/vods.json` : `${base}/vods`
-    case 'vod':
-      return isFixtureBase
-        ? `${base}/vod.json`
-        : `${base}/vods/${encodePathSegments(endpoint.slug)}`
-  }
-}
-
-function isNetworkFailure(err: unknown): boolean {
-  if (err instanceof FeedResponseError) {
-    return false
-  }
-  if (err && typeof err === 'object' && 'response' in err && (err as { response?: unknown }).response) {
-    return false
-  }
-  return true
-}
-
-function replaceHostTokens<T>(value: T, host: string): T {
-  if (!host) return value
-  if (typeof value === 'string') {
-    return (value.includes('{host}') ? value.replaceAll('{host}', host) : value) as T
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => replaceHostTokens(item, host)) as T
-  }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value)) {
-      out[k] = replaceHostTokens(v, host)
-    }
-    return out as T
-  }
-  return value
-}
-
-async function fetchFromBase<T extends { success: boolean }>(
-  fetcher: typeof $fetch,
-  url: string,
-  host: string,
-): Promise<T> {
-  const payload = await fetcher<T | FeedErrorPayload>(url, {
-    responseType: 'json',
-  })
-
-  if (!payload || typeof payload !== 'object' || payload.success === false) {
-    const message =
-      payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : 'Feed returned success: false'
-    throw new FeedResponseError(message)
-  }
-
-  return replaceHostTokens(payload as T, host)
-}
-
-async function fetchWithMirrorFallback<T extends { success: boolean }>(
-  fetcher: typeof $fetch,
-  primaryBase: string,
-  mirrorBase: string,
-  endpoint: FeedEndpoint,
-  host: string,
-): Promise<T> {
-  const primaryUrl = buildEndpointUrl(primaryBase, endpoint)
-  try {
-    return await fetchFromBase<T>(fetcher, primaryUrl, host)
-  } catch (err) {
-    if (!isNetworkFailure(err)) {
-      throw err
-    }
-    const mirrorUrl = buildEndpointUrl(mirrorBase, endpoint)
-    return await fetchFromBase<T>(fetcher, mirrorUrl, host)
-  }
-}
 
 function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
   const nuxtApp = useNuxtApp()
@@ -256,25 +144,17 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const config = useRuntimeConfig()
   const fetcher = useRequestFetch()
   const requestUrl = useRequestURL()
-  const host = requestUrl.host || config.public.canonicalHost
-  // A relative feed base points at public/, which only Vite serves in dev — an
-  // internal SSR fetch has to be absolute to reach it.
-  const absolutise = (base: string) => (base.startsWith('/') ? `${requestUrl.origin}${base}` : base)
-  const [configuredPrimary, configuredMirror] = resolveFeedBases(
-    config.public.feedBase,
-    config.public.feedMirrorBase,
-  )
-  const primaryBase = absolutise(configuredPrimary)
-  const mirrorBase = absolutise(configuredMirror)
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
 
   return useAsyncData<T>(
     cacheKey,
-    () => fetchWithMirrorFallback<T>(fetcher, primaryBase, mirrorBase, resolveEndpoint(), host),
+    () => fetchFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint()),
     {
       server: true,
-      getCachedData(key, nuxtApp) {
-        return nuxtApp.payload.data[key] ?? nuxtApp.static.data[key]
+      getCachedData(key, nuxtApp, { cause }) {
+        if (cause === 'initial') {
+          return nuxtApp.payload.data[key] ?? nuxtApp.static.data[key]
+        }
       },
     },
   )

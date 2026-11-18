@@ -10,20 +10,23 @@ app/layouts/**
 app/pages/index.vue
 app/pages/live/**
 app/pages/c/**
+app/pages/vods/**
 app/assets/css/**
 app/composables/useTheme.ts
 ```
+
+Task 06 landed the VOD routes under Agent A.
 
 ## Agent B (data, pages, SEO)
 
 ```
 app/composables/useFeed.ts
 app/composables/usePlayerSources.ts
-app/pages/vods/**
 app/pages/mirrors.vue
 app/pages/about.vue
 app/utils/**
 server/**
+server/utils/**
 nuxt.config.ts
 public/**
 ```
@@ -36,5 +39,5 @@ public/**
 
 - One task per worktree, one branch, serial merges in the order given.
 - Import from a teammate's glob, never edit it.
-- The feed is fetched in `useFeed.ts` only. Components take props.
+- Pages access the feed through `useFeed.ts`. It shares feed fetching with the sitemap through `server/utils/feed.ts`. Components take props.
 - Reply with the list of files you changed and anything you added to `package.json`.

@@ -7,7 +7,7 @@ interface DomainsResponse {
 const { siteName, canonicalHost } = useRuntimeConfig().public
 const { data, error, refresh } = await useAsyncData('domains', () => $fetch<DomainsResponse>('/api/domains'))
 
-const current = computed(() => data.value?.canonical || canonicalHost)
+const current = computed(() => canonicalHost || data.value?.canonical)
 const mirrors = computed(() => (data.value?.mirrors ?? []).filter((d) => d && d !== current.value))
 
 useSeoMeta({

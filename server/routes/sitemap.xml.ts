@@ -1,5 +1,5 @@
-import type { H3Event } from 'h3'
 import type { FeedStreamsResponse, FeedVodsResponse } from '../../app/composables/useFeed'
+import { fetchFeed } from '../utils/feed'
 
 const STATIC_PATHS = ['/', '/vods', '/mirrors', '/about']
 
@@ -21,34 +21,15 @@ function toLastmod(value: number | string | undefined): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
 }
 
-// Mirrors useFeed.ts endpoint resolution; that composable is Vue-only and can't run in a Nitro route.
-function feedUrl(event: H3Event, base: string, name: 'streams' | 'vods'): string {
-  const trimmed = (base || '/fixtures').replace(/\/+$/, '')
-  const isFixture = trimmed === '/fixtures' || trimmed.endsWith('/fixtures')
-  const path = isFixture ? `${trimmed}/${name}.json` : `${trimmed}/${name}`
-  return trimmed.startsWith('/') ? `${getRequestURL(event).origin}${path}` : path
-}
-
-async function fetchFeed<T extends { success: boolean }>(event: H3Event, name: 'streams' | 'vods'): Promise<T | null> {
-  const { feedBase, feedMirrorBase } = useRuntimeConfig(event).public
-  for (const base of [feedBase, feedMirrorBase].filter(Boolean)) {
-    try {
-      const data = await $fetch<T>(feedUrl(event, base, name), { responseType: 'json' })
-      if (data && data.success) return data
-    } catch {
-      // try the next base; fail soft below
-    }
-  }
-  return null
-}
-
 export default defineEventHandler(async (event) => {
   const origin = canonicalOrigin(event)
   const entries: Entry[] = STATIC_PATHS.map((path) => ({ path }))
 
+  const config = useRuntimeConfig(event).public
+  const requestUrl = getRequestURL(event)
   const [streams, vods] = await Promise.all([
-    fetchFeed<FeedStreamsResponse>(event, 'streams'),
-    fetchFeed<FeedVodsResponse>(event, 'vods'),
+    fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }).catch(() => null),
+    fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }).catch(() => null),
   ])
 
   const seen = new Set(entries.map((e) => e.path))
