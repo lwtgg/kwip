@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { FeedStreamItem } from '~/composables/useFeed'
+import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
 const props = withDefaults(
   defineProps<{
@@ -53,15 +54,8 @@ const targetHref = computed(() => {
   return props.stream ? `/live/${props.stream.uri_name}` : '/'
 })
 
-function formatViewers(raw: string | number): string {
-  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10)
-  if (!Number.isFinite(n) || n < 0) return '0'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}k`
-  return String(n)
-}
-
-const formattedViewers = computed(() => (props.stream ? formatViewers(props.stream.viewers) : '0'))
+const compact = computed(() => formatViewersCompact(props.stream?.viewers ?? 0))
+const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
 </script>
 
 <template>
@@ -115,12 +109,13 @@ const formattedViewers = computed(() => (props.stream ? formatViewers(props.stre
         />
 
         <span
+          role="img"
+          :aria-label="`${exact} ${metricLabel}`"
           class="inline-flex items-center gap-1 rounded-full bg-bg/85 px-2.5 py-0.5 text-[11px] font-medium text-fg backdrop-blur-xs"
         >
           <span v-if="metricLabel === 'viewers'" aria-hidden="true">●</span>
-          <span>{{ formattedViewers }}</span>
-          <span v-if="metricLabel === 'views'">views</span>
-          <span v-else class="sr-only">viewers</span>
+          <span aria-hidden="true">{{ compact }}</span>
+          <span v-if="metricLabel === 'views'" aria-hidden="true">views</span>
         </span>
       </div>
       <span

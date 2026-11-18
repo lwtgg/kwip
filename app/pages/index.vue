@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useStreams, type FeedStreamItem } from '~/composables/useFeed'
+import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
 const route = useRoute()
 const { siteName } = useRuntimeConfig().public
@@ -64,14 +65,6 @@ const allStreams = computed<FeedStreamItem[]>(() =>
 function viewerCount(stream: FeedStreamItem): number {
   const n = Number.parseInt(String(stream.viewers), 10)
   return Number.isFinite(n) ? n : 0
-}
-
-function formatViewers(raw: string | number): string {
-  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10)
-  if (!Number.isFinite(n) || n < 0) return '0'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}k`
-  return String(n)
 }
 
 function slugifyCategory(name: string): string {
@@ -308,8 +301,14 @@ useSeoMeta({
                   {{ heroStream.category_name }}
                 </NuxtLink>
                 <span v-if="heroStream.tag" class="text-muted">· {{ heroStream.tag }}</span>
-                <span class="ml-auto text-muted">
-                  {{ formatViewers(heroStream.viewers) }} {{ heroMode === 'live' ? 'watching' : 'interested' }}
+                <span
+                  class="ml-auto text-muted"
+                  role="img"
+                  :aria-label="`${formatViewersExact(heroStream.viewers)} ${heroMode === 'live' ? 'watching' : 'interested'}`"
+                >
+                  <span aria-hidden="true">
+                    {{ formatViewersCompact(heroStream.viewers) }} {{ heroMode === 'live' ? 'watching' : 'interested' }}
+                  </span>
                 </span>
               </div>
 

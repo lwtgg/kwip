@@ -2,6 +2,7 @@
 import { useStream, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources } from '~/composables/usePlayerSources'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
+import { formatViewersExact } from '~/utils/viewers'
 
 const route = useRoute()
 const router = useRouter()
@@ -179,14 +180,6 @@ function slugifyCategory(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-function formatViewers(raw: string | number): string {
-  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw), 10)
-  if (!Number.isFinite(n) || n < 0) return '0'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}k`
-  return String(n)
-}
-
 const categoryLabel = computed(
   () => detail.value?.category_name || matchingListItem.value?.category_name || '',
 )
@@ -341,7 +334,7 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
               {{ detail.category_name }}
             </NuxtLink>
             <span v-if="detail.tag">· {{ detail.tag }}</span>
-            <span>· {{ formatViewers(detail.viewers) }} viewers</span>
+            <span>· {{ formatViewersExact(detail.viewers) }} viewers</span>
           </div>
           <LiveProgress
             v-if="detail"
