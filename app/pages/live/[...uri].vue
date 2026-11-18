@@ -28,8 +28,24 @@ const {
   refresh: refreshList,
 } = list
 
-// Review #6 & #9: wall-clock `Date.now()` at render + ticking interval so open pages age into stale.
-const nowSeconds = useState('live-event-now', () => Math.floor(Date.now() / 1000))
+const freshAt = ref<number | null>(null)
+const receivedAt = ref<number | null>(null)
+watch([streamResp, listResp], (payloads, previous) => {
+  if (!payloads.some(Boolean)) return
+
+  const arrivedAt = Math.floor(Date.now() / 1000)
+  receivedAt.value ??= arrivedAt
+  if (payloads.some((payload, index) => payload && !payload.fromCache && payload !== previous[index])) {
+    freshAt.value = arrivedAt
+  }
+}, { immediate: true, flush: 'sync' })
+
+const { isStale, nowSeconds, retry } = useFeedFreshness(
+  () => listResp.value?.timestamp,
+  freshAt,
+  receivedAt,
+)
+
 const hasEnded = computed(() => {
   const event = detail.value
   return event?.always_live === 0 && event.ends_at > 0 && nowSeconds.value >= event.ends_at
@@ -50,37 +66,6 @@ const ReplayLink = defineComponent({
       : replayFallback
   },
 })
-const fetchedAtSeconds = ref<number | null>(
-  streamResp.value || listResp.value ? Math.floor(Date.now() / 1000) : null,
-)
-let clockTimer: ReturnType<typeof setInterval> | null = null
-
-watch([streamResp, listResp], ([nextStream, nextList]) => {
-  if (nextStream || nextList) {
-    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
-  }
-})
-
-onMounted(() => {
-  nowSeconds.value = Math.floor(Date.now() / 1000)
-  if ((streamResp.value || listResp.value) && fetchedAtSeconds.value === null) {
-    fetchedAtSeconds.value = nowSeconds.value
-  }
-  clockTimer = setInterval(() => {
-    nowSeconds.value = Math.floor(Date.now() / 1000)
-  }, 1_000)
-})
-
-onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer)
-})
-
-const isStale = computed(() => {
-  if (streamResp.value?.fromCache || listResp.value?.fromCache) return true
-  const originTs = listResp.value?.timestamp || fetchedAtSeconds.value
-  return Boolean(originTs && nowSeconds.value - originTs > 300)
-})
-
 function humanizeUri(uri: string): string {
   const last = uri.split('/').filter(Boolean).pop() || ''
   if (!last) return 'Live Event'
@@ -187,10 +172,11 @@ function handleRetryChain() {
   retryGeneration.value += 1
 }
 
-async function handleRetryFeed() {
-  await Promise.all([refreshStream(), refreshList()])
-  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
-  nowSeconds.value = fetchedAtSeconds.value
+function handleRetryFeed() {
+  return retry(
+    () => Promise.all([refreshStream(), refreshList()]),
+    () => [streamResp.value, listResp.value],
+  )
 }
 
 function slugifyCategory(name: string): string {

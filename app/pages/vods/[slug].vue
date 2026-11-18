@@ -26,38 +26,23 @@ const {
   refresh: refreshVodsList,
 } = vods
 
-// Review #6: wall-clock at render + ticking interval so open pages age into stale.
-const nowSeconds = ref(Math.floor(Date.now() / 1000))
-const fetchedAtSeconds = ref<number | null>(
-  vodResp.value || vodsListResp.value ? Math.floor(Date.now() / 1000) : null,
+const freshAt = ref<number | null>(null)
+const receivedAt = ref<number | null>(null)
+watch([vodResp, vodsListResp], (payloads, previous) => {
+  if (!payloads.some(Boolean)) return
+
+  const arrivedAt = Math.floor(Date.now() / 1000)
+  receivedAt.value ??= arrivedAt
+  if (payloads.some((payload, index) => payload && !payload.fromCache && payload !== previous[index])) {
+    freshAt.value = arrivedAt
+  }
+}, { immediate: true, flush: 'sync' })
+
+const { isStale, nowSeconds, retry } = useFeedFreshness(
+  () => vodsListResp.value?.timestamp,
+  freshAt,
+  receivedAt,
 )
-let clockTimer: ReturnType<typeof setInterval> | null = null
-
-watch([vodResp, vodsListResp], ([nextVod, nextList]) => {
-  if (nextVod || nextList) {
-    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
-  }
-})
-
-onMounted(() => {
-  nowSeconds.value = Math.floor(Date.now() / 1000)
-  if ((vodResp.value || vodsListResp.value) && fetchedAtSeconds.value === null) {
-    fetchedAtSeconds.value = nowSeconds.value
-  }
-  clockTimer = setInterval(() => {
-    nowSeconds.value = Math.floor(Date.now() / 1000)
-  }, 15_000)
-})
-
-onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer)
-})
-
-const isStale = computed(() => {
-  if (vodResp.value?.fromCache || vodsListResp.value?.fromCache) return true
-  const originTs = vodsListResp.value?.timestamp || fetchedAtSeconds.value
-  return Boolean(originTs && nowSeconds.value - originTs > 300)
-})
 
 const matchedListContext = computed<{ item: FeedVodItem; category: string } | null>(() => {
   for (const cat of vodsListResp.value?.vods ?? []) {
@@ -143,10 +128,11 @@ function handleRetrySource() {
   retryNonce.value += 1
 }
 
-async function handleRetryFeed() {
-  await Promise.all([refreshVod(), refreshVodsList()])
-  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
-  nowSeconds.value = fetchedAtSeconds.value
+function handleRetryFeed() {
+  return retry(
+    () => Promise.all([refreshVod(), refreshVodsList()]),
+    () => [vodResp.value, vodsListResp.value],
+  )
 }
 
 function parseEventDate(value: number | string | undefined): Date | null {

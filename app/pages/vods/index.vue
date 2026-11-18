@@ -5,42 +5,27 @@ const route = useRoute()
 const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useVods()
 
-// Review #6: wall-clock at render + ticking interval so open pages age into stale.
-const nowSeconds = ref(Math.floor(Date.now() / 1000))
-const fetchedAtSeconds = ref<number | null>(data.value ? Math.floor(Date.now() / 1000) : null)
-let clockTimer: ReturnType<typeof setInterval> | null = null
-
+const freshAt = ref<number | null>(null)
+const receivedAt = ref<number | null>(null)
 watch(data, (next) => {
-  if (next) {
-    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  if (!next) return
+
+  const arrivedAt = Math.floor(Date.now() / 1000)
+  receivedAt.value ??= arrivedAt
+  if (!next.fromCache) {
+    freshAt.value = arrivedAt
   }
-})
+}, { immediate: true, flush: 'sync' })
 
-onMounted(() => {
-  nowSeconds.value = Math.floor(Date.now() / 1000)
-  if (data.value && fetchedAtSeconds.value === null) {
-    fetchedAtSeconds.value = nowSeconds.value
-  }
-  clockTimer = setInterval(() => {
-    nowSeconds.value = Math.floor(Date.now() / 1000)
-  }, 15_000)
-})
+const { isStale, nowSeconds, retry } = useFeedFreshness(
+  () => data.value?.timestamp,
+  freshAt,
+  receivedAt,
+)
 
-onBeforeUnmount(() => {
-  if (clockTimer) clearInterval(clockTimer)
-})
-
-async function handleRefresh() {
-  await refresh()
-  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
-  nowSeconds.value = fetchedAtSeconds.value
+function handleRefresh() {
+  return retry(refresh, () => [data.value])
 }
-
-const isStale = computed(() => {
-  if (data.value?.fromCache) return true
-  const originTs = data.value?.timestamp || fetchedAtSeconds.value
-  return Boolean(originTs && nowSeconds.value - originTs > 300)
-})
 
 function formatEventDate(value: number | string): string {
   const asNum = typeof value === 'number' ? value : Number(value)
