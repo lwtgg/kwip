@@ -6,7 +6,7 @@ const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useStreams()
 
 // Review #6 & #9: wall-clock `Date.now()` at render + ticking interval (never feed snapshot timestamp for live/upcoming).
-const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const nowSeconds = useState('directory-now', () => Math.floor(Date.now() / 1000))
 const fetchedAtSeconds = ref<number | null>(data.value ? Math.floor(Date.now() / 1000) : null)
 let clockTimer: ReturnType<typeof setInterval> | null = null
 
@@ -23,7 +23,7 @@ onMounted(() => {
   }
   clockTimer = setInterval(() => {
     nowSeconds.value = Math.floor(Date.now() / 1000)
-  }, 15_000)
+  }, 1_000)
 })
 
 onBeforeUnmount(() => {
@@ -72,18 +72,6 @@ function formatViewers(raw: string | number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}k`
   return String(n)
-}
-
-function formatCountdown(startsAt: number, now: number): string {
-  const diff = Math.max(0, startsAt - now)
-  if (diff < 60) return 'Starting soon'
-  const minutes = Math.floor(diff / 60)
-  if (minutes < 60) return `in ${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  const remMinutes = minutes % 60
-  if (hours < 24) return remMinutes > 0 ? `in ${hours}h ${remMinutes}m` : `in ${hours}h`
-  const days = Math.floor(hours / 24)
-  return `in ${days}d`
 }
 
 function slugifyCategory(name: string): string {
@@ -149,6 +137,7 @@ const hasVisibleStreams = computed(() =>
 const heroStream = computed(() => heroEntry.value?.stream ?? null)
 const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
 
+const heroImgRef = ref<HTMLImageElement | null>(null)
 const heroImgError = ref(false)
 const heroImgLoaded = ref(false)
 watch(
@@ -158,6 +147,13 @@ watch(
     heroImgLoaded.value = false
   },
 )
+
+onMounted(() => {
+  if (heroImgRef.value?.complete) {
+    heroImgLoaded.value = heroImgRef.value.naturalWidth > 0
+    heroImgError.value = !heroImgLoaded.value
+  }
+})
 
 const filterOptions = [
   { value: 'all', label: 'All' },
@@ -246,6 +242,7 @@ useSeoMeta({
             >
               <img
                 v-if="heroStream.poster && !heroImgError"
+                ref="heroImgRef"
                 :src="heroStream.poster"
                 :alt="heroStream.name"
                 width="960"
@@ -257,36 +254,18 @@ useSeoMeta({
                 @load="heroImgLoaded = true"
                 @error="heroImgError = true"
               >
-              <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/80 via-transparent to-transparent lg:bg-gradient-to-r lg:from-transparent lg:to-surface/90" />
+              <PosterFallback v-else :name="heroStream.name" :colors="heroStream.colors" />
+              <div v-if="heroStream.poster && !heroImgError" class="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/80 via-transparent to-transparent lg:bg-gradient-to-r lg:from-transparent lg:to-surface/90" />
             </div>
 
             <div class="flex flex-col justify-center gap-4 p-6 sm:p-8 lg:col-span-5">
               <div class="flex flex-wrap items-center gap-2 text-xs">
-                <span
-                  v-if="heroMode === 'live'"
-                  class="inline-flex items-center gap-1.5 rounded-full bg-live px-2.5 py-0.5 font-semibold uppercase tracking-wide text-white"
-                >
-                  <span class="relative flex h-2 w-2">
-                    <span class="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
-                    <span class="relative inline-flex h-2 w-2 rounded-full bg-white" />
-                  </span>
-                  <span>Live</span>
-                </span>
-                <span
-                  v-else-if="heroMode === 'upcoming'"
-                  class="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-0.5 font-semibold uppercase tracking-wide text-fg"
-                >
-                  <span>Upcoming</span>
-                  <span class="font-normal normal-case text-muted">
-                    · {{ formatCountdown(heroStream.starts_at, nowSeconds) }}
-                  </span>
-                </span>
-                <span
-                  v-else
-                  class="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-0.5 font-semibold uppercase tracking-wide text-muted"
-                >
-                  Event
-                </span>
+                <StatusPill
+                  :starts-at="heroStream.starts_at"
+                  :ends-at="heroStream.ends_at"
+                  :always-live="heroStream.always_live"
+                  :now="nowSeconds"
+                />
 
                 <NuxtLink
                   :to="`/c/${slugifyCategory(heroStream.category_name)}`"
@@ -299,6 +278,13 @@ useSeoMeta({
                   {{ formatViewers(heroStream.viewers) }} {{ heroMode === 'live' ? 'watching' : 'interested' }}
                 </span>
               </div>
+
+              <LiveProgress
+                :starts-at="heroStream.starts_at"
+                :ends-at="heroStream.ends_at"
+                :always-live="heroStream.always_live"
+                :now="nowSeconds"
+              />
 
               <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
                 {{ heroStream.name }}
@@ -368,7 +354,6 @@ useSeoMeta({
               :key="stream.id"
               :stream="stream"
               :now="nowSeconds"
-              :countdown="formatCountdown(stream.starts_at, nowSeconds)"
             />
           </div>
         </section>

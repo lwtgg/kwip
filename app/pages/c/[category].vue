@@ -8,7 +8,7 @@ const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useStreams()
 
 // Review #6 & #9: wall-clock `Date.now()` at render + ticking interval.
-const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const nowSeconds = useState('category-now', () => Math.floor(Date.now() / 1000))
 const fetchedAtSeconds = ref<number | null>(data.value ? Math.floor(Date.now() / 1000) : null)
 let clockTimer: ReturnType<typeof setInterval> | null = null
 
@@ -25,7 +25,7 @@ onMounted(() => {
   }
   clockTimer = setInterval(() => {
     nowSeconds.value = Math.floor(Date.now() / 1000)
-  }, 15_000)
+  }, 1_000)
 })
 
 onBeforeUnmount(() => {
@@ -89,18 +89,6 @@ function isStreamLive(s: FeedStreamItem): boolean {
 function isStreamUpcoming(s: FeedStreamItem): boolean {
   if (s.always_live === 1) return false
   return s.starts_at > nowSeconds.value
-}
-
-function formatCountdown(startsAt: number, now: number): string {
-  if (startsAt <= now) return ''
-  const diff = startsAt - now
-  if (diff < 60) return 'Starting soon'
-  const minutes = Math.floor(diff / 60)
-  if (minutes < 60) return `in ${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  const remMinutes = minutes % 60
-  if (hours < 24) return remMinutes > 0 ? `in ${hours}h ${remMinutes}m` : `in ${hours}h`
-  return `in ${Math.floor(hours / 24)}d`
 }
 
 const filteredStreams = computed(() => {
@@ -202,7 +190,6 @@ useSeoMeta({
           :key="stream.id"
           :stream="stream"
           :now="nowSeconds"
-          :countdown="isStreamUpcoming(stream) ? formatCountdown(stream.starts_at, nowSeconds) : ''"
         />
       </div>
     </template>

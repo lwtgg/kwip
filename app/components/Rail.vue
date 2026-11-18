@@ -59,7 +59,7 @@ const categoryHref = computed(() => {
     </div>
 
     <div
-      class="flex flex-col gap-4 md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:pb-2"
+      class="flex flex-col gap-4 md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:pb-2 md:has-[:focus-visible]:snap-none"
     >
       <div
         v-for="stream in streams"
@@ -67,6 +67,7 @@ const categoryHref = computed(() => {
         class="w-full md:w-72 md:shrink-0 md:snap-start xl:w-80"
       >
         <StreamCard
+          class="md:focus-visible:outline-offset-[-2px]"
           :stream="stream"
           :now="now"
           :to="`${linkBase}/${stream.uri_name}`"

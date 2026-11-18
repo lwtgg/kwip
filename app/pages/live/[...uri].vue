@@ -27,7 +27,7 @@ const {
 } = list
 
 // Review #6 & #9: wall-clock `Date.now()` at render + ticking interval so open pages age into stale.
-const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const nowSeconds = useState('live-event-now', () => Math.floor(Date.now() / 1000))
 const fetchedAtSeconds = ref<number | null>(
   streamResp.value || listResp.value ? Math.floor(Date.now() / 1000) : null,
 )
@@ -46,7 +46,7 @@ onMounted(() => {
   }
   clockTimer = setInterval(() => {
     nowSeconds.value = Math.floor(Date.now() / 1000)
-  }, 15_000)
+  }, 1_000)
 })
 
 onBeforeUnmount(() => {
@@ -318,6 +318,12 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
             {{ pageHeading }}
           </h1>
           <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
+            <StatusPill
+              :starts-at="detail.starts_at || 0"
+              :ends-at="detail.ends_at || 0"
+              :always-live="detail.always_live"
+              :now="nowSeconds"
+            />
             <NuxtLink
               v-if="categorySlug"
               :to="`/c/${categorySlug}`"
@@ -328,9 +334,17 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
             <span v-if="detail.tag">· {{ detail.tag }}</span>
             <span>· {{ formatViewers(detail.viewers) }} viewers</span>
           </div>
+          <LiveProgress
+            v-if="detail"
+            :starts-at="detail.starts_at"
+            :ends-at="detail.ends_at"
+            :always-live="detail.always_live"
+            :now="nowSeconds"
+            show-label
+          />
         </div>
 
-        <div v-if="detail" class="flex flex-wrap items-center gap-3">
+        <div v-if="detail" class="relative z-10 flex flex-wrap items-center gap-3">
           <SourceSelect
             v-model="activeSourceIndex"
             :sources="sources"

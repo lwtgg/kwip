@@ -35,8 +35,6 @@ export function useTheme() {
   const initial: ThemeMode = resolveTheme(cookie.value)
   const theme = useState<ThemeMode>('ui:theme', () => initial)
 
-  theme.value = resolveTheme(cookie.value)
-
   useHead({
     htmlAttrs: {
       class: () => theme.value,

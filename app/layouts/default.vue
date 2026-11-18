@@ -31,9 +31,18 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
       <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <NuxtLink
           to="/"
-          class="shrink-0 text-lg font-bold tracking-tight text-fg hover:text-accent"
+          class="inline-flex shrink-0 items-center max-sm:min-h-11"
         >
-          {{ siteName }}
+          <span class="inline-flex items-center rounded-[calc(var(--radius)-4px)] bg-white px-2 py-1.5 ring-1 ring-black/10">
+            <img
+              src="/logo.png"
+              srcset="/logo.png 1x, /logo@2x.png 2x"
+              :alt="siteName"
+              width="720"
+              height="314"
+              class="h-5 w-auto sm:h-6"
+            >
+          </span>
         </NuxtLink>
 
         <nav

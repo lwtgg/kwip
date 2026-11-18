@@ -14,6 +14,10 @@
   --radius-card: var(--radius);
 }
 
+:root {
+  --focus-ring: var(--color-accent);
+}
+
 /* Rule 12: dark default, light must not be broken */
 :root.light,
 :root[data-theme="light"] {
@@ -26,10 +30,14 @@
   --color-accent: #1f5fd6;
   --color-accent-fg: #ffffff;
   --color-live: #c81e1e;
+  --focus-ring: var(--color-accent);
 }
 
 @layer base {
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    scroll-padding-top: 5rem;
+  }
   :root.light,
   :root[data-theme="light"] { color-scheme: light; }
 
@@ -39,9 +47,18 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
     border-radius: calc(var(--radius) / 2);
+  }
+
+  nav.overflow-x-auto {
+    scroll-padding-inline: 0.5rem;
+  }
+
+  nav.overflow-x-auto a:focus-visible {
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 4px var(--color-bg);
   }
 
   @media (prefers-reduced-motion: reduce) {

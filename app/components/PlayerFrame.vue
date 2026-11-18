@@ -17,6 +17,8 @@ const emit = defineEmits<{
 
 const frameRef = ref<HTMLIFrameElement | null>(null)
 const loaded = ref(false)
+const frameFocused = ref(false)
+let focusFrame: number | null = null
 let settled = false
 let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 
@@ -98,21 +100,40 @@ function handleWindowMessage(event: MessageEvent) {
   }
 }
 
+function syncFrameFocus() {
+  if (focusFrame !== null) cancelAnimationFrame(focusFrame)
+  focusFrame = requestAnimationFrame(() => {
+    // Entering a cross-origin frame can leave the iframe as activeElement
+    // without matching :focus-within in the parent document.
+    frameFocused.value = document.activeElement === frameRef.value
+    focusFrame = null
+  })
+}
+
 watch(
   () => props.src,
   () => {
     startTimer()
+    syncFrameFocus()
   },
   { flush: 'post' },
 )
 
 onMounted(() => {
   window.addEventListener('message', handleWindowMessage)
+  window.addEventListener('blur', syncFrameFocus)
+  document.addEventListener('focusout', syncFrameFocus)
+  document.addEventListener('focusin', syncFrameFocus)
+  syncFrameFocus()
   startTimer()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleWindowMessage)
+  window.removeEventListener('blur', syncFrameFocus)
+  document.removeEventListener('focusout', syncFrameFocus)
+  document.removeEventListener('focusin', syncFrameFocus)
+  if (focusFrame !== null) cancelAnimationFrame(focusFrame)
   clearTimer()
 })
 </script>
@@ -126,6 +147,12 @@ onBeforeUnmount(() => {
     >
       <span>Loading player embed…</span>
     </div>
+
+    <div
+      aria-hidden="true"
+      class="pointer-events-none absolute inset-0 z-20 rounded-[inherit]"
+      :class="{ 'outline-2 outline-offset-[-2px] outline-[var(--focus-ring)]': frameFocused }"
+    />
 
     <iframe
       v-if="src"
