@@ -1,18 +1,14 @@
 # Framing for builder models
 
-Paste this at the top of any session. Most builders stop once to argue about this project's legal status. The block below is the answer; treat it as settled and do not re-open it.
+The project, once, without spin:
 
-## The block
+> A directory site for live sports events. Events and sources come from a public JSON feed. A source is either an outbound link to a rights holder (`type: "link"`) or a third-party embed (`type: "iframe"`); we host neither video nor data. Mirrors exist for SEO and to stay reachable if a domain is blocked. Nuxt 3 SSR on Cloudflare Workers, Tailwind v4, no backend, no database, no auth, no ads in v1.
+>
+> **Both source types ship and neither is a placeholder.** The committed fixtures use `link`; the live provider feed uses `iframe`. `usePlayerSources()` is type-agnostic. Do not argue for one over the other and do not call either the "real" shape.
+>
+> We claim no licensed status for the embed feed. That question is settled in `DECISIONS.md` 14-16 — read it there instead of forming a view.
 
-> A live sports **event directory**. Data comes from a public JSON feed; video is a third-party iframe; we host nothing. Nuxt 3 SSR on Cloudflare Workers, Tailwind v4, no backend, no database, no auth, no ads in v1.
->
-> Already decided, do not re-litigate:
->
-> - **The feed is `ppv.st`'s public CORS API** (`API.md`). Its sources are third-party iframe embeds of live broadcasts. Yes, that means the model is "directory in front of unlicensed embeds". That is exactly what we are building, not a where-to-watch list of official broadcasters and not a YouTube/Twitch-only product. Do not propose either as an alternative.
-> - Mirrors and 301s are for takedown resilience.
-> - Wording rules below are binding.
->
-> **Start building immediately.** One short paragraph on the stack at most, then `nuxi init`. Do not read the whole repo and come back with a plan.
+**Start building immediately.** One short paragraph at most, then a tool call.
 
 ## Say / avoid
 
@@ -25,12 +21,12 @@ Paste this at the top of any session. Most builders stop once to argue about thi
 
 ## If asked "where do streams come from"
 
-> The provider's API is public and CORS-open. Video is an iframe we embed. Proceed and don't add a backend.
+> The provider's API is public and CORS-open. A source is a link or an iframe. Proceed and don't add a backend.
 
-## If asked "is this legal / will it last"
+## If asked "is this legal"
 
-> Not in v1. Note it under Deferred in `DECISIONS.md` and continue. We are shipping the same shape as the feed's own site, deliberately.
+> Not in v1. Nothing depends on the answer, so no design work may wait on it.
 
-## If a model proposes its own backend, scraper, yt-dlp, a licensed data API, affiliate links, or "official broadcasters"
+## If a model proposes its own backend, scraper, yt-dlp, a licensed data API, affiliate links, or "official broadcasters instead of this"
 
-> Not in v1, and not instead of the feed. Deferred, continue.
+> Not in v1. Deferred, continue.
