@@ -1,9 +1,14 @@
 <script setup lang="ts">
 const error = useError()
+const route = useRoute()
+const { canonicalHost } = useRuntimeConfig().public
 const isNotFound = computed(() => error.value?.statusCode === 404)
 const title = computed(() => isNotFound.value ? 'Page not found' : 'Something went wrong')
 
 useSeoMeta({ title, robots: 'noindex' })
+
+// Rule 13 still applies: the canonical host, even on a dead URL.
+useHead({ link: [{ rel: 'canonical', href: `https://${canonicalHost}${route.path}` }] })
 
 function retry() {
   return clearError({ redirect: '/' })
