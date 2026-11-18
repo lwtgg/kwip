@@ -129,6 +129,18 @@ const currentSource = computed(() =>
   !chainExhausted.value ? sources.value[activeSourceIndex.value] ?? null : null,
 )
 
+const { isShielded, toggleShield } = usePlayerShield()
+const shieldSourceKey = computed(() => {
+  const source = currentSource.value
+  if (!source || source.kind === 'link') return null
+  return JSON.stringify([uriName.value, source.label.trim().toLowerCase(), activeSourceIndex.value])
+})
+const shieldEnabled = computed(() => shieldSourceKey.value !== null && isShielded(shieldSourceKey.value))
+
+function toggleCurrentShield() {
+  if (shieldSourceKey.value !== null) toggleShield(shieldSourceKey.value)
+}
+
 const firstRemainingLink = computed<SelectableSourceOption | null>(() => {
   return (
     sources.value.find((s, idx) => idx > lastFailedIndex.value && s.kind === 'link') ??
@@ -346,6 +358,26 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
             v-model="activeSourceIndex"
             :sources="sources"
           />
+          <button
+            v-if="shieldSourceKey !== null"
+            type="button"
+            :aria-pressed="shieldEnabled"
+            title="Reload the player to block popups and page redirects"
+            class="inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-[var(--radius)] border px-2.5 text-xs font-medium hover:border-accent sm:min-h-8"
+            :class="shieldEnabled ? 'border-accent text-accent' : 'border-border text-fg'"
+            @click="toggleCurrentShield"
+          >
+            <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+              <path d="M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Z" />
+            </svg>
+            Shield
+          </button>
+          <p v-if="shieldEnabled" class="basis-full text-xs text-muted">
+            Popups and page redirects are blocked. Some players may stop working.
+            <button type="button" class="text-fg underline hover:text-accent" @click="toggleCurrentShield">
+              Reload without shield
+            </button>
+          </p>
         </div>
       </div>
     </div>
@@ -422,6 +454,7 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
           :key="`${activeSourceIndex}-${retryGeneration}`"
           :src="currentSource.url"
           :title="`${detail.name} — ${currentSource.label}`"
+          :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
           @error="handleFrameError"
         />
 

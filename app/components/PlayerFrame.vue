@@ -3,6 +3,7 @@ const props = withDefaults(
   defineProps<{
     src: string
     title: string
+    sandbox?: string
     timeoutMs?: number
   }>(),
   {
@@ -111,7 +112,7 @@ function syncFrameFocus() {
 }
 
 watch(
-  () => props.src,
+  [() => props.src, () => props.sandbox],
   () => {
     startTimer()
     syncFrameFocus()
@@ -157,9 +158,10 @@ onBeforeUnmount(() => {
     <iframe
       v-if="src"
       ref="frameRef"
-      :key="src"
+      :key="JSON.stringify([src, sandbox])"
       :src="src"
       :title="title"
+      :sandbox="sandbox"
       allow="autoplay; fullscreen; picture-in-picture"
       allowfullscreen
       class="h-full w-full border-0"
