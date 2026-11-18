@@ -12,6 +12,10 @@ routes = [
   { pattern = "www.kwip.lol", zone_name = "kwip.lol", custom_domain = true },
 ]
 
+[vars]
+NUXT_PUBLIC_FEED_BASE = "https://api.ppv.st/api"
+NUXT_PUBLIC_FEED_MIRROR_BASE = "https://api.ppv.cx/api"
+
 [assets]
 binding = "ASSETS"
 directory = ".output/public"
