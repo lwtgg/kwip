@@ -18,6 +18,7 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 14. **The build target is the fixture feed**, `public/fixtures/`, base `/fixtures`. The live provider feed is an adapter chosen by `NUXT_PUBLIC_FEED_BASE` / `NUXT_PUBLIC_FEED_MIRROR_BASE`, and nothing in v1 may depend on who serves it.
 15. **`sources[]` is type-agnostic and both types ship.** `type: "link"` renders as an outbound link, `type: "iframe"` as the embed. The fixtures use `link` because they point at rights holders; the live provider feed uses `iframe` because it embeds third-party players. Which one a source is, is the feed's business, not ours — `usePlayerSources()` orders the chain either way. We make no licensed-status claim for the embed feed.
 16. **Mirrors are not only SEO.** They also keep the site reachable when a domain is blocked; the 301 in rule 13 still applies, so a blocked primary means a recorded host change, not a rebuild.
+17. **Design borrows patterns, not code.** `DESIGN.md` is the reference set and its ranking is the order of work. Tokens only, dark first, nothing that needs a dependency without rule 9 sign-off.
 
 ## Deferred (do not build, just note)
 
@@ -26,4 +27,3 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 - Own player with multi-source health checks
 - Search
 - Native apps
-- Design pass sourced from OSS references (GitHub) once v1 ships

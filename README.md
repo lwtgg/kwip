@@ -13,6 +13,7 @@ Read `SPEC.md`, `DECISIONS.md` and `API.md` before changing anything. Facts abou
 - `API.md` — the external JSON feed we consume
 - `CONTRACT.md` — which files each agent owns
 - `INFRA.md` — hosting, domains, deploy
+- `DESIGN.md` — OSS-sourced design pass and its priority order
 - `.prompts/` — the brief for the current task
 
 ## Checks
