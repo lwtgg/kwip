@@ -63,6 +63,7 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
     class="flex flex-col items-start justify-between gap-4 rounded-[var(--radius)] border border-border bg-surface p-6 sm:flex-row sm:items-center"
   >
     <div>
+      <span class="error-glyph" aria-hidden="true" />
       <p class="font-semibold text-fg">Unable to load the feed</p>
       <p class="mt-1 text-sm text-muted">
         {{ message || 'The event feed did not respond in time. Try refreshing in a moment.' }}
@@ -82,8 +83,57 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
     role="status"
     class="rounded-[var(--radius)] border border-border bg-surface p-8 text-center"
   >
+    <span class="empty-glyph" aria-hidden="true" />
     <p class="text-sm text-muted">
       {{ message || 'No events match this view right now.' }}
     </p>
   </div>
 </template>
+
+<style scoped>
+.error-glyph {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+}
+
+.error-glyph::before {
+  content: '';
+  width: 24px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  transform: rotate(-45deg);
+}
+
+.empty-glyph {
+  display: grid;
+  grid-template-rows: 1fr 2px 1fr;
+  justify-items: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 auto 12px;
+  color: var(--color-muted);
+  background: linear-gradient(currentColor, currentColor) center / 2px 2px no-repeat;
+}
+
+.empty-glyph::before,
+.empty-glyph::after {
+  content: '';
+  border-inline: 12px solid transparent;
+}
+
+.empty-glyph::before {
+  grid-row: 1;
+  border-top: 17px solid currentColor;
+}
+
+.empty-glyph::after {
+  grid-row: 3;
+  border-bottom: 17px solid currentColor;
+}
+</style>
