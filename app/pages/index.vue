@@ -4,27 +4,41 @@ import { useStreams, type FeedStreamItem } from '~/composables/useFeed'
 const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useStreams()
 
-const wallClockSeconds = ref(Math.floor(Date.now() / 1000))
+// Review #6 & #9: wall-clock `Date.now()` at render + ticking interval (never feed snapshot timestamp for live/upcoming).
+const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const fetchedAtSeconds = ref<number | null>(data.value ? Math.floor(Date.now() / 1000) : null)
 let clockTimer: ReturnType<typeof setInterval> | null = null
 
+watch(data, (next) => {
+  if (next) {
+    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  }
+})
+
 onMounted(() => {
-  wallClockSeconds.value = Math.floor(Date.now() / 1000)
+  nowSeconds.value = Math.floor(Date.now() / 1000)
+  if (data.value && fetchedAtSeconds.value === null) {
+    fetchedAtSeconds.value = nowSeconds.value
+  }
   clockTimer = setInterval(() => {
-    wallClockSeconds.value = Math.floor(Date.now() / 1000)
-  }, 30_000)
+    nowSeconds.value = Math.floor(Date.now() / 1000)
+  }, 15_000)
 })
 
 onBeforeUnmount(() => {
   if (clockTimer) clearInterval(clockTimer)
 })
 
-// Use the feed's own timestamp as reference so static fixtures and live responses resolve consistently.
-const feedNow = computed(() => data.value?.timestamp || wallClockSeconds.value)
+async function handleRefresh() {
+  await refresh()
+  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  nowSeconds.value = fetchedAtSeconds.value
+}
 
 const isStale = computed(() => {
-  const ts = data.value?.timestamp
-  if (!ts) return false
-  return wallClockSeconds.value - ts > 300
+  const originTs = data.value?.timestamp || fetchedAtSeconds.value
+  if (!originTs) return false
+  return nowSeconds.value - originTs > 300
 })
 
 const categories = computed(() => data.value?.streams ?? [])
@@ -78,8 +92,8 @@ const liveNowStreams = computed(() =>
     .filter(
       (s) =>
         (s.always_live ?? 0) === 0 &&
-        s.starts_at <= feedNow.value &&
-        s.ends_at > feedNow.value,
+        s.starts_at <= nowSeconds.value &&
+        s.ends_at > nowSeconds.value,
     )
     .sort((a, b) => viewerCount(b) - viewerCount(a)),
 )
@@ -91,19 +105,36 @@ const alwaysLiveStreams = computed(() =>
     .sort((a, b) => viewerCount(b) - viewerCount(a)),
 )
 
-// SPEC: Hero — the single most-watched live stream
-const heroStream = computed<FeedStreamItem | null>(() => {
-  if (liveNowStreams.value.length > 0) return liveNowStreams.value[0]!
-  if (alwaysLiveStreams.value.length > 0) return alwaysLiveStreams.value[0]!
-  return [...allStreams.value].sort((a, b) => viewerCount(b) - viewerCount(a))[0] ?? null
-})
-
 // SPEC: Upcoming block — starts_at > now, showing a relative countdown
 const upcomingStreams = computed(() =>
   allStreams.value
-    .filter((s) => (s.always_live ?? 0) === 0 && s.starts_at > feedNow.value)
+    .filter((s) => (s.always_live ?? 0) === 0 && s.starts_at > nowSeconds.value)
     .sort((a, b) => a.starts_at - b.starts_at),
 )
+
+// Review #1: scheduled live first -> always_live === 1 when no scheduled is live -> highest-viewed upcoming labelled "Upcoming".
+const heroEntry = computed<{
+  stream: FeedStreamItem
+  mode: 'live' | 'upcoming' | 'archive'
+} | null>(() => {
+  if (liveNowStreams.value.length > 0) {
+    return { stream: liveNowStreams.value[0]!, mode: 'live' }
+  }
+  if (alwaysLiveStreams.value.length > 0) {
+    return { stream: alwaysLiveStreams.value[0]!, mode: 'live' }
+  }
+  if (upcomingStreams.value.length > 0) {
+    const highestViewedUpcoming = [...upcomingStreams.value].sort(
+      (a, b) => viewerCount(b) - viewerCount(a),
+    )[0]!
+    return { stream: highestViewedUpcoming, mode: 'upcoming' }
+  }
+  const fallback = [...allStreams.value].sort((a, b) => viewerCount(b) - viewerCount(a))[0]
+  return fallback ? { stream: fallback, mode: 'archive' } : null
+})
+
+const heroStream = computed(() => heroEntry.value?.stream ?? null)
+const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
 
 const heroImgError = ref(false)
 const heroImgLoaded = ref(false)
@@ -129,38 +160,47 @@ useSeoMeta({
 
 <template>
   <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
-    <StateBlock
-      v-if="status === 'pending' && !data"
-      variant="skeleton"
-      :rows="8"
-    />
+    <template v-if="status === 'pending' && !data">
+      <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+        Live Sports Event Directory
+      </h1>
+      <StateBlock variant="skeleton" :rows="8" />
+    </template>
 
-    <StateBlock
-      v-else-if="error && !data"
-      variant="error"
-      :message="error.message"
-      @retry="refresh()"
-    />
+    <template v-else-if="error && !data">
+      <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+        Live Sports Event Directory
+      </h1>
+      <StateBlock
+        variant="error"
+        :message="error.message"
+        @retry="handleRefresh"
+      />
+    </template>
 
     <template v-else>
       <StateBlock
         v-if="isStale"
         variant="stale"
         message="Directory data is older than 5 minutes."
-        @retry="refresh()"
+        @retry="handleRefresh"
       />
 
-      <StateBlock
-        v-if="allStreams.length === 0"
-        variant="empty"
-        message="No live or upcoming events are listed in the feed right now."
-      />
+      <template v-if="allStreams.length === 0">
+        <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+          Live Sports Event Directory
+        </h1>
+        <StateBlock
+          variant="empty"
+          message="No live or upcoming events are listed in the feed right now."
+        />
+      </template>
 
       <template v-else>
-        <!-- Hero: most-watched live stream -->
+        <!-- Hero -->
         <section
           v-if="heroStream"
-          aria-label="Featured live event"
+          aria-label="Featured event"
           class="relative overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
         >
           <div class="grid grid-cols-1 lg:grid-cols-12">
@@ -186,13 +226,32 @@ useSeoMeta({
 
             <div class="flex flex-col justify-center gap-4 p-6 sm:p-8 lg:col-span-5">
               <div class="flex flex-wrap items-center gap-2 text-xs">
-                <span class="inline-flex items-center gap-1.5 rounded-full bg-live px-2.5 py-0.5 font-semibold uppercase tracking-wide text-white">
+                <span
+                  v-if="heroMode === 'live'"
+                  class="inline-flex items-center gap-1.5 rounded-full bg-live px-2.5 py-0.5 font-semibold uppercase tracking-wide text-white"
+                >
                   <span class="relative flex h-2 w-2">
                     <span class="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
                     <span class="relative inline-flex h-2 w-2 rounded-full bg-white" />
                   </span>
                   <span>Live</span>
                 </span>
+                <span
+                  v-else-if="heroMode === 'upcoming'"
+                  class="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-0.5 font-semibold uppercase tracking-wide text-fg"
+                >
+                  <span>Upcoming</span>
+                  <span class="font-normal normal-case text-muted">
+                    · {{ formatCountdown(heroStream.starts_at, nowSeconds) }}
+                  </span>
+                </span>
+                <span
+                  v-else
+                  class="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-0.5 font-semibold uppercase tracking-wide text-muted"
+                >
+                  Event
+                </span>
+
                 <NuxtLink
                   :to="`/c/${slugifyCategory(heroStream.category_name)}`"
                   class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-muted hover:text-fg"
@@ -201,7 +260,7 @@ useSeoMeta({
                 </NuxtLink>
                 <span v-if="heroStream.tag" class="text-muted">· {{ heroStream.tag }}</span>
                 <span class="ml-auto text-muted">
-                  {{ formatViewers(heroStream.viewers) }} watching
+                  {{ formatViewers(heroStream.viewers) }} {{ heroMode === 'live' ? 'watching' : 'interested' }}
                 </span>
               </div>
 
@@ -222,14 +281,14 @@ useSeoMeta({
                   >
                     <path d="M8 5.14v14l11-7-11-7Z" />
                   </svg>
-                  <span>Watch live event</span>
+                  <span>{{ heroMode === 'live' ? 'Watch live event' : 'Open event page' }}</span>
                 </NuxtLink>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- Reserved leaderboard AdSlot between hero and first rail -->
+        <!-- Reserved AdSlot between hero and first rail -->
         <AdSlot format="leaderboard" />
 
         <!-- Live now rail -->
@@ -237,7 +296,7 @@ useSeoMeta({
           v-if="liveNowStreams.length > 0"
           title="Live now"
           :streams="liveNowStreams"
-          :now="feedNow"
+          :now="nowSeconds"
         />
 
         <!-- 24/7 rail -->
@@ -245,7 +304,7 @@ useSeoMeta({
           v-if="alwaysLiveStreams.length > 0"
           title="24/7"
           :streams="alwaysLiveStreams"
-          :now="feedNow"
+          :now="nowSeconds"
         />
 
         <!-- Per-category rails -->
@@ -255,7 +314,7 @@ useSeoMeta({
           :title="cat.category"
           :category="cat.category"
           :streams="cat.streams"
-          :now="feedNow"
+          :now="nowSeconds"
         />
 
         <!-- Upcoming block with relative countdown -->
@@ -272,8 +331,8 @@ useSeoMeta({
               v-for="stream in upcomingStreams"
               :key="stream.id"
               :stream="stream"
-              :now="feedNow"
-              :countdown="formatCountdown(stream.starts_at, feedNow)"
+              :now="nowSeconds"
+              :countdown="formatCountdown(stream.starts_at, nowSeconds)"
             />
           </div>
         </section>

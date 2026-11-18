@@ -4,16 +4,40 @@ import { useVods, type FeedStreamItem, type FeedVodItem } from '~/composables/us
 const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useVods()
 
-const wallClockSeconds = ref(Math.floor(Date.now() / 1000))
-onMounted(() => {
-  wallClockSeconds.value = Math.floor(Date.now() / 1000)
+// Review #6: wall-clock at render + ticking interval so open pages age into stale.
+const nowSeconds = ref(Math.floor(Date.now() / 1000))
+const fetchedAtSeconds = ref<number | null>(data.value ? Math.floor(Date.now() / 1000) : null)
+let clockTimer: ReturnType<typeof setInterval> | null = null
+
+watch(data, (next) => {
+  if (next) {
+    fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  }
 })
 
-const feedNow = computed(() => data.value?.timestamp || wallClockSeconds.value)
+onMounted(() => {
+  nowSeconds.value = Math.floor(Date.now() / 1000)
+  if (data.value && fetchedAtSeconds.value === null) {
+    fetchedAtSeconds.value = nowSeconds.value
+  }
+  clockTimer = setInterval(() => {
+    nowSeconds.value = Math.floor(Date.now() / 1000)
+  }, 15_000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer) clearInterval(clockTimer)
+})
+
+async function handleRefresh() {
+  await refresh()
+  fetchedAtSeconds.value = Math.floor(Date.now() / 1000)
+  nowSeconds.value = fetchedAtSeconds.value
+}
 
 const isStale = computed(() => {
-  const ts = data.value?.timestamp
-  return Boolean(ts && wallClockSeconds.value - ts > 300)
+  const originTs = data.value?.timestamp || fetchedAtSeconds.value
+  return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
 
 function formatEventDate(value: number | string): string {
@@ -107,7 +131,7 @@ useSeoMeta({
       v-else-if="error && !data"
       variant="error"
       :message="error.message"
-      @retry="refresh()"
+      @retry="handleRefresh"
     />
 
     <template v-else>
@@ -115,7 +139,7 @@ useSeoMeta({
         v-if="isStale"
         variant="stale"
         message="Archive data is older than 5 minutes."
-        @retry="refresh()"
+        @retry="handleRefresh"
       />
 
       <StateBlock
@@ -131,20 +155,13 @@ useSeoMeta({
           :title="rail.category"
           :category="rail.category"
           :streams="rail.items"
-          :now="feedNow"
+          :now="nowSeconds"
           link-base="/vods"
           metric-label="views"
           :countdown-map="rail.dateLabels"
         />
 
-        <div>
-          <div class="hidden md:block">
-            <AdSlot format="leaderboard" />
-          </div>
-          <div class="md:hidden">
-            <AdSlot format="mobile" />
-          </div>
-        </div>
+        <AdSlot format="leaderboard" />
       </template>
     </template>
   </div>
