@@ -41,7 +41,8 @@ const datetime = computed(() => {
       <span class="absolute inline-flex h-full w-full rounded-full bg-white opacity-75 motion-safe:animate-ping" />
       <span class="relative inline-flex h-2 w-2 rounded-full bg-white" />
     </span>
-    <time v-if="datetime" :datetime="datetime" :aria-label="status.aria">{{ status.text }}</time>
-    <span v-else :aria-label="status.aria">{{ status.text }}</span>
+    <!-- The clock moves between the server render and hydration. -->
+    <time v-if="datetime" :datetime="datetime" :aria-label="status.aria" data-allow-mismatch="text attribute">{{ status.text }}</time>
+    <span v-else :aria-label="status.aria" data-allow-mismatch="text attribute">{{ status.text }}</span>
   </span>
 </template>

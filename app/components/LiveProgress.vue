@@ -29,9 +29,14 @@ const progress = computed(() => {
       :aria-valuenow="Math.round(progress.percentage)"
       :aria-label="progress.aria"
       class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2"
+      data-allow-mismatch="attribute"
     >
-      <div class="h-full rounded-full bg-live" :style="{ width: `${progress.percentage}%` }" />
+      <div
+        class="h-full rounded-full bg-live"
+        :style="{ width: `${progress.percentage}%` }"
+        data-allow-mismatch="style"
+      />
     </div>
-    <span v-if="showLabel" aria-hidden="true" class="text-xs text-muted">{{ progress.text }}</span>
+    <span v-if="showLabel" aria-hidden="true" class="text-xs text-muted" data-allow-mismatch="text">{{ progress.text }}</span>
   </div>
 </template>
