@@ -26,3 +26,4 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 - Own player with multi-source health checks
 - Search
 - Native apps
+- Design pass sourced from OSS references (GitHub) once v1 ships
