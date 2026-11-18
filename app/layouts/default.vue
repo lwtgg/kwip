@@ -14,15 +14,24 @@ function slugifyCategory(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-const categories = computed(() =>
-  (streamsData.value?.streams ?? []).map((cat) => ({
-    id: cat.id,
-    name: cat.category,
-    slug: slugifyCategory(cat.category),
-  })),
-)
-
 const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
+
+const categories = computed(() => {
+  const visible = []
+  for (const category of streamsData.value?.streams ?? []) {
+    const chip = {
+      id: category.id,
+      name: category.category,
+      slug: slugifyCategory(category.category),
+    }
+    if (category.streams.length > 0) {
+      visible.push(chip)
+    } else if (isCategoryActive(chip.slug)) {
+      visible.unshift(chip)
+    }
+  }
+  return visible
+})
 </script>
 
 <template>

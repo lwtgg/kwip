@@ -102,9 +102,6 @@ watch(
   },
 )
 
-const mounted = ref(false)
-onMounted(() => { mounted.value = true })
-
 const requestedSourceIndex = computed(() => {
   const raw = route.query.source
   if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null
@@ -117,7 +114,7 @@ watch(() => route.query.source, () => {
 })
 
 const activeSourceIndex = computed({
-  get: () => selectedSourceIndex.value ?? (mounted.value ? requestedSourceIndex.value : null) ?? defaultSourceIndex.value,
+  get: () => selectedSourceIndex.value ?? requestedSourceIndex.value ?? defaultSourceIndex.value,
   set: (next: number) => {
     selectedSourceIndex.value = next
     void router.push({ query: { ...route.query, source: String(next) } })

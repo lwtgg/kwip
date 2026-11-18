@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
     <div
       v-if="!loaded"
       aria-live="polite"
-      class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface-2 text-xs text-muted motion-safe:animate-pulse"
+      class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface-2 text-xs text-muted motion-safe:animate-pulse [@media(scripting:none)]:hidden"
     >
       <span>Loading player embed…</span>
     </div>
