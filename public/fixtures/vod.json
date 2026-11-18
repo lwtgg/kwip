@@ -9,7 +9,7 @@
     "added": 1794790000,
     "event_date": 1794700000,
     "views": "4120",
-    "source": { "type": "playlist", "data": "https://{host}/fixtures/replay.m3u8" },
+    "source": { "type": "playlist", "data": "//{host}/fixtures/replay.m3u8" },
     "recommended_vods": []
   }
 }
