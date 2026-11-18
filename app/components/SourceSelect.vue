@@ -17,6 +17,24 @@ const group = ref<HTMLDivElement | null>(null)
 const mounted = ref(false)
 onMounted(() => { mounted.value = true })
 
+// Remounting the player frame can pull focus into it; put it back on the chip.
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+
+function holdFocus(index: number) {
+  if (holdTimer) clearTimeout(holdTimer)
+  let tries = 0
+  const tick = () => {
+    const chip = group.value?.querySelectorAll('button')[index]
+    if (chip && document.activeElement?.tagName === 'IFRAME') chip.focus()
+    if (++tries < 12) holdTimer = setTimeout(tick, 100)
+  }
+  holdTimer = setTimeout(tick, 100)
+}
+
+onBeforeUnmount(() => {
+  if (holdTimer) clearTimeout(holdTimer)
+})
+
 const hasSelection = computed(() =>
   Number.isInteger(props.modelValue) && props.modelValue >= 0 && props.modelValue < props.sources.length,
 )
@@ -34,7 +52,8 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
 
   event.preventDefault()
   emit('update:modelValue', next)
-  group.value?.querySelectorAll('button')[next]?.focus()
+  void nextTick(() => group.value?.querySelectorAll('button')[next]?.focus())
+  holdFocus(next)
 }
 </script>
 
