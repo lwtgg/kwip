@@ -189,7 +189,12 @@ function useFeedEndpoint<T extends { success: boolean }>(
 
   if (browserRefresh) {
     onMounted(() => {
-      if (nuxtApp.isHydrating && feed.data.value?.fromCache) void feed.refresh({ dedupe: 'defer' })
+      if (!nuxtApp.isHydrating) return
+      if (!feed.data.value?.fromCache) return
+      // Paint the hydrated snapshot first; replacing data mid-hydration reads as a DOM mismatch.
+      if (nuxtApp.isHydrating) {
+        nuxtApp.hooks.hookOnce('app:mounted', () => { void feed.refresh({ dedupe: 'defer' }) })
+      }
     })
   }
 
