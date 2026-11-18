@@ -257,7 +257,15 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const fetcher = useRequestFetch()
   const requestUrl = useRequestURL()
   const host = requestUrl.host || config.public.canonicalHost
-  const [primaryBase, mirrorBase] = resolveFeedBases(config.public.feedBase, config.public.feedMirrorBase)
+  // A relative feed base points at public/, which only Vite serves in dev — an
+  // internal SSR fetch has to be absolute to reach it.
+  const absolutise = (base: string) => (base.startsWith('/') ? `${requestUrl.origin}${base}` : base)
+  const [configuredPrimary, configuredMirror] = resolveFeedBases(
+    config.public.feedBase,
+    config.public.feedMirrorBase,
+  )
+  const primaryBase = absolutise(configuredPrimary)
+  const mirrorBase = absolutise(configuredMirror)
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
 
   return useAsyncData<T>(
