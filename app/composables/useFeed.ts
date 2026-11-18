@@ -1,5 +1,12 @@
 import { toValue, type MaybeRefOrGetter } from 'vue'
-import { fetchFeed, getFeedAssets, type FeedEndpoint } from '../../server/utils/feed'
+import {
+  fetchBrowserFeed,
+  fetchFeed,
+  getFeedAssets,
+  isCrossOriginFeed,
+  type FeedEndpoint,
+  type FeedProvenance,
+} from '../../server/utils/feed'
 
 export { FeedResponseError } from '../../server/utils/feed'
 
@@ -146,10 +153,24 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const requestUrl = useRequestURL()
   const event = import.meta.server ? useRequestEvent() : undefined
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
+  const browserRefresh = import.meta.client
+    && isCrossOriginFeed(config.public.feedBase, requestUrl, resolveEndpoint())
+  const retries = browserRefresh
+    ? useState<Record<string, 'pending' | 'done'>>('feed-browser-retries', () => ({}))
+    : undefined
 
-  return useAsyncData<T>(
+  const feed = useAsyncData<T & FeedProvenance>(
     cacheKey,
-    () => {
+    async () => {
+      if (browserRefresh) {
+        const cached = retries?.value[cacheKey.value] === 'pending' ? feed.data.value : undefined
+        try {
+          return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint())
+        } catch (error) {
+          if (cached?.fromCache) return cached
+          throw error
+        }
+      }
       const assets = import.meta.server ? getFeedAssets(event) : undefined
       return fetchFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint(), assets)
     },
@@ -162,6 +183,28 @@ function useFeedEndpoint<T extends { success: boolean }>(
       },
     },
   )
+
+  if (!retries) return feed
+
+  onMounted(async () => {
+    const key = cacheKey.value
+    if (retries.value[key] || (!feed.error.value && !feed.data.value?.fromCache)) return
+
+    retries.value[key] = 'pending'
+    try {
+      await feed.refresh({ dedupe: 'defer' })
+    } finally {
+      retries.value[key] = 'done'
+    }
+  })
+
+  const { pending, status, error, refresh, execute, clear } = feed
+  const data = computed({
+    get: () => retries.value[cacheKey.value] === 'pending' ? undefined : feed.data.value,
+    set: (value) => { feed.data.value = value },
+  })
+  const result = { data, pending, status, error, refresh, execute, clear }
+  return Object.assign(feed.then(() => result), result)
 }
 
 export function usePing() {

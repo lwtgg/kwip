@@ -25,3 +25,6 @@ logs
 
 # Wrangler
 .wrangler
+
+# Build-time feed snapshot
+public/feed-cache/

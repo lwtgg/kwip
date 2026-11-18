@@ -33,6 +33,10 @@ interface FeedConfig {
   canonicalHost: string
 }
 
+export interface FeedProvenance {
+  fromCache?: true
+}
+
 function encodePathSegments(value: string): string {
   return value
     .replace(/^\/+/, '')
@@ -59,6 +63,14 @@ function buildEndpointUrl(base: string, endpoint: FeedEndpoint): string {
         ? `${base}/vod.json`
         : `${base}/vods/${encodePathSegments(endpoint.slug)}`
   }
+}
+
+function resolveEndpointUrl(base: string, requestUrl: URL, endpoint: FeedEndpoint): string {
+  return new URL(buildEndpointUrl(base.replace(/\/+$/, ''), endpoint), requestUrl.origin).href
+}
+
+export function isCrossOriginFeed(base: string, requestUrl: URL, endpoint: FeedEndpoint): boolean {
+  return new URL(resolveEndpointUrl(base || '/fixtures', requestUrl, endpoint)).origin !== requestUrl.origin
 }
 
 function replaceHostTokens<T>(value: T, host: string): T {
@@ -116,19 +128,25 @@ async function fetchFromBase<T extends { success: boolean }>(
   return replaceHostTokens(payload as T, host)
 }
 
+export function fetchBrowserFeed<T extends { success: boolean }>(
+  fetcher: typeof $fetch,
+  config: FeedConfig,
+  requestUrl: URL,
+  endpoint: FeedEndpoint,
+): Promise<T> {
+  const url = resolveEndpointUrl(config.feedBase, requestUrl, endpoint)
+  return fetchFromBase<T>(fetcher, url, requestUrl, requestUrl.host || config.canonicalHost)
+}
+
 export async function fetchFeed<T extends { success: boolean }>(
   fetcher: typeof $fetch,
   config: FeedConfig,
   requestUrl: URL,
   endpoint: FeedEndpoint,
   assets?: FeedAssets,
-): Promise<T> {
+): Promise<T & FeedProvenance> {
   const host = requestUrl.host || config.canonicalHost
-  // Use absolute URLs for public fixtures, which Vite serves separately in dev.
-  const resolveUrl = (base: string) => {
-    const path = buildEndpointUrl(base.replace(/\/+$/, ''), endpoint)
-    return path.startsWith('/') ? new URL(path, requestUrl.origin).href : path
-  }
+  const resolveUrl = (base: string) => resolveEndpointUrl(base, requestUrl, endpoint)
   const primaryUrl = resolveUrl(config.feedBase || '/fixtures')
   const mirrorUrl = config.feedMirrorBase ? resolveUrl(config.feedMirrorBase) : null
   let networkFailure = false
@@ -137,9 +155,32 @@ export async function fetchFeed<T extends { success: boolean }>(
       networkFailure = true
     })
   } catch (err) {
-    if (!networkFailure || !mirrorUrl || mirrorUrl === primaryUrl) {
-      throw err
+    let upstreamError = err
+    if (networkFailure && mirrorUrl && mirrorUrl !== primaryUrl) {
+      try {
+        return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, assets)
+      } catch (error) {
+        upstreamError = error
+      }
     }
-    return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, assets)
+    if (!URL.canParse(config.feedBase) || endpoint.kind === 'ping') {
+      throw upstreamError
+    }
+    let cacheUnreachable = false
+    try {
+      const cached = await fetchFromBase<T>(
+        fetcher,
+        `${resolveUrl('/feed-cache')}.json`,
+        requestUrl,
+        host,
+        assets,
+        () => { cacheUnreachable = true },
+      )
+      return { ...cached, fromCache: true }
+    } catch (cacheError) {
+      const cacheMissing = cacheError instanceof Error && 'statusCode' in cacheError && cacheError.statusCode === 404
+      if (!assets && (cacheMissing || cacheUnreachable)) throw upstreamError
+      throw cacheError
+    }
   }
 }

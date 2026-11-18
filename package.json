@@ -7,9 +7,10 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "wrangler dev .output/server/index.mjs --assets .output/public",
-    "deploy": "wrangler deploy",
+    "deploy": "pnpm snapshot && pnpm build && wrangler deploy",
     "test": "node --test tests/*.test.ts",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "snapshot": "node scripts/snapshot-feed.mjs"
   },
   "dependencies": {
     "nuxt": "^3.21.11",
