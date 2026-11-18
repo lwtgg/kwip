@@ -226,8 +226,8 @@ useSeoMeta({
   ogTitle: () => `${seoTitle.value} · ${siteName}`,
   ogDescription: seoDescription,
   ogType: 'video.other',
-  ogImage: () => detail.value?.poster || undefined,
 })
+useOgImage(() => detail.value?.poster, pageHeading)
 
 function parseMatchupCompetitors(name: string): { '@type': 'SportsTeam'; name: string }[] {
   const parts = name.split(/\s+(?:vs\.?|v\.?|@)\s+/i).map((p) => p.trim()).filter(Boolean)

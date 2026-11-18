@@ -236,8 +236,8 @@ useSeoMeta({
   ogTitle: () => `${seoTitle.value} · ${siteName}`,
   ogDescription: seoDescription,
   ogType: 'video.other',
-  ogImage: () => detail.value?.poster || undefined,
 })
+useOgImage(() => detail.value?.poster, pageHeading)
 await Promise.all([vod, vods])
 if (!detail.value) throw createError({ statusCode: 404, fatal: true })
 </script>

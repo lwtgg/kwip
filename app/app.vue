@@ -22,6 +22,7 @@ useSeoMeta({
   ogSiteName: siteName,
   ogType: 'website',
 })
+useOgImage(undefined, siteName)
 
 function revealHorizontalFocus(event: FocusEvent) {
   const target = event.target

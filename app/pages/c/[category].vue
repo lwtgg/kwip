@@ -115,6 +115,7 @@ useSeoMeta({
   title: () => `${categoryTitle.value} Events`,
   description: seoDescription,
   ogTitle: () => `${categoryTitle.value} Events · ${siteName}`,
+  ogImageAlt: () => `${categoryTitle.value} Events`,
   ogDescription: seoDescription,
 })
 </script>

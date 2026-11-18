@@ -198,6 +198,7 @@ useSeoMeta({
   title: 'Live Sports Event Directory',
   description: pageDescription,
   ogTitle: () => `Live Sports Event Directory · ${siteName}`,
+  ogImageAlt: 'Live Sports Event Directory',
   ogDescription: pageDescription,
 })
 </script>

@@ -113,6 +113,7 @@ useSeoMeta({
   title: 'Event Archive',
   description: pageDescription,
   ogTitle: () => `Event Archive · ${siteName}`,
+  ogImageAlt: 'Event Archive',
   ogDescription: pageDescription,
 })
 </script>

@@ -5,6 +5,7 @@ useSeoMeta({
   title: 'About',
   description: `What ${siteName} is: a directory of live and upcoming sports events with links to their sources.`,
   ogTitle: `About · ${siteName}`,
+  ogImageAlt: 'About',
   ogDescription: `What ${siteName} is: a directory of live and upcoming sports events with links to their sources.`,
 })
 </script>
