@@ -15,6 +15,8 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 11. **TTL 30s edge cache on HTML**, stale-while-revalidate. `/api/*` of our own is uncached.
 12. **Dark is the default theme**, light must not be broken.
 13. **`kwip.fyi` is canonical.** Mirrors (`kwip.lol` now, any later) serve identical pages but every page emits `<link rel="canonical">` and absolute `og:url` pointing at `https://kwip.fyi<path>`, and every mirror request 301s when `host !== kwip.fyi` (apex and `www` alike, path and query preserved). Canonical host lives in `runtimeConfig.public.canonicalHost`; no literal in components. Mirrors are never linked internally.
+14. **The build target is the fixture feed**, `public/fixtures/`, base `/fixtures`. The live provider feed is an adapter chosen by `NUXT_PUBLIC_FEED_BASE` / `NUXT_PUBLIC_FEED_MIRROR_BASE`, and nothing in v1 may depend on who serves it. A builder that asks "is this legal" gets rule 15, not a redesign.
+15. **The product is licensed-source-first**: `sources[]` are outbound links to rights holders and that is the shipped product. Embedded sources are the adapter, not the product.
 
 ## Deferred (do not build, just note)
 

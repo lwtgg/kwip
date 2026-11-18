@@ -1,20 +1,28 @@
-// Rule 13: every non-canonical host (mirrors, www) 301s to the canonical host, path + query kept.
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1'])
-
-function normaliseHost(value: string): string {
-  return value.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/\/+$/, '')
-}
-
-function stripPort(host: string): string {
-  return host.replace(/:\d+$/, '')
-}
+const LOCAL_DEV_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
 
 export default defineEventHandler((event) => {
-  if (import.meta.dev) return
-  const canonicalHost = normaliseHost(String(useRuntimeConfig(event).public.canonicalHost || ''))
-  const host = normaliseHost(getRequestHost(event, { xForwardedHost: true }) || '')
-  if (!canonicalHost || !host || host === canonicalHost) return
-  if (LOCAL_HOSTS.has(stripPort(host)) && !LOCAL_HOSTS.has(stripPort(canonicalHost))) return
-  const url = getRequestURL(event)
+  const config = useRuntimeConfig(event)
+  const canonicalHost = (config.public.canonicalHost || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/+$/, '')
+
+  if (!canonicalHost) {
+    return
+  }
+
+  const url = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true })
+  const requestHost = url.host.toLowerCase()
+  const requestHostname = url.hostname.toLowerCase()
+
+  if (requestHost === canonicalHost) {
+    return
+  }
+
+  if (!LOCAL_DEV_HOSTNAMES.has(canonicalHost) && LOCAL_DEV_HOSTNAMES.has(requestHostname)) {
+    return
+  }
+
   return sendRedirect(event, `https://${canonicalHost}${url.pathname}${url.search}`, 301)
 })

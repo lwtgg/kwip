@@ -1,53 +1,69 @@
-// Feed client. Shapes are API.md verbatim; the feed is fetched here only (CONTRACT.md).
+import { toValue, type MaybeRefOrGetter } from 'vue'
 
-export interface Substream {
+export interface FeedErrorPayload {
+  success: false
+  error: string
+}
+
+export interface FeedPingResponse {
+  success: true
+  domains: string[]
+  status: unknown[]
+}
+
+export interface FeedSubstream {
   id: number
   name: string
   uri_name: string
   iframe: string
 }
 
-export interface StreamItem {
+export interface FeedStreamItem {
   id: number
   name: string
   tag: string
-  source_tag: string
-  poster: string
+  source_tag?: string
+  poster?: string
   blurhash: string
   colors: string[]
   uri_name: string
   starts_at: number
   ends_at: number
-  always_live: number
+  always_live?: number
   locale: string
   category_name: string
-  iframe: string
-  substreams: Substream[]
+  iframe?: string
+  substreams?: FeedSubstream[]
   viewers: string
 }
 
-export interface StreamCategory {
+export interface FeedStreamCategory {
   category: string
   id: number
   always_live: number
-  streams: StreamItem[]
+  streams: FeedStreamItem[]
 }
 
-export interface PlayerSource {
+export interface FeedStreamsResponse {
+  success: true
+  timestamp: number
+  performance: number
+  streams: FeedStreamCategory[]
+}
+
+export type FeedSourceKind = 'iframe' | 'link'
+
+export interface FeedStreamSource {
   name: string
   default: boolean
-  type: 'iframe' | 'link'
+  type: FeedSourceKind
   data: string
 }
 
-export interface StreamDetail extends Omit<StreamItem, 'source_tag' | 'iframe' | 'substreams' | 'always_live'> {
-  source_tag?: string
-  iframe?: string
-  substreams?: Substream[]
-  always_live?: number
+export interface FeedStreamDetail extends FeedStreamItem {
   m3u8: string
   source_type: string
-  sources: PlayerSource[]
+  sources: FeedStreamSource[]
   category: number
   auth: boolean
   vip_stream: boolean
@@ -55,87 +71,239 @@ export interface StreamDetail extends Omit<StreamItem, 'source_tag' | 'iframe' |
   token: string
 }
 
-export interface VodItem {
+export interface FeedStreamDetailResponse {
+  success: true
+  data: FeedStreamDetail
+}
+
+export interface FeedVodItem {
   id: number
   name: string
   tag: string
-  poster: string
+  poster?: string
+  blurhash?: string
+  colors?: string[]
   uri_name: string
-  added: number
-  event_date: number
-  views: number | string
+  added: number | string
+  event_date: number | string
+  views: string | number
 }
 
-export interface VodCategory {
+export interface FeedVodCategory {
   category: string
   id: number
-  vods: VodItem[]
+  vods: FeedVodItem[]
 }
 
-export interface VodDetail extends VodItem {
-  source: { type: string; data: string }
-  recommended_vods: VodItem[]
+export interface FeedVodsResponse {
+  success: true
+  timestamp?: number
+  performance?: number
+  vods: FeedVodCategory[]
 }
 
-interface Envelope { success: boolean; error?: string }
-export interface PingResponse extends Envelope { domains: string[]; status: unknown[] }
-export interface StreamsResponse extends Envelope { timestamp: number; performance: number; streams: StreamCategory[] }
-export interface StreamResponse extends Envelope { data: StreamDetail }
-export interface VodsResponse extends Envelope { vods: VodCategory[] }
-export interface VodResponse extends Envelope { data: VodDetail }
+export interface FeedVodSource {
+  type: 'playlist' | FeedSourceKind | string
+  data: string
+}
 
-export class FeedError extends Error {
+export interface FeedVodDetail extends FeedVodItem {
+  source: FeedVodSource
+  recommended_vods: FeedVodItem[]
+}
+
+export interface FeedVodDetailResponse {
+  success: true
+  data: FeedVodDetail
+}
+
+export class FeedResponseError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = 'FeedError'
+    this.name = 'FeedResponseError'
   }
 }
 
-const CACHE_SECONDS = 60
+const FEED_CACHE_WINDOW_MS = 60_000
 
-/** Network error = no HTTP response at all. HTTP errors and success:false never fall back. */
-function isNetworkError(err: unknown): boolean {
-  const e = err as { response?: unknown; statusCode?: number } | null
-  return !!e && e.response === undefined && e.statusCode === undefined
+type FeedEndpoint =
+  | { kind: 'ping' }
+  | { kind: 'streams' }
+  | { kind: 'stream'; uriName: string }
+  | { kind: 'vods' }
+  | { kind: 'vod'; slug: string }
+
+function resolveFeedBases(configuredBase: string, configuredMirrorBase: string): [string, string] {
+  const primary = (configuredBase || '/fixtures').replace(/\/+$/, '')
+  const mirror = (configuredMirrorBase || '').replace(/\/+$/, '') || primary
+  return [primary, mirror]
 }
 
-/** Fixture base serves static files, so `/streams/{uri}` maps to `stream.json`. */
-function resolvePath(base: string, path: string): string {
-  if (!base.startsWith('/fixtures')) return `${base}${path}`
-  if (path === '/streams' || path === '/ping' || path === '/vods') return `${base}${path === '/streams' ? '/streams.json' : `${path}.json`}`
-  if (path.startsWith('/streams/')) return `${base}/stream.json`
-  if (path.startsWith('/vods/')) return `${base}/vod.json`
-  return `${base}${path}.json`
+function encodePathSegments(value: string): string {
+  return value
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
 }
 
-export async function feedFetch<T extends Envelope>(path: string): Promise<T> {
-  const { feedBase, feedMirrorBase } = useRuntimeConfig().public
-  let res: T
+function buildEndpointUrl(base: string, endpoint: FeedEndpoint): string {
+  const isFixtureBase = base === '/fixtures' || base.endsWith('/fixtures')
+  switch (endpoint.kind) {
+    case 'ping':
+      return isFixtureBase ? `${base}/ping.json` : `${base}/ping`
+    case 'streams':
+      return isFixtureBase ? `${base}/streams.json` : `${base}/streams`
+    case 'stream':
+      return isFixtureBase
+        ? `${base}/stream.json`
+        : `${base}/streams/${encodePathSegments(endpoint.uriName)}`
+    case 'vods':
+      return isFixtureBase ? `${base}/vods.json` : `${base}/vods`
+    case 'vod':
+      return isFixtureBase
+        ? `${base}/vod.json`
+        : `${base}/vods/${encodePathSegments(endpoint.slug)}`
+  }
+}
+
+function isNetworkFailure(err: unknown): boolean {
+  if (err instanceof FeedResponseError) {
+    return false
+  }
+  if (err && typeof err === 'object' && 'response' in err && (err as { response?: unknown }).response) {
+    return false
+  }
+  return true
+}
+
+function replaceHostTokens<T>(value: T, host: string): T {
+  if (!host) return value
+  if (typeof value === 'string') {
+    return (value.includes('{host}') ? value.replaceAll('{host}', host) : value) as T
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceHostTokens(item, host)) as T
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = replaceHostTokens(v, host)
+    }
+    return out as T
+  }
+  return value
+}
+
+async function fetchFromBase<T extends { success: boolean }>(
+  fetcher: typeof $fetch,
+  url: string,
+  host: string,
+): Promise<T> {
+  const payload = await fetcher<T | FeedErrorPayload>(url, {
+    responseType: 'json',
+  })
+
+  if (!payload || typeof payload !== 'object' || payload.success === false) {
+    const message =
+      payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
+        ? payload.error
+        : 'Feed returned success: false'
+    throw new FeedResponseError(message)
+  }
+
+  return replaceHostTokens(payload as T, host)
+}
+
+async function fetchWithMirrorFallback<T extends { success: boolean }>(
+  fetcher: typeof $fetch,
+  primaryBase: string,
+  mirrorBase: string,
+  endpoint: FeedEndpoint,
+  host: string,
+): Promise<T> {
+  const primaryUrl = buildEndpointUrl(primaryBase, endpoint)
   try {
-    res = await $fetch<T>(resolvePath(feedBase, path))
+    return await fetchFromBase<T>(fetcher, primaryUrl, host)
   } catch (err) {
-    if (!isNetworkError(err) || !feedMirrorBase || feedMirrorBase === feedBase) throw err
-    res = await $fetch<T>(resolvePath(feedMirrorBase, path))
+    if (!isNetworkFailure(err)) {
+      throw err
+    }
+    const mirrorUrl = buildEndpointUrl(mirrorBase, endpoint)
+    return await fetchFromBase<T>(fetcher, mirrorUrl, host)
   }
-  if (!res.success) throw new FeedError(res.error || 'Feed returned success: false')
-  return res
 }
 
-/** Key is bucketed to 60s so SSR and client share a payload and refetches respect API.md's poll limit. */
-function feedKey(path: string): string {
-  return `feed:${path}:${Math.floor(Date.now() / 1000 / CACHE_SECONDS)}`
+function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
+  const nuxtApp = useNuxtApp()
+  const initialBucket = Math.floor(Date.now() / FEED_CACHE_WINDOW_MS)
+  const bucket = useState<number>(`feed-cache-bucket:${toValue(prefix)}`, () => initialBucket)
+
+  if (import.meta.client && !nuxtApp.isHydrating) {
+    const nowBucket = Math.floor(Date.now() / FEED_CACHE_WINDOW_MS)
+    if (nowBucket !== bucket.value) {
+      bucket.value = nowBucket
+    }
+  }
+
+  return computed(() => `${toValue(prefix)}:${bucket.value}`)
 }
 
-function useFeedData<T extends Envelope>(path: string) {
-  return useAsyncData<T>(feedKey(path), () => feedFetch<T>(path), { server: true })
+function useFeedEndpoint<T extends { success: boolean }>(
+  keyPrefix: MaybeRefOrGetter<string>,
+  resolveEndpoint: () => FeedEndpoint,
+) {
+  const config = useRuntimeConfig()
+  const fetcher = useRequestFetch()
+  const requestUrl = useRequestURL()
+  const host = requestUrl.host || config.public.canonicalHost
+  const [primaryBase, mirrorBase] = resolveFeedBases(config.public.feedBase, config.public.feedMirrorBase)
+  const cacheKey = useSixtySecondCacheKey(keyPrefix)
+
+  return useAsyncData<T>(
+    cacheKey,
+    () => fetchWithMirrorFallback<T>(fetcher, primaryBase, mirrorBase, resolveEndpoint(), host),
+    {
+      server: true,
+      getCachedData(key, nuxtApp) {
+        return nuxtApp.payload.data[key] ?? nuxtApp.static.data[key]
+      },
+    },
+  )
+}
+
+export function usePing() {
+  return useFeedEndpoint<FeedPingResponse>('feed:ping', () => ({ kind: 'ping' }))
+}
+
+export function useStreams() {
+  return useFeedEndpoint<FeedStreamsResponse>('feed:streams', () => ({ kind: 'streams' }))
+}
+
+export function useStream(uriName: MaybeRefOrGetter<string>) {
+  return useFeedEndpoint<FeedStreamDetailResponse>(
+    () => `feed:stream:${toValue(uriName)}`,
+    () => ({ kind: 'stream', uriName: toValue(uriName) }),
+  )
+}
+
+export function useVods() {
+  return useFeedEndpoint<FeedVodsResponse>('feed:vods', () => ({ kind: 'vods' }))
+}
+
+export function useVod(slug: MaybeRefOrGetter<string>) {
+  return useFeedEndpoint<FeedVodDetailResponse>(
+    () => `feed:vod:${toValue(slug)}`,
+    () => ({ kind: 'vod', slug: toValue(slug) }),
+  )
 }
 
 export function useFeed() {
   return {
-    ping: () => useFeedData<PingResponse>('/ping'),
-    streams: () => useFeedData<StreamsResponse>('/streams'),
-    stream: (uriName: string) => useFeedData<StreamResponse>(`/streams/${uriName}`),
-    vods: () => useFeedData<VodsResponse>('/vods'),
-    vod: (slug: string) => useFeedData<VodResponse>(`/vods/${slug}`),
+    usePing,
+    useStreams,
+    useStream,
+    useVods,
+    useVod,
   }
 }
