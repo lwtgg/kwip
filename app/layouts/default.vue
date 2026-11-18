@@ -73,7 +73,7 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
             to="/mirrors"
             aria-label="Mirror domains"
             title="Mirror domains"
-            class="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
+            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
           >
             <svg
               aria-hidden="true"
@@ -95,7 +95,7 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
             type="button"
             :aria-label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
             :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-            class="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
+            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
             @click="toggleTheme"
           >
             <svg
@@ -138,9 +138,9 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
       <div class="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
         <p>{{ siteName }} · Live sports event directory</p>
         <nav aria-label="Footer navigation" class="flex flex-wrap items-center gap-4">
-          <NuxtLink to="/vods" class="hover:text-fg">Archive</NuxtLink>
-          <NuxtLink to="/about" class="hover:text-fg">About</NuxtLink>
-          <NuxtLink to="/mirrors" class="hover:text-fg">Mirrors</NuxtLink>
+          <NuxtLink to="/vods" class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">Archive</NuxtLink>
+          <NuxtLink to="/about" class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">About</NuxtLink>
+          <NuxtLink to="/mirrors" class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">Mirrors</NuxtLink>
         </nav>
       </div>
     </footer>
