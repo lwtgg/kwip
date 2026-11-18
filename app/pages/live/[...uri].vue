@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { useStream, useStreams, type FeedStreamDetail, type FeedStreamItem } from '~/composables/useFeed'
+import { useStream, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources } from '~/composables/usePlayerSources'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 
 const route = useRoute()
+const router = useRouter()
 const { siteName, canonicalHost } = useRuntimeConfig().public
 
 const uriName = computed(() => {
@@ -11,17 +12,19 @@ const uriName = computed(() => {
   return (Array.isArray(raw) ? raw.join('/') : String(raw || '')).replace(/^\/+|\/+$/g, '')
 })
 
+const { feed, list, detail, matchingListItem } = useStream(uriName)
+
 const {
   data: streamResp,
   status: streamStatus,
   error: streamError,
   refresh: refreshStream,
-} = useStream(uriName)
+} = feed
 
 const {
   data: listResp,
   refresh: refreshList,
-} = useStreams()
+} = list
 
 // Review #6 & #9: wall-clock `Date.now()` at render + ticking interval so open pages age into stale.
 const nowSeconds = ref(Math.floor(Date.now() / 1000))
@@ -51,51 +54,9 @@ onBeforeUnmount(() => {
 })
 
 const isStale = computed(() => {
+  if (streamResp.value?.fromCache || listResp.value?.fromCache) return true
   const originTs = listResp.value?.timestamp || fetchedAtSeconds.value
   return Boolean(originTs && nowSeconds.value - originTs > 300)
-})
-
-// Match stream metadata from the list feed when the single-file fixture returns a generic detail payload.
-const matchingListItem = computed<FeedStreamItem | null>(() => {
-  for (const cat of listResp.value?.streams ?? []) {
-    for (const item of cat.streams) {
-      if (item.uri_name === uriName.value) {
-        return {
-          ...item,
-          always_live: item.always_live ?? cat.always_live,
-          category_name: item.category_name || cat.category,
-        }
-      }
-    }
-  }
-  return null
-})
-
-const detail = computed<FeedStreamDetail | null>(() => {
-  const raw = streamResp.value?.data
-  if (!raw) return null
-  const matched = matchingListItem.value
-  if (matched && raw.uri_name !== uriName.value) {
-    return {
-      ...raw,
-      id: matched.id,
-      name: matched.name,
-      tag: matched.tag,
-      source_tag: matched.source_tag,
-      poster: matched.poster || raw.poster,
-      blurhash: matched.blurhash || raw.blurhash,
-      colors: matched.colors?.length ? matched.colors : raw.colors,
-      uri_name: matched.uri_name,
-      starts_at: matched.starts_at,
-      ends_at: matched.ends_at,
-      always_live: matched.always_live,
-      locale: matched.locale || raw.locale,
-      category_name: matched.category_name,
-      viewers: matched.viewers,
-      substreams: matched.substreams?.length ? matched.substreams : raw.substreams,
-    }
-  }
-  return raw
 })
 
 function humanizeUri(uri: string): string {
@@ -111,18 +72,7 @@ const pageHeading = computed(
   () => detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value),
 )
 
-const sources = computed<SelectableSourceOption[]>(() => {
-  const d = detail.value
-  if (!d) return []
-  const nonEmptyPrimary = (d.sources ?? []).filter((s) => s.data)
-  return usePlayerSources(d).map((option, idx) => ({
-    ...option,
-    kind:
-      idx < nonEmptyPrimary.length && nonEmptyPrimary[idx]?.type === 'link'
-        ? 'link'
-        : 'iframe',
-  }))
-})
+const sources = computed(() => detail.value ? usePlayerSources(detail.value) : [])
 
 const defaultSourceIndex = computed(() => {
   const nonEmptyPrimary = (detail.value?.sources ?? []).filter((s) => s.data)
@@ -152,10 +102,25 @@ watch(
   },
 )
 
+const mounted = ref(false)
+onMounted(() => { mounted.value = true })
+
+const requestedSourceIndex = computed(() => {
+  const raw = route.query.source
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null
+  const index = Number(raw)
+  return index < sources.value.length ? index : null
+})
+
+watch(() => route.query.source, () => {
+  selectedSourceIndex.value = null
+})
+
 const activeSourceIndex = computed({
-  get: () => selectedSourceIndex.value ?? defaultSourceIndex.value,
+  get: () => selectedSourceIndex.value ?? (mounted.value ? requestedSourceIndex.value : null) ?? defaultSourceIndex.value,
   set: (next: number) => {
     selectedSourceIndex.value = next
+    void router.push({ query: { ...route.query, source: String(next) } })
   },
 })
 
@@ -318,6 +283,8 @@ useHead({
         ]
       : [],
 })
+await Promise.all([feed, list])
+if (!detail.value) throw createError({ statusCode: 404, fatal: true })
 </script>
 
 <template>
@@ -337,7 +304,7 @@ useHead({
         <NuxtLink
           v-if="categorySlug"
           :to="`/c/${categorySlug}`"
-          class="hover:text-fg"
+          class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
         >
           {{ categoryLabel }}
         </NuxtLink>
@@ -354,7 +321,7 @@ useHead({
             <NuxtLink
               v-if="categorySlug"
               :to="`/c/${categorySlug}`"
-              class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-fg hover:text-accent"
+              class="rounded bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-fg hover:text-accent"
             >
               {{ detail.category_name }}
             </NuxtLink>
@@ -505,7 +472,7 @@ useHead({
           <NuxtLink
             v-if="categorySlug"
             :to="`/c/${categorySlug}`"
-            class="text-xs font-medium text-muted hover:text-accent"
+            class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:text-accent"
           >
             More {{ detail.category_name }} →
           </NuxtLink>

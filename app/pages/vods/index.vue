@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useVods, type FeedStreamItem, type FeedVodItem } from '~/composables/useFeed'
 
+const route = useRoute()
 const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useVods()
 
@@ -36,6 +37,7 @@ async function handleRefresh() {
 }
 
 const isStale = computed(() => {
+  if (data.value?.fromCache) return true
   const originTs = data.value?.timestamp || fetchedAtSeconds.value
   return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
@@ -73,8 +75,15 @@ function vodToCardItem(vod: FeedVodItem, categoryName: string): FeedStreamItem {
   }
 }
 
+const activeFilter = computed(() => {
+  const raw = Array.isArray(route.query.filter) ? route.query.filter[0] : route.query.filter
+  return raw || ''
+})
+
 const categoryRails = computed(() =>
   (data.value?.vods ?? [])
+    .filter((cat) => !activeFilter.value || cat.category.trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') === activeFilter.value)
     .map((cat) => {
       const dateLabels: Record<number, string> = {}
       const items = cat.vods.map((vod) => {
@@ -119,6 +128,14 @@ useSeoMeta({
       <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
         Event Archive
       </h1>
+      <NuxtLink
+        v-if="activeFilter"
+        to="/vods"
+        class="inline-flex items-center gap-1.5 text-xs font-medium text-muted max-sm:min-h-11 hover:text-accent"
+      >
+        <span aria-hidden="true">←</span>
+        <span>All categories</span>
+      </NuxtLink>
     </div>
 
     <StateBlock

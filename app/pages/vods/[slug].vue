@@ -12,17 +12,19 @@ const { siteName } = useRuntimeConfig().public
 
 const slug = computed(() => String(route.params.slug || '').replace(/^\/+|\/+$/g, ''))
 
+const vod = useVod(slug)
+const vods = useVods()
 const {
   data: vodResp,
   status: vodStatus,
   error: vodError,
   refresh: refreshVod,
-} = useVod(slug)
+} = vod
 
 const {
   data: vodsListResp,
   refresh: refreshVodsList,
-} = useVods()
+} = vods
 
 // Review #6: wall-clock at render + ticking interval so open pages age into stale.
 const nowSeconds = ref(Math.floor(Date.now() / 1000))
@@ -52,6 +54,7 @@ onBeforeUnmount(() => {
 })
 
 const isStale = computed(() => {
+  if (vodResp.value?.fromCache || vodsListResp.value?.fromCache) return true
   const originTs = vodsListResp.value?.timestamp || fetchedAtSeconds.value
   return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
@@ -67,26 +70,27 @@ const matchedListContext = computed<{ item: FeedVodItem; category: string } | nu
   return null
 })
 
+const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
 const detail = computed<FeedVodDetail | null>(() => {
   const raw = vodResp.value?.data
   if (!raw) return null
   const matched = matchedListContext.value?.item
-  if (matched && raw.uri_name !== slug.value) {
-    return {
-      ...raw,
-      id: matched.id,
-      name: matched.name,
-      tag: matched.tag,
-      poster: matched.poster || raw.poster,
-      blurhash: matched.blurhash ?? raw.blurhash,
-      colors: matched.colors?.length ? matched.colors : raw.colors,
-      uri_name: matched.uri_name,
-      added: matched.added,
-      event_date: matched.event_date,
-      views: matched.views,
-    }
+  // Live detail responses omit `uri_name`; only a present-but-different key proves a mismatch.
+  if (!matched) return raw.uri_name && raw.uri_name !== slug.value ? null : raw
+  if (raw.uri_name === slug.value && !isFixture) return raw
+  return {
+    ...raw,
+    id: matched.id,
+    name: matched.name,
+    tag: matched.tag,
+    poster: matched.poster || raw.poster,
+    blurhash: matched.blurhash ?? raw.blurhash,
+    colors: matched.colors?.length ? matched.colors : raw.colors,
+    uri_name: matched.uri_name,
+    added: matched.added,
+    event_date: matched.event_date,
+    views: matched.views,
   }
-  return raw
 })
 
 function humanizeSlug(rawSlug: string): string {
@@ -234,6 +238,8 @@ useSeoMeta({
   ogType: 'video.other',
   ogImage: () => detail.value?.poster || undefined,
 })
+await Promise.all([vod, vods])
+if (!detail.value) throw createError({ statusCode: 404, fatal: true })
 </script>
 
 <template>

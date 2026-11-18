@@ -28,9 +28,11 @@ function slugifyCategory(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-const categoryHref = computed(() =>
-  props.category ? `/c/${slugifyCategory(props.category)}` : null,
-)
+const categoryHref = computed(() => {
+  if (!props.category) return null
+  const slug = slugifyCategory(props.category)
+  return props.linkBase === '/vods' ? `/vods?filter=${slug}` : `/c/${slug}`
+})
 </script>
 
 <template>
@@ -40,7 +42,7 @@ const categoryHref = computed(() =>
         <NuxtLink
           v-if="categoryHref"
           :to="categoryHref"
-          class="inline-flex items-center gap-1.5 hover:text-accent"
+          class="inline-flex items-center gap-1.5 max-sm:min-h-11 hover:text-accent"
         >
           <span>{{ title }}</span>
           <span aria-hidden="true" class="text-sm text-muted">→</span>
@@ -50,7 +52,7 @@ const categoryHref = computed(() =>
       <NuxtLink
         v-if="categoryHref"
         :to="categoryHref"
-        class="text-xs font-medium text-muted hover:text-accent"
+        class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:text-accent"
       >
         View all ({{ streams.length }})
       </NuxtLink>

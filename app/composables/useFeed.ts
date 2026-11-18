@@ -2,6 +2,7 @@ import { toValue, type MaybeRefOrGetter } from 'vue'
 import {
   fetchBrowserFeed,
   fetchFeed,
+  fetchFeedSnapshot,
   getFeedAssets,
   isCrossOriginFeed,
   type FeedEndpoint,
@@ -81,11 +82,6 @@ export interface FeedStreamDetail extends FeedStreamItem {
   token: string
 }
 
-export interface FeedStreamDetailResponse {
-  success: true
-  data: FeedStreamDetail
-}
-
 export interface FeedVodItem {
   id: number
   name: string
@@ -148,6 +144,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
   keyPrefix: MaybeRefOrGetter<string>,
   resolveEndpoint: () => FeedEndpoint,
 ) {
+  const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
   const fetcher = useRequestFetch()
   const requestUrl = useRequestURL()
@@ -155,24 +152,30 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
   const browserRefresh = import.meta.client
     && isCrossOriginFeed(config.public.feedBase, requestUrl, resolveEndpoint())
-  const retries = browserRefresh
-    ? useState<Record<string, 'pending' | 'done'>>('feed-browser-retries', () => ({}))
-    : undefined
-
   const feed = useAsyncData<T & FeedProvenance>(
     cacheKey,
-    async () => {
-      if (browserRefresh) {
-        const cached = retries?.value[cacheKey.value] === 'pending' ? feed.data.value : undefined
-        try {
-          return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint())
-        } catch (error) {
-          if (cached?.fromCache) return cached
-          throw error
+    async (_app, { signal }) => {
+      const endpoint = resolveEndpoint()
+      const key = cacheKey.value
+      const previous = import.meta.client
+        ? nuxtApp.payload.data[key] as (T & FeedProvenance) | undefined
+        : undefined
+      try {
+        if (browserRefresh) {
+          return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
         }
+        const assets = import.meta.server ? getFeedAssets(event) : undefined
+        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
+      } catch (error) {
+        if (signal.aborted || key !== cacheKey.value) throw error
+        if (previous) return { ...previous, fromCache: true }
+        if (browserRefresh && endpoint.kind !== 'ping') {
+          return fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, requestUrl.host).catch(() => {
+            throw error
+          })
+        }
+        throw error
       }
-      const assets = import.meta.server ? getFeedAssets(event) : undefined
-      return fetchFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint(), assets)
     },
     {
       server: true,
@@ -184,27 +187,13 @@ function useFeedEndpoint<T extends { success: boolean }>(
     },
   )
 
-  if (!retries) return feed
+  if (browserRefresh) {
+    onMounted(() => {
+      if (nuxtApp.isHydrating && feed.data.value?.fromCache) void feed.refresh({ dedupe: 'defer' })
+    })
+  }
 
-  onMounted(async () => {
-    const key = cacheKey.value
-    if (retries.value[key] || (!feed.error.value && !feed.data.value?.fromCache)) return
-
-    retries.value[key] = 'pending'
-    try {
-      await feed.refresh({ dedupe: 'defer' })
-    } finally {
-      retries.value[key] = 'done'
-    }
-  })
-
-  const { pending, status, error, refresh, execute, clear } = feed
-  const data = computed({
-    get: () => retries.value[cacheKey.value] === 'pending' ? undefined : feed.data.value,
-    set: (value) => { feed.data.value = value },
-  })
-  const result = { data, pending, status, error, refresh, execute, clear }
-  return Object.assign(feed.then(() => result), result)
+  return feed
 }
 
 export function usePing() {
@@ -215,11 +204,83 @@ export function useStreams() {
   return useFeedEndpoint<FeedStreamsResponse>('feed:streams', () => ({ kind: 'streams' }))
 }
 
+type RawStreamDetail = Omit<FeedStreamDetail,
+  'uri_name' | 'starts_at' | 'ends_at' | 'viewers' | 'category_name' | 'colors' | 'blurhash' | 'substreams'
+> & {
+  uri_name?: string
+  uri?: string
+  starts_at?: number | string
+  ends_at?: number | string
+  start_timestamp?: number | string
+  end_timestamp?: number | string
+  viewers: number | string
+  category_name?: string
+  colors?: string[]
+  blurhash?: string
+  substreams?: (Pick<FeedSubstream, 'name'> & {
+    iframe?: string
+    source_tag?: string
+    sources?: FeedStreamSource[]
+  })[]
+}
+
 export function useStream(uriName: MaybeRefOrGetter<string>) {
-  return useFeedEndpoint<FeedStreamDetailResponse>(
+  const list = useStreams()
+  const feed = useFeedEndpoint<{ success: true; data: RawStreamDetail }>(
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
   )
+  const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
+  const matchingListItem = computed(() => {
+    for (const category of list.data.value?.streams ?? []) {
+      const item = category.streams.find((stream) => stream.uri_name === toValue(uriName))
+      if (item) {
+        return {
+          ...item,
+          always_live: item.always_live ?? category.always_live,
+          category_name: item.category_name || category.category,
+        }
+      }
+    }
+  })
+
+  const detail = computed<FeedStreamDetail | null>(() => {
+    const raw = feed.data.value?.data
+    if (!raw) return null
+    const uri = raw.uri_name ?? raw.uri
+    const matched = matchingListItem.value
+    const fixtureItem = isFixture && uri !== toValue(uriName) ? matched : undefined
+    if (uri !== toValue(uriName) && !fixtureItem) return null
+
+    const substreams: RawStreamDetail['substreams'] = fixtureItem?.substreams?.length
+      ? fixtureItem.substreams : raw.substreams
+    const alternatives = (substreams ?? []).flatMap((substream) => {
+      const name = [substream.name, substream.source_tag].filter(Boolean).join(' · ')
+      if (substream.sources?.length) {
+        return substream.sources.map((source) => ({ ...source, name, default: false }))
+      }
+      return substream.iframe
+        ? [{ name, type: 'iframe' as const, data: substream.iframe, default: false }]
+        : []
+    })
+
+    return {
+      ...raw,
+      ...fixtureItem,
+      uri_name: toValue(uriName),
+      starts_at: Number(fixtureItem?.starts_at ?? raw.starts_at ?? raw.start_timestamp),
+      ends_at: Number(fixtureItem?.ends_at ?? raw.ends_at ?? raw.end_timestamp),
+      viewers: String(fixtureItem?.viewers ?? raw.viewers ?? '0'),
+      always_live: fixtureItem?.always_live ?? raw.always_live ?? matched?.always_live,
+      category_name: fixtureItem?.category_name || raw.category_name || matched?.category_name || '',
+      poster: fixtureItem?.poster || raw.poster,
+      colors: fixtureItem?.colors?.length ? fixtureItem.colors : raw.colors ?? [],
+      blurhash: fixtureItem?.blurhash || raw.blurhash || '',
+      sources: [...(raw.sources ?? []), ...alternatives],
+      substreams: undefined,
+    }
+  })
+  return { feed, list, detail, matchingListItem }
 }
 
 export function useVods() {

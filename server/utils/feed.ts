@@ -138,6 +138,19 @@ export function fetchBrowserFeed<T extends { success: boolean }>(
   return fetchFromBase<T>(fetcher, url, requestUrl, requestUrl.host || config.canonicalHost)
 }
 
+export async function fetchFeedSnapshot<T extends { success: boolean }>(
+  fetcher: typeof $fetch,
+  requestUrl: URL,
+  endpoint: FeedEndpoint,
+  host: string,
+  assets?: FeedAssets,
+  onRequestError?: () => void,
+): Promise<T & FeedProvenance> {
+  const url = resolveEndpointUrl('/feed-cache', requestUrl, endpoint)
+  const cached = await fetchFromBase<T>(fetcher, `${url}.json`, requestUrl, host, assets, onRequestError)
+  return { ...cached, fromCache: true }
+}
+
 export async function fetchFeed<T extends { success: boolean }>(
   fetcher: typeof $fetch,
   config: FeedConfig,
@@ -168,15 +181,9 @@ export async function fetchFeed<T extends { success: boolean }>(
     }
     let cacheUnreachable = false
     try {
-      const cached = await fetchFromBase<T>(
-        fetcher,
-        `${resolveUrl('/feed-cache')}.json`,
-        requestUrl,
-        host,
-        assets,
-        () => { cacheUnreachable = true },
-      )
-      return { ...cached, fromCache: true }
+      return await fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, host, assets, () => {
+        cacheUnreachable = true
+      })
     } catch (cacheError) {
       const cacheMissing = cacheError instanceof Error && 'statusCode' in cacheError && cacheError.statusCode === 404
       if (!assets && (cacheMissing || cacheUnreachable)) throw upstreamError

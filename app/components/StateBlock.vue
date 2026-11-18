@@ -50,7 +50,7 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
     </span>
     <button
       type="button"
-      class="rounded px-2.5 py-1 font-medium text-fg underline decoration-border underline-offset-2 hover:decoration-accent"
+      class="rounded max-sm:min-h-11 px-2.5 py-1 font-medium text-fg underline decoration-border underline-offset-2 hover:decoration-accent"
       @click="emit('retry')"
     >
       Refresh

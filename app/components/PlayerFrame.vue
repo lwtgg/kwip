@@ -52,84 +52,43 @@ function startTimer() {
     failOnce()
     return
   }
+  if (frameHasDocument()) {
+    succeedOnce()
+    return
+  }
   timeoutHandle = setTimeout(() => {
-    if (!loaded.value) {
-      failOnce()
-    }
+    if (frameHasDocument(true)) succeedOnce()
+    else failOnce()
   }, props.timeoutMs)
 }
 
-/**
- * Classify an iframe `load` event into `'loaded' | 'pending' | 'failed'`.
- * - `'pending'`: initial `about:blank` or an unconfirmed cross-origin error page;
- *   keep the 12s timer authoritative until a real load or timeout fires.
- * - `'failed'`: explicit browser error/blocked document; advance immediately.
- * - `'loaded'`: verified HTTP(S) document; clear the 12s timer and reveal frame.
- */
-function classifyFrameLoad(el: HTMLIFrameElement): 'loaded' | 'pending' | 'failed' {
-  let targetUrl: URL
-  try {
-    targetUrl = new URL(props.src, window.location.href)
-  } catch {
-    return 'failed'
-  }
-
-  const isSameOriginTarget = targetUrl.origin === window.location.origin
+function frameHasDocument(allowLoading = false): boolean {
+  const frame = frameRef.value
+  const win = frame?.contentWindow
+  if (!frame || !win) return false
 
   try {
-    const win = el.contentWindow
-    const doc = el.contentDocument
-    if (!win || !doc) {
-      return 'failed'
-    }
-    const href = win.location.href
-    if (!href || href === 'about:blank') {
-      return 'pending'
-    }
-    if (win.location.protocol !== 'http:' && win.location.protocol !== 'https:') {
-      return 'failed'
-    }
-    if (!isSameOriginTarget) {
-      // Cross-origin target should never expose a readable location; if it did, navigation failed.
-      return 'failed'
-    }
-    const hasContent = Boolean(
-      doc.body && (doc.body.childElementCount > 0 || doc.body.textContent?.trim()),
-    )
-    return hasContent ? 'loaded' : 'pending'
+    const protocol = win.location.protocol
+    if (protocol !== 'http:' && protocol !== 'https:') return false
+    const doc = win.document
+    return doc.readyState === 'complete' || (allowLoading && Boolean(doc.documentElement))
   } catch {
-    // Accessing contentWindow.location threw SecurityError (opaque or cross-origin document).
-    // Chromium's internal `chrome-error://chromewebdata/` also throws SecurityError and fires `load`.
-    // Check Resource Timing: a network failure produces no completed iframe entry (`responseEnd > 0`),
-    // so keep the 12s timer authoritative unless an HTTP response completed.
-    if (typeof performance !== 'undefined' && typeof performance.getEntriesByType === 'function') {
-      const entries = performance.getEntriesByType('resource') as PerformanceResourceTiming[]
-      const matching = entries.filter(
-        (entry) => entry.initiatorType === 'iframe' && entry.name === targetUrl.href,
-      )
-      if (matching.length === 0 || matching.every((entry) => entry.responseEnd === 0)) {
-        return 'pending'
-      }
-    }
-    return 'loaded'
+    // Cross-origin documents are opaque. A completed iframe resource can confirm
+    // the navigation even when the load event fired before hydration.
+    return performance.getEntriesByName(frame.src, 'resource').some((entry) => {
+      const resource = entry as PerformanceResourceTiming
+      return resource.initiatorType === 'iframe' && resource.responseEnd > 0
+    })
   }
 }
 
-function handleLoad(event: Event) {
-  if (!props.src || settled) return
-  const el = (event.currentTarget as HTMLIFrameElement | null) ?? frameRef.value
-  if (!el) return
-  const outcome = classifyFrameLoad(el)
-  if (outcome === 'loaded') {
-    succeedOnce()
-  } else if (outcome === 'failed') {
-    failOnce()
-  }
-  // When outcome === 'pending', the 12s timer remains authoritative until it fires.
+function handleLoad() {
+  if (frameHasDocument()) succeedOnce()
 }
 
 function handleError() {
-  failOnce()
+  if (frameHasDocument(true)) succeedOnce()
+  else failOnce()
 }
 
 function handleWindowMessage(event: MessageEvent) {
@@ -144,6 +103,7 @@ watch(
   () => {
     startTimer()
   },
+  { flush: 'post' },
 )
 
 onMounted(() => {

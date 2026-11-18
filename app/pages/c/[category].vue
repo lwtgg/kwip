@@ -39,6 +39,7 @@ async function handleRefresh() {
 }
 
 const isStale = computed(() => {
+  if (data.value?.fromCache) return true
   const originTs = data.value?.timestamp || fetchedAtSeconds.value
   return Boolean(originTs && nowSeconds.value - originTs > 300)
 })
@@ -150,7 +151,7 @@ useSeoMeta({
           :key="opt.value"
           :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
           :aria-current="activeFilter === opt.value ? 'page' : undefined"
-          class="rounded-[calc(var(--radius)-4px)] px-3 py-1.5 text-xs font-medium motion-safe:transition-colors"
+          class="rounded-[calc(var(--radius)-4px)] max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium motion-safe:transition-colors"
           :class="
             activeFilter === opt.value
               ? 'bg-accent text-accent-fg'

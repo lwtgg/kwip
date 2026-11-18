@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useStreams, type FeedStreamItem } from '~/composables/useFeed'
 
+const route = useRoute()
 const { siteName } = useRuntimeConfig().public
 const { data, status, error, refresh } = useStreams()
 
@@ -36,9 +37,16 @@ async function handleRefresh() {
 }
 
 const isStale = computed(() => {
+  if (data.value?.fromCache) return true
   const originTs = data.value?.timestamp || fetchedAtSeconds.value
   if (!originTs) return false
   return nowSeconds.value - originTs > 300
+})
+
+const activeFilter = computed(() => {
+  const raw = Array.isArray(route.query.filter) ? route.query.filter[0] : route.query.filter
+  if (raw === 'live' || raw === 'upcoming') return raw
+  return 'all'
 })
 
 const categories = computed(() => data.value?.streams ?? [])
@@ -117,21 +125,26 @@ const heroEntry = computed<{
   stream: FeedStreamItem
   mode: 'live' | 'upcoming' | 'archive'
 } | null>(() => {
-  if (liveNowStreams.value.length > 0) {
+  if (activeFilter.value !== 'upcoming' && liveNowStreams.value.length > 0) {
     return { stream: liveNowStreams.value[0]!, mode: 'live' }
   }
-  if (alwaysLiveStreams.value.length > 0) {
+  if (activeFilter.value !== 'upcoming' && alwaysLiveStreams.value.length > 0) {
     return { stream: alwaysLiveStreams.value[0]!, mode: 'live' }
   }
-  if (upcomingStreams.value.length > 0) {
+  if (activeFilter.value !== 'live' && upcomingStreams.value.length > 0) {
     const highestViewedUpcoming = [...upcomingStreams.value].sort(
       (a, b) => viewerCount(b) - viewerCount(a),
     )[0]!
     return { stream: highestViewedUpcoming, mode: 'upcoming' }
   }
+  if (activeFilter.value !== 'all') return null
   const fallback = [...allStreams.value].sort((a, b) => viewerCount(b) - viewerCount(a))[0]
   return fallback ? { stream: fallback, mode: 'archive' } : null
 })
+
+const hasVisibleStreams = computed(() =>
+  activeFilter.value === 'all' ? allStreams.value.length > 0 : heroEntry.value !== null,
+)
 
 const heroStream = computed(() => heroEntry.value?.stream ?? null)
 const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
@@ -145,6 +158,12 @@ watch(
     heroImgLoaded.value = false
   },
 )
+
+const filterOptions = [
+  { value: 'all', label: 'All' },
+  { value: 'live', label: 'Live' },
+  { value: 'upcoming', label: 'Upcoming' },
+]
 
 const pageDescription = computed(
   () => `Browse live sports events, 24/7 channels, and upcoming fixtures in the ${siteName} live event directory.`,
@@ -160,6 +179,23 @@ useSeoMeta({
 
 <template>
   <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
+    <nav aria-label="Event status filter" class="inline-flex items-center gap-1 rounded-[var(--radius)] border border-border bg-surface p-1">
+      <NuxtLink
+        v-for="opt in filterOptions"
+        :key="opt.value"
+        :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
+        :aria-current="activeFilter === opt.value ? 'page' : undefined"
+        class="rounded-[calc(var(--radius)-4px)] max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium motion-safe:transition-colors"
+        :class="
+          activeFilter === opt.value
+            ? 'bg-accent text-accent-fg'
+            : 'text-muted hover:text-fg'
+        "
+      >
+        {{ opt.label }}
+      </NuxtLink>
+    </nav>
+
     <template v-if="status === 'pending' && !data">
       <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
         Live Sports Event Directory
@@ -186,7 +222,7 @@ useSeoMeta({
         @retry="handleRefresh"
       />
 
-      <template v-if="allStreams.length === 0">
+      <template v-if="!hasVisibleStreams">
         <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
           Live Sports Event Directory
         </h1>
@@ -254,7 +290,7 @@ useSeoMeta({
 
                 <NuxtLink
                   :to="`/c/${slugifyCategory(heroStream.category_name)}`"
-                  class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-muted hover:text-fg"
+                  class="rounded bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-muted hover:text-fg"
                 >
                   {{ heroStream.category_name }}
                 </NuxtLink>
@@ -293,7 +329,7 @@ useSeoMeta({
 
         <!-- Live now rail -->
         <Rail
-          v-if="liveNowStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && liveNowStreams.length > 0"
           title="Live now"
           :streams="liveNowStreams"
           :now="nowSeconds"
@@ -301,7 +337,7 @@ useSeoMeta({
 
         <!-- 24/7 rail -->
         <Rail
-          v-if="alwaysLiveStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && alwaysLiveStreams.length > 0"
           title="24/7"
           :streams="alwaysLiveStreams"
           :now="nowSeconds"
@@ -309,7 +345,7 @@ useSeoMeta({
 
         <!-- Per-category rails -->
         <Rail
-          v-for="cat in categories"
+          v-for="cat in activeFilter === 'all' ? categories : []"
           :key="cat.id"
           :title="cat.category"
           :category="cat.category"
@@ -318,7 +354,7 @@ useSeoMeta({
         />
 
         <!-- Upcoming block with relative countdown -->
-        <section v-if="upcomingStreams.length > 0" class="space-y-3">
+        <section v-if="activeFilter !== 'live' && upcomingStreams.length > 0" class="space-y-3">
           <div class="flex items-baseline justify-between gap-3">
             <h2 class="text-lg font-semibold tracking-tight text-fg">
               Upcoming

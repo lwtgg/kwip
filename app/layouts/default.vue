@@ -43,7 +43,7 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
           <NuxtLink
             to="/"
             :aria-current="route.path === '/' ? 'page' : undefined"
-            class="shrink-0 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap motion-safe:transition-colors"
+            class="shrink-0 rounded-full max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap motion-safe:transition-colors"
             :class="
               route.path === '/'
                 ? 'bg-accent text-accent-fg'
@@ -57,7 +57,7 @@ const isCategoryActive = (slug: string) => route.path === `/c/${slug}`
             :key="cat.id"
             :to="`/c/${cat.slug}`"
             :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
-            class="shrink-0 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap motion-safe:transition-colors"
+            class="shrink-0 rounded-full max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap motion-safe:transition-colors"
             :class="
               isCategoryActive(cat.slug)
                 ? 'bg-accent text-accent-fg'

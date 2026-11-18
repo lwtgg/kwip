@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import type { SourceOption } from '~/composables/usePlayerSources'
 
-export interface SelectableSourceOption extends SourceOption {
-  kind?: 'iframe' | 'link'
-}
+export type SelectableSourceOption = SourceOption
 
 defineProps<{
   sources: SelectableSourceOption[]
@@ -34,7 +32,7 @@ function onChange(event: Event) {
       :id="selectId"
       :value="sources.length > 0 && modelValue >= 0 && modelValue < sources.length ? modelValue : ''"
       :disabled="sources.length === 0"
-      class="rounded-[var(--radius)] border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-[var(--radius)] border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11 disabled:cursor-not-allowed disabled:opacity-50"
       @change="onChange"
     >
       <option
