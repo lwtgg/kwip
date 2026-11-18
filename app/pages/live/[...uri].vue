@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useStream, type FeedStreamItem } from '~/composables/useFeed'
+import { NuxtLink } from '#components'
+import { useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources } from '~/composables/usePlayerSources'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { formatViewersExact } from '~/utils/viewers'
@@ -29,6 +30,26 @@ const {
 
 // Review #6 & #9: wall-clock `Date.now()` at render + ticking interval so open pages age into stale.
 const nowSeconds = useState('live-event-now', () => Math.floor(Date.now() / 1000))
+const hasEnded = computed(() => {
+  const event = detail.value
+  return event?.always_live === 0 && event.ends_at > 0 && nowSeconds.value >= event.ends_at
+})
+const replayFallback = 'Replays usually appear shortly after the final whistle.'
+const ReplayLink = defineComponent({
+  setup() {
+    const { data } = useVods()
+    const hasReplay = computed(() => data.value?.vods.some(category =>
+      category.vods.some(vod => vod.uri_name === uriName.value),
+    ))
+
+    return () => hasReplay.value
+      ? h(NuxtLink, {
+          to: `/vods/${uriName.value}`,
+          class: 'text-fg underline hover:text-accent max-md:inline-flex max-md:min-h-11 max-md:items-center',
+        }, () => 'Watch the replay')
+      : replayFallback
+  },
+})
 const fetchedAtSeconds = ref<number | null>(
   streamResp.value || listResp.value ? Math.floor(Date.now() / 1000) : null,
 )
@@ -397,6 +418,13 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
     <template v-else>
       <!-- Player frame (iframe) or outbound link block or exhausted-chain fallback -->
       <section aria-label="Event player">
+        <p v-if="hasEnded" class="w-full border-t border-border py-2 text-xs text-muted">
+          This event has ended.
+          <ClientOnly>
+            <ReplayLink />
+            <template #fallback>{{ replayFallback }}</template>
+          </ClientOnly>
+        </p>
         <div
           v-if="!chainExhausted && currentSource && currentSource.kind === 'link'"
           class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
