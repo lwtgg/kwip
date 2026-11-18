@@ -1,3 +1,18 @@
+import type { H3Event } from 'h3'
+
+interface FeedAssets {
+  fetch(request: Request): Promise<Response>
+}
+
+interface CloudflareEnv {
+  ASSETS?: FeedAssets
+}
+
+export function getFeedAssets(event?: H3Event): FeedAssets | undefined {
+  const env = event?.context.cloudflare?.env as CloudflareEnv | undefined
+  return env?.ASSETS ?? (globalThis as typeof globalThis & { __env__?: CloudflareEnv }).__env__?.ASSETS
+}
+
 export class FeedResponseError extends Error {
   constructor(message: string) {
     super(message)
@@ -67,16 +82,30 @@ function replaceHostTokens<T>(value: T, host: string): T {
 async function fetchFromBase<T extends { success: boolean }>(
   fetcher: typeof $fetch,
   url: string,
+  requestUrl: URL,
   host: string,
+  assets?: FeedAssets,
   onRequestError?: () => void,
 ): Promise<T> {
-  const payload = await fetcher<T | { success: false; error: string }>(url, {
-    responseType: 'json',
-    retry: 0,
-    onRequestError,
-  })
+  let payload: unknown
+  if (assets && URL.canParse(url) && new URL(url).origin === requestUrl.origin) {
+    const request = new Request(url)
+    let response: Response
+    try {
+      response = await assets.fetch(request)
+    } catch (error) {
+      onRequestError?.()
+      throw error
+    }
+    if (!response.ok) {
+      throw new FeedResponseError(`Feed request failed with HTTP ${response.status}`)
+    }
+    payload = await response.json()
+  } else {
+    payload = await fetcher(url, { responseType: 'json', retry: 0, onRequestError })
+  }
 
-  if (!payload || typeof payload !== 'object' || payload.success !== true) {
+  if (!payload || typeof payload !== 'object' || !('success' in payload) || payload.success !== true) {
     const message =
       payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
         ? payload.error
@@ -92,6 +121,7 @@ export async function fetchFeed<T extends { success: boolean }>(
   config: FeedConfig,
   requestUrl: URL,
   endpoint: FeedEndpoint,
+  assets?: FeedAssets,
 ): Promise<T> {
   const host = requestUrl.host || config.canonicalHost
   // Use absolute URLs for public fixtures, which Vite serves separately in dev.
@@ -103,13 +133,13 @@ export async function fetchFeed<T extends { success: boolean }>(
   const mirrorUrl = config.feedMirrorBase ? resolveUrl(config.feedMirrorBase) : null
   let networkFailure = false
   try {
-    return await fetchFromBase<T>(fetcher, primaryUrl, host, () => {
+    return await fetchFromBase<T>(fetcher, primaryUrl, requestUrl, host, assets, () => {
       networkFailure = true
     })
   } catch (err) {
     if (!networkFailure || !mirrorUrl || mirrorUrl === primaryUrl) {
       throw err
     }
-    return await fetchFromBase<T>(fetcher, mirrorUrl, host)
+    return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, assets)
   }
 }

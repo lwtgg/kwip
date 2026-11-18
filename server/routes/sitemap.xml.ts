@@ -1,5 +1,5 @@
 import type { FeedStreamsResponse, FeedVodsResponse } from '../../app/composables/useFeed'
-import { fetchFeed } from '../utils/feed'
+import { fetchFeed, getFeedAssets } from '../utils/feed'
 
 const STATIC_PATHS = ['/', '/vods', '/mirrors', '/about']
 
@@ -27,9 +27,10 @@ export default defineEventHandler(async (event) => {
 
   const config = useRuntimeConfig(event).public
   const requestUrl = getRequestURL(event)
+  const assets = getFeedAssets(event)
   const [streams, vods] = await Promise.all([
-    fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }).catch(() => null),
-    fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }).catch(() => null),
+    fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }, assets).catch(() => null),
+    fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }, assets).catch(() => null),
   ])
 
   const seen = new Set(entries.map((e) => e.path))

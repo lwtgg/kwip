@@ -1,5 +1,5 @@
 import { toValue, type MaybeRefOrGetter } from 'vue'
-import { fetchFeed, type FeedEndpoint } from '../../server/utils/feed'
+import { fetchFeed, getFeedAssets, type FeedEndpoint } from '../../server/utils/feed'
 
 export { FeedResponseError } from '../../server/utils/feed'
 
@@ -144,11 +144,15 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const config = useRuntimeConfig()
   const fetcher = useRequestFetch()
   const requestUrl = useRequestURL()
+  const event = import.meta.server ? useRequestEvent() : undefined
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
 
   return useAsyncData<T>(
     cacheKey,
-    () => fetchFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint()),
+    () => {
+      const assets = import.meta.server ? getFeedAssets(event) : undefined
+      return fetchFeed<T>(fetcher, config.public, requestUrl, resolveEndpoint(), assets)
+    },
     {
       server: true,
       getCachedData(key, nuxtApp, { cause }) {

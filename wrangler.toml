@@ -13,6 +13,7 @@ routes = [
 ]
 
 [assets]
+binding = "ASSETS"
 directory = ".output/public"
 not_found_handling = "none"
 
