@@ -1,0 +1,20 @@
+# Rule 7: Cloudflare Workers via Nitro cloudflare_module. No secrets here.
+name = "kwip"
+main = ".output/server/index.mjs"
+compatibility_date = "2025-07-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Apex + www for canonical and mirror; rule 13 301s handled in the app.
+routes = [
+  { pattern = "kwip.fyi", zone_name = "kwip.fyi", custom_domain = true },
+  { pattern = "www.kwip.fyi", zone_name = "kwip.fyi", custom_domain = true },
+  { pattern = "kwip.lol", zone_name = "kwip.lol", custom_domain = true },
+  { pattern = "www.kwip.lol", zone_name = "kwip.lol", custom_domain = true },
+]
+
+[assets]
+directory = ".output/public"
+not_found_handling = "none"
+
+[observability]
+enabled = true
