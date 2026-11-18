@@ -1,8 +1,10 @@
-# MatchDeck
+# kwip
 
-A directory for live sports events. Video is a third-party iframe embed; this repo hosts no media.
+A live sports event directory: a schedule grouped by category, each event pointing at the sources that carry it. A source is either an outbound `link` or an `iframe` embed; this repo hosts no media.
 
 Stack: Nuxt 3 (SSR on), Tailwind v4, deployed to Cloudflare Workers.
+
+Build target is the committed fixture feed in `public/fixtures/`. A live provider feed is an adapter, selected with `NUXT_PUBLIC_FEED_BASE` (and `NUXT_PUBLIC_FEED_MIRROR_BASE` for the fallback).
 
 Read `SPEC.md`, `DECISIONS.md` and `API.md` before changing anything. Facts about the outside world live in `API.md` — take them as given and don't re-derive them.
 
@@ -12,6 +14,13 @@ Read `SPEC.md`, `DECISIONS.md` and `API.md` before changing anything. Facts abou
 - `CONTRACT.md` — which files each agent owns
 - `INFRA.md` — hosting, domains, deploy
 - `.prompts/` — the brief for the current task
+
+## Checks
+
+```sh
+pnpm test   # node:test, no extra dependency
+pnpm build
+```
 
 ## Deploy
 

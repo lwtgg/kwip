@@ -10,8 +10,8 @@ Escape hatch kept working: `nitro.preset = "node-server"` on a Hetzner CX22 behi
 
 - `wrangler.toml` with `compatibility_date`, no secrets committed
 - `NUXT_PUBLIC_SITE_NAME`, `NUXT_PUBLIC_FEED_BASE` from env; no literal feed URL in components
-- Cache Rules: HTML 30s, `stale-while-revalidate=300`, bypass on `/api/*` and query strings except `?page=`
-- `/api/domains` returns our mirror list, served from a static JSON in the Worker
+- Cache headers come from `nuxt.config.ts` `routeRules`, not dashboard rules: HTML 30s + `stale-while-revalidate=300`, immutable hashed assets, `no-store` on `/api/*`
+- `/api/domains` returns our mirror list from the committed `public/domains.json`, sanitised against `NUXT_PUBLIC_CANONICAL_HOST` when set
 - `pnpm build` must pass with both presets
 
 ## Domains
@@ -23,7 +23,7 @@ Registered at Porkbun. Nameservers delegated to Cloudflare; both zones on the Fr
 | Canonical | `kwip.fyi` | 2026-11-17 | $5.66 flat | on |
 | Mirror | `kwip.lol` | 2026-11-17 | $26.26 | off |
 
-Mirrors never diverge in content; see rule 13 in `DECISIONS.md` for the canonical/301 enforcement. Adding a mirror means: register, delegate NS to Cloudflare, add a Worker custom domain, add its host to the mirror list `GET /api/domains` returns. No `.com` until the brand earns one.
+Mirrors never diverge in content; see rule 13 in `DECISIONS.md` for the canonical/301 enforcement. Adding a mirror means: register, delegate NS to Cloudflare, add a Worker custom domain in `wrangler.toml`, add its host to `public/domains.json`. No `.com` until the brand earns one.
 
 ## Deploy
 
