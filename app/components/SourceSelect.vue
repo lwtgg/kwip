@@ -37,13 +37,18 @@ function onChange(event: Event) {
       class="rounded-[var(--radius)] border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg disabled:cursor-not-allowed disabled:opacity-50"
       @change="onChange"
     >
-      <option value="" disabled>
+      <option
+        value=""
+        disabled
+        :selected="!(sources.length > 0 && modelValue >= 0 && modelValue < sources.length)"
+      >
         Change source
       </option>
       <option
         v-for="(source, index) in sources"
         :key="`${index}-${source.url}`"
         :value="index"
+        :selected="index === modelValue"
       >
         {{ source.kind === 'link' ? `${source.label} (Link ↗)` : source.label }}
       </option>

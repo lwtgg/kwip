@@ -90,14 +90,22 @@ const sources = computed<SelectableSourceOption[]>(() => {
   }))
 })
 
-const activeSourceIndex = ref(0)
+const defaultSourceIndex = computed(() => {
+  const nonEmptyPrimary = (detail.value?.sources ?? []).filter((s) => s.data)
+  const idx = nonEmptyPrimary.findIndex((s) => s.default)
+  return idx >= 0 ? idx : 0
+})
+
+const selectedSourceIndex = ref<number | null>(null)
+const failedSourceIndices = ref<number[]>([])
 const lastFailedIndex = ref(-1)
 const retryGeneration = ref(0)
 const posterLoaded = ref(false)
 const posterError = ref(false)
 
 watch(uriName, () => {
-  activeSourceIndex.value = 0
+  selectedSourceIndex.value = null
+  failedSourceIndices.value = []
   lastFailedIndex.value = -1
   retryGeneration.value = 0
   posterLoaded.value = false
@@ -112,10 +120,11 @@ watch(
   },
 )
 
-watch(sources, (next) => {
-  if (next.length > 0 && activeSourceIndex.value < 0) {
-    activeSourceIndex.value = 0
-  }
+const activeSourceIndex = computed({
+  get: () => selectedSourceIndex.value ?? defaultSourceIndex.value,
+  set: (next: number) => {
+    selectedSourceIndex.value = next
+  },
 })
 
 const chainExhausted = computed(
@@ -137,18 +146,31 @@ const firstRemainingLink = computed<SelectableSourceOption | null>(() => {
 function handleFrameError() {
   const failedAt = activeSourceIndex.value
   lastFailedIndex.value = failedAt
-  const nextIframeIndex = sources.value.findIndex(
-    (s, idx) => idx > failedAt && s.kind === 'iframe',
+  if (!failedSourceIndices.value.includes(failedAt)) {
+    failedSourceIndices.value = [...failedSourceIndices.value, failedAt]
+  }
+  const nextAfter = sources.value.findIndex(
+    (s, idx) =>
+      idx > failedAt && s.kind === 'iframe' && !failedSourceIndices.value.includes(idx),
   )
-  activeSourceIndex.value = nextIframeIndex !== -1 ? nextIframeIndex : sources.value.length
+  if (nextAfter !== -1) {
+    selectedSourceIndex.value = nextAfter
+    return
+  }
+  const anyRemainingIframe = sources.value.findIndex(
+    (s, idx) => s.kind === 'iframe' && !failedSourceIndices.value.includes(idx),
+  )
+  selectedSourceIndex.value =
+    anyRemainingIframe !== -1 ? anyRemainingIframe : sources.value.length
 }
 
 function handleRetryChain() {
   if (sources.value.length === 0) {
     refreshStream()
   }
+  failedSourceIndices.value = []
   lastFailedIndex.value = -1
-  activeSourceIndex.value = 0
+  selectedSourceIndex.value = null
   retryGeneration.value += 1
 }
 
