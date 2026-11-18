@@ -90,6 +90,8 @@ const defaultSourceIndex = computed(() => {
 const selectedSourceIndex = ref<number | null>(null)
 const lastFailedIndex = ref(-1)
 const retryGeneration = ref(0)
+const playerWrapper = ref<HTMLElement | null>(null)
+const playerHelpOpen = ref(false)
 const posterLoaded = ref(false)
 const posterError = ref(false)
 
@@ -97,6 +99,7 @@ watch(uriName, () => {
   selectedSourceIndex.value = null
   lastFailedIndex.value = -1
   retryGeneration.value = 0
+  playerHelpOpen.value = false
   posterLoaded.value = false
   posterError.value = false
 })
@@ -146,6 +149,31 @@ const shieldEnabled = computed(() => shieldSourceKey.value !== null && isShielde
 
 function toggleCurrentShield() {
   if (shieldSourceKey.value !== null) toggleShield(shieldSourceKey.value)
+}
+
+const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-[var(--radius)] border text-xs font-medium hover:border-accent md:min-h-8 md:min-w-8'
+
+async function enterFullscreen() {
+  const wrapper = playerWrapper.value
+  if (!wrapper || !currentSource.value?.url) return
+
+  try {
+    if (wrapper.requestFullscreen) {
+      await wrapper.requestFullscreen()
+      return
+    }
+  } catch {
+    // Some in-app browsers expose fullscreen but reject requests.
+  }
+  const url = currentSource.value?.url
+  if (!url) return
+
+  const tab = window.open(url, '_blank')
+  if (tab === null) {
+    playerHelpOpen.value = true
+  } else {
+    tab.opener = null
+  }
 }
 
 const firstRemainingLink = computed<SelectableSourceOption | null>(() => {
@@ -372,11 +400,52 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
             </svg>
             Shield
           </button>
+          <template v-if="currentSource?.kind === 'iframe'">
+            <button
+              type="button"
+              aria-label="Fullscreen"
+              title="Fullscreen"
+              :class="[playerControlClass, 'border-border text-fg']"
+              @click="enterFullscreen"
+            >
+              <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label="Player help"
+              :aria-pressed="playerHelpOpen"
+              title="Not playing?"
+              :class="[playerControlClass, playerHelpOpen ? 'border-accent text-accent' : 'border-border text-fg']"
+              @click="playerHelpOpen = !playerHelpOpen"
+            >
+              <span aria-hidden="true">?</span>
+            </button>
+          </template>
           <p v-if="shieldEnabled" class="basis-full text-xs text-muted">
             Popups and page redirects are blocked. Some players may stop working.
             <button type="button" class="text-fg underline hover:text-accent" @click="toggleCurrentShield">
               Reload without shield
             </button>
+          </p>
+          <p v-if="playerHelpOpen && currentSource?.kind === 'iframe'" class="basis-full text-xs text-muted">
+            If the picture stays black, reload the frame or open it in a new tab.
+            <button
+              type="button"
+              class="inline-flex items-center text-fg underline hover:text-accent max-md:min-h-11"
+              @click="retryGeneration += 1"
+            >
+              Reload player
+            </button>
+            <a
+              :href="currentSource.url"
+              target="_blank"
+              rel="noreferrer"
+              class="inline-flex items-center text-fg underline hover:text-accent max-md:min-h-11"
+            >
+              Open in new tab
+            </a>
           </p>
         </div>
       </div>
@@ -456,14 +525,19 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
           </div>
         </div>
 
-        <PlayerFrame
+        <div
           v-else-if="!chainExhausted && currentSource"
-          :key="`${activeSourceIndex}-${retryGeneration}`"
-          :src="currentSource.url"
-          :title="`${detail.name} — ${currentSource.label}`"
-          :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
-          @error="handleFrameError"
-        />
+          ref="playerWrapper"
+          class="[&:fullscreen>*]:h-full"
+        >
+          <PlayerFrame
+            :key="`${activeSourceIndex}-${retryGeneration}`"
+            :src="currentSource.url"
+            :title="`${detail.name} — ${currentSource.label}`"
+            :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
+            @error="handleFrameError"
+          />
+        </div>
 
         <div
           v-else
