@@ -59,3 +59,50 @@ To force a run, open **Actions → Feed refresh → Run workflow**, select
 `main`, and click **Run workflow**. Check the run summary for the publisher
 result. A `paused` result means the provider blocked the runner and a
 person needs to investigate before resuming publication.
+
+The workflow opens or updates one live GitHub issue labeled `feed-refresh`
+when publication fails or pauses, or when the pre-publication manifest is
+missing or its last list verification is more than 45 minutes old. Recovery
+requires a fresh precheck and an outcome of `published` or `unchanged`.
+A separate completion-triggered workflow reports cancelled live runs on
+`main`, including pending runs GitHub replaces before they start. It reads the
+Actions recovery artifacts under the issue update lock. The
+artifact holds the latest confirmed live attempt by start time, including
+reruns of older runs, and expires after seven days. Live recovery uploads it
+before closing any incident and retires the previous artifact. It alternates between two fixed
+artifact names so a rerun can upload before retiring its predecessor. If
+retirement fails after the upload, incident closure proceeds and the next
+healthy refresh retries the cleanup. The
+check reads at most one artifact in each slot and fetches the exact cancelled
+attempt only if the event omits its start time. Healthy runs leave no issue activity. If the lookup
+fails after retries, the cancellation still alerts and the issue marks
+the lookup as inconclusive.
+
+To exercise the issue lifecycle without publishing, dispatch `failed`, `paused`
+and `stale` in order using the `simulate` input. Then dispatch `simulate=none`
+with `simulate_recovery` enabled. The rehearsal uses its own marked issue
+with the `feed-refresh` label. Only explicit simulated recovery closes it.
+Live runs and rehearsals can each have one open issue.
+
+GitHub disables scheduled workflows in public repositories after 60 days
+without repository activity. A commit that changes the workflow's cron schedule
+re-enables it. A disabled or unscheduled workflow cannot check the manifest age
+or raise an alert about its own absence. The GitHub issue is the only alert channel.
+
+### Verify the refresh workflows
+
+Run the following from the repository root with Git, Go, and ShellCheck
+installed. The pinned actionlint revision validates GitHub's
+`concurrency.queue` setting, which keeps pending issue updates in order.
+
+```sh
+kwip_lint_dir=$(mktemp -d)
+git init -q "$kwip_lint_dir"
+git -C "$kwip_lint_dir" fetch --depth=1 https://github.com/rhysd/actionlint.git 644076a59742c2d1540ebd4686eab3c308f0e562
+git -C "$kwip_lint_dir" checkout --detach FETCH_HEAD
+(cd "$kwip_lint_dir" && go build -o actionlint ./cmd/actionlint)
+"$kwip_lint_dir/actionlint" &&
+  pnpm build &&
+  pnpm test &&
+  pnpm exec wrangler deploy --dry-run
+```

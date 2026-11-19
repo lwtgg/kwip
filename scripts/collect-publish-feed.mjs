@@ -359,12 +359,17 @@ async function collectSnapshot(current, result, deadline, dryRun) {
 async function publish(result, deadline) {
   const { values } = parseArgs({ options: {
     bucket: { type: 'string', default: previewBucket },
+    'check-freshness': { type: 'boolean' },
     'credentials-file': { type: 'string' },
     'dry-run': { type: 'boolean' },
     'provider-status': { type: 'string' },
     'retry-after': { type: 'string' },
   } })
   const { bucket, 'dry-run': dryRun, 'provider-status': providerStatus, 'retry-after': retryAfter } = values
+  if (values['check-freshness'] && (dryRun || providerStatus !== undefined || retryAfter !== undefined)) {
+    throw new Error('--check-freshness cannot be combined with --dry-run, --provider-status or --retry-after')
+  }
+  if (values['check-freshness']) delete result.commitId
   if (!buckets.includes(bucket)) throw new Error('Unknown snapshot bucket')
   if (providerStatus !== undefined && !['429', 'blocked'].includes(providerStatus)) throw new Error('Invalid provider status')
   if (retryAfter !== undefined && providerStatus !== '429') throw new Error('--retry-after requires --provider-status 429')
@@ -372,6 +377,15 @@ async function publish(result, deadline) {
   if (!config && !dryRun) throw new Error(`Missing bucket-scoped credentials for ${bucket}`)
   const publicationDeadline = deadline - stateReserveMs
   const r2 = config && storage(bucket, config, result, publicationDeadline)
+  if (values['check-freshness']) {
+    if (!r2) throw new Error('Missing R2 credentials for freshness check')
+    const current = parseObject(await r2.get(manifestKey))
+    if (!current) return 'missing'
+    validateManifest(current)
+    result.commitId = current.commitId
+    result.listsVerifiedAtAgeMs = Date.now() - Date.parse(current.listsVerifiedAt)
+    return result.listsVerifiedAtAgeMs > 45 * 60_000 ? 'stale' : 'fresh'
+  }
   const stateStorage = config && storage(bucket, config, result, deadline)
   const stateObject = await r2?.get(stateKey)
   const state = parseObject(stateObject) ?? {}
@@ -390,9 +404,16 @@ async function publish(result, deadline) {
     collected = await collectSnapshot(current, result, publicationDeadline, dryRun)
     timeLeft(publicationDeadline, 'Collection deadline exceeded')
   } catch (error) {
-    if (error instanceof ProviderError && [429, 403, 451].includes(error.status)) {
-      return persistProviderStatus(stateStorage, stateObject, error.status === 429 ? '429' : 'blocked',
-        error.retryAfter, dryRun, deadline)
+    if (error instanceof ProviderError) {
+      result.providerStatus = error.status
+      // Only forward the two Retry-After wire formats to public alerts.
+      if (/^(?:[0-9]{1,12}|[A-Z][a-z]{2}, [0-9]{2} [A-Z][a-z]{2} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT)$/.test(error.retryAfter ?? '')) {
+        result.retryAfter = error.retryAfter
+      }
+      if ([429, 403, 451].includes(error.status)) {
+        return persistProviderStatus(stateStorage, stateObject, error.status === 429 ? '429' : 'blocked',
+          error.retryAfter, dryRun, deadline)
+      }
     }
     throw error
   }

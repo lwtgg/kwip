@@ -1,12 +1,23 @@
 name: Feed refresh
+run-name: ${{ ((inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery) && 'Feed refresh (live)' || 'Feed refresh (simulation)' }}
 
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      simulate:
+        description: Exercise the issue alert without publishing
+        type: choice
+        default: none
+        options: [none, failed, paused, stale]
+      simulate_recovery:
+        description: Exercise issue closure without publishing (use with simulate=none)
+        type: boolean
+        default: false
 
 concurrency:
-  group: feed-refresh
+  group: ${{ ((inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery) && 'feed-refresh' || 'feed-refresh-simulation' }}
   cancel-in-progress: false
 
 permissions:
@@ -14,38 +25,122 @@ permissions:
 
 jobs:
   refresh:
+    if: (inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery
     runs-on: ubuntu-latest
     environment: feed-production
     timeout-minutes: 10
+    outputs:
+      freshness: ${{ steps.freshness.outputs.result }}
+      publication: ${{ steps.publication.outputs.result }}
+      stages: ${{ format('{{"checkout":"{0}","node":"{1}","pnpm":"{2}","install":"{3}","freshness":"{4}","publish":"{5}","record_freshness":"{6}","record_publication":"{7}"}}', steps.checkout.outcome, steps.node.outcome, steps.pnpm.outcome, steps.install.outcome, steps.check.outcome, steps.publish.outcome, steps.freshness.outcome, steps.publication.outcome) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        id: checkout
         with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        id: node
         with:
           node-version: '22'
       - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        id: pnpm
         with:
           version: '10.11.0'
       - name: Install publisher dependency
+        id: install
         run: pnpm --dir scripts --ignore-workspace install --frozen-lockfile
-      - name: Publish feed
+      - name: Check current manifest age
+        id: check
         shell: bash
-        timeout-minutes: 5
         env:
-          NUXT_PUBLIC_FEED_BASE: https://api.ppv.st/api
           R2_BUCKET: kwip-feed-prod
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: node scripts/collect-publish-feed.mjs --bucket "$R2_BUCKET" --check-freshness > "$RUNNER_TEMP/feed-freshness.json"
+      - name: Record freshness result
+        id: freshness
+        if: success() || failure()
+        shell: bash
+        env:
+          RESULT_FILE: ${{ runner.temp }}/feed-freshness.json
         run: |
-          status=0
-          output=$(pnpm publish:feed --bucket kwip-feed-prod) || status=$?
-          printf '%s\n' "$output"
-          {
-            printf '%s\n' '```json'
-            printf '%s\n' "$output" | sed -n '/^{.*}$/p'
-            printf '%s\n' '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
+          if [[ -s "$RESULT_FILE" ]]; then
+            jq -c '{outcome, commitId, listsVerifiedAtAgeMs}' "$RESULT_FILE" | sed 's/^/result=/' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish feed
+        id: publish
+        if: "!cancelled() && steps.install.outcome == 'success'"
+        shell: bash
+        timeout-minutes: 5
+        env:
+          R2_BUCKET: kwip-feed-prod
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          NUXT_PUBLIC_FEED_BASE: https://api.ppv.st/api
+        run: pnpm publish:feed --bucket "$R2_BUCKET" | tee "$RUNNER_TEMP/feed-publication.log"
+      - name: Record publication result
+        id: publication
+        if: success() || failure()
+        shell: bash
+        run: |
+          if [[ -s "$RUNNER_TEMP/feed-publication.log" ]]; then
+            result=$(sed -n '/^{.*}$/p' "$RUNNER_TEMP/feed-publication.log" | tail -n 1)
+            if [[ -n "$result" ]]; then
+              printf "\`\`\`json\n%s\n\`\`\`\n" "$result" >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' "$result" | jq -c '{outcome, commitId, providerStatus, retryAfter}' |
+                sed 's/^/result=/' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  simulation:
+    if: (inputs.simulate != '' && inputs.simulate != 'none') || inputs.simulate_recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      freshness: ${{ steps.simulation.outputs.freshness }}
+      publication: ${{ steps.simulation.outputs.publication }}
+    env:
+      SIMULATE: ${{ inputs.simulate }}
+      SIMULATE_RECOVERY: ${{ inputs.simulate_recovery }}
+    steps:
+      - name: Simulate a refresh result
+        id: simulation
+        shell: bash
+        run: |
+          case "$SIMULATE" in
+            failed)
+              echo 'publication={"outcome":"failed","providerStatus":503}' >> "$GITHUB_OUTPUT"
+              exit 1 ;;
+            paused)
+              echo 'publication={"outcome":"paused","providerStatus":403}' >> "$GITHUB_OUTPUT"
+              exit 1 ;;
+            stale)
+              echo 'freshness={"outcome":"stale","listsVerifiedAtAgeMs":3600000}' >> "$GITHUB_OUTPUT" ;;
+            *)
+              if [[ "$SIMULATE_RECOVERY" == true ]]; then
+                echo 'freshness={"outcome":"fresh"}' >> "$GITHUB_OUTPUT"
+                echo 'publication={"outcome":"unchanged","commitId":"simulated-recovery"}' >> "$GITHUB_OUTPUT"
+              fi ;;
+          esac
+
+  alert:
+    needs: [refresh, simulation]
+    if: >-
+      !cancelled() && needs.refresh.result != 'cancelled' &&
+      (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    uses: ./.github/workflows/feed-refresh-issue.yml
+    with:
+      refresh_result: ${{ needs.simulation.result != 'skipped' && needs.simulation.result || needs.refresh.result }}
+      simulated: ${{ needs.simulation.result != 'skipped' }}
+      simulation_recovery: ${{ inputs.simulate_recovery && (inputs.simulate == '' || inputs.simulate == 'none') }}
+      freshness: ${{ needs.simulation.outputs.freshness || needs.refresh.outputs.freshness || '{}' }}
+      publication: ${{ needs.simulation.outputs.publication || needs.refresh.outputs.publication || '{}' }}
+      stages: ${{ needs.refresh.outputs.stages || '{}' }}

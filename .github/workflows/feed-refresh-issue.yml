@@ -1,0 +1,293 @@
+name: Feed refresh issue
+
+on:
+  workflow_call:
+    inputs:
+      refresh_result:
+        type: string
+        required: true
+      simulated:
+        type: boolean
+        default: false
+      simulation_recovery:
+        type: boolean
+        default: false
+      freshness:
+        type: string
+        default: '{}'
+      publication:
+        type: string
+        default: '{}'
+      stages:
+        type: string
+        default: '{}'
+  workflow_run:
+    workflows: [Feed refresh]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  issue:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'cancelled' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.display_title == 'Feed refresh (live)')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: feed-refresh-issue
+      queue: max
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || github.run_id }}
+      REFRESH_RESULT: ${{ github.event_name == 'workflow_run' && 'cancelled' || inputs.refresh_result }}
+      SIMULATED: ${{ inputs.simulated }}
+      SIMULATION_RECOVERY: ${{ inputs.simulation_recovery }}
+      FRESHNESS: ${{ inputs.freshness || '{}' }}
+      PUBLICATION: ${{ inputs.publication || '{}' }}
+      STAGES: ${{ inputs.stages || '{}' }}
+      RECOVERY_ARTIFACT: feed-refresh-recovery
+    steps:
+      - name: Read or record live recovery
+        id: recovery_record
+        if: github.event_name == 'workflow_run' || (github.ref == 'refs/heads/main' && !inputs.simulated && inputs.refresh_result == 'success')
+        continue-on-error: ${{ github.event_name == 'workflow_run' }}
+        shell: bash
+        env:
+          RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || github.run_id }}
+          RUN_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || github.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          CANCELLED_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
+        run: |
+          if [[ "$REFRESH_RESULT" != cancelled ]]; then
+            if ! jq -e '.outcome == "fresh"' <<< "$FRESHNESS" > /dev/null ||
+               ! jq -e '(.outcome == "published" or .outcome == "unchanged") and
+                        (.commitId | type == "string" and length > 0)' <<< "$PUBLICATION" > /dev/null; then
+              exit 0
+            fi
+          fi
+
+          deadline=$((SECONDS + 60))
+          read_api() {
+            local destination=$1 try remaining
+            shift
+            for try in 1 2 3; do
+              remaining=$((deadline - SECONDS))
+              if (( remaining <= 0 )); then return 1; fi
+              if (( remaining > 15 )); then remaining=15; fi
+              if timeout --kill-after=2s "${remaining}s" gh api --method GET "$@" > "$destination"; then
+                return 0
+              fi
+              if (( try < 3 && SECONDS < deadline )); then sleep "$try"; fi
+            done
+            return 1
+          }
+
+          artifacts_api="repos/$GH_REPO/actions/artifacts"
+          response="$RUNNER_TEMP/feed-recovery-response"
+          artifact_ids=
+          for slot in a b; do
+            read_api "$response" "$artifacts_api" -f name="$RECOVERY_ARTIFACT-$slot" -F per_page=2
+            if [[ "$REFRESH_RESULT" != cancelled ]]; then
+              expired_id=$(jq -r --arg repo "$REPOSITORY_ID" '
+                if .total_count == 1 then .artifacts[] |
+                  select(.expired and .workflow_run.head_branch == "main" and
+                    (.workflow_run.head_repository_id | tostring) == $repo) | .id
+                else empty end' "$response")
+              if [[ -n "$expired_id" ]]; then gh api --method DELETE "$artifacts_api/$expired_id" --silent; fi
+            fi
+            ids=$(jq -r --arg repo "$REPOSITORY_ID" --arg slot "$slot" '
+              if .total_count > 1 then error("Multiple artifacts in one recovery slot") else
+                .artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and
+                  (.workflow_run.head_repository_id | tostring) == $repo) |
+                  if .size_in_bytes > 4096 then error("Oversized recovery artifact")
+                  else [.id, $slot] | @tsv end
+              end' "$response")
+            artifact_ids+="$ids"$'\n'
+          done
+          recovery_time=0
+          newest_id=
+          newest_slot=
+          older_id=
+          while IFS=$'\t' read -r artifact_id slot; do
+            if [[ -z "$artifact_id" ]]; then continue; fi
+            read_api "$response" "$artifacts_api/$artifact_id/zip"
+            timestamp=$(unzip -p "$response" feed-recovery.json |
+              jq -e 'select(.version == 1) | .startedAt | fromdateiso8601')
+            if (( timestamp > recovery_time )); then
+              recovery_time=$timestamp
+              older_id=$newest_id
+              newest_id=$artifact_id
+              newest_slot=$slot
+            else
+              older_id=$artifact_id
+            fi
+          done <<< "$artifact_ids"
+          if [[ -z "$newest_id" && "$REFRESH_RESULT" == cancelled ]]; then exit 0; fi
+
+          started_at=$CANCELLED_STARTED_AT
+          if [[ -z "$started_at" ]]; then
+            read_api "$response" "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT"
+            started_at=$(jq -er --argjson attempt "$RUN_ATTEMPT" '
+              select(.run_attempt == $attempt) | .run_started_at' "$response")
+          fi
+          source_time=$(jq -ne --arg started "$started_at" '$started | fromdateiso8601')
+
+          if [[ "$REFRESH_RESULT" == cancelled ]]; then
+            if (( recovery_time > source_time )); then
+              echo "Dropping cancellation alert because recovery artifact $newest_id is newer."
+              echo 'superseded=true' >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          # Keep the strongest record if a prior upload succeeded but its cleanup failed.
+          if [[ -n "$older_id" ]]; then gh api --method DELETE "$artifacts_api/$older_id" --silent; fi
+          if (( source_time <= recovery_time )); then exit 0; fi
+
+          jq -cn --arg startedAt "$started_at" --arg url "$RUN_URL" --argjson attempt "$RUN_ATTEMPT" \
+            '{version: 1, $startedAt, $url, $attempt}' > "$RUNNER_TEMP/feed-recovery.json"
+          next_slot=a
+          if [[ "$newest_slot" == a ]]; then next_slot=b; fi
+          {
+            echo "name=$RECOVERY_ARTIFACT-$next_slot"
+            echo 'upload=true'
+            echo "previous_id=$newest_id"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish confirmed recovery artifact
+        if: steps.recovery_record.outputs.upload == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.recovery_record.outputs.name }}
+          path: ${{ runner.temp }}/feed-recovery.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Retire previous recovery artifact
+        if: steps.recovery_record.outputs.upload == 'true' && steps.recovery_record.outputs.previous_id != ''
+        continue-on-error: true
+        env:
+          PREVIOUS_ARTIFACT_ID: ${{ steps.recovery_record.outputs.previous_id }}
+        run: timeout --kill-after=2s 15s gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$PREVIOUS_ARTIFACT_ID" --silent
+
+      - name: Update feed refresh issue
+        if: steps.recovery_record.outputs.superseded != 'true'
+        env:
+          RECOVERY_LOOKUP: ${{ steps.recovery_record.outcome }}
+        shell: bash
+        run: |
+          outcome=$(jq -r '.outcome // empty' <<< "$PUBLICATION")
+          commit=$(jq -r '.commitId // empty' <<< "$PUBLICATION")
+          freshness=$(jq -r '.outcome // empty' <<< "$FRESHNESS")
+          provider_status=$(jq -r '.providerStatus // empty' <<< "$PUBLICATION")
+          failures=$(jq -r '
+            to_entries[] | select(.value == "failure") | .key |
+            if . == "checkout" then "Checkout failed. Check repository access."
+            elif . == "node" then "Node setup failed. Check the runner and Node download."
+            elif . == "pnpm" then "pnpm setup failed. Check the runner and pnpm download."
+            elif . == "install" then "Dependency installation failed. Check the lockfile and registry access."
+            elif . == "freshness" then "Manifest age check failed. Check R2 access and manifest validity."
+            elif . == "publish" then "Publisher exited unsuccessfully. Check the publisher run log."
+            elif . == "record_freshness" then "Recording the manifest check result failed. Check the result recording step."
+            elif . == "record_publication" then "Recording the publisher result failed. Check the result recording step."
+            else empty end' <<< "$STAGES")
+
+          title=
+          incident=
+          action='Inspect the run and resolve the refresh failure.'
+          case "$freshness" in
+            stale)
+              incident=stale
+              title='Feed has stopped advancing'
+              action='Check the refresh run and restore successful feed verification.' ;;
+            missing)
+              incident=missing
+              title='Feed has stopped advancing'
+              action='Check the production R2 bucket and restore publication of current.json.' ;;
+          esac
+          if [[ "$REFRESH_RESULT" == cancelled ]]; then
+            incident=cancelled
+            title='Feed refresh is failing'
+            action='Check the run history for a cancellation or a newer queued refresh.'
+          elif [[ -z "$incident" && "$REFRESH_RESULT" == failure ]]; then
+            incident=failed
+            title='Feed refresh is failing'
+            if [[ "$outcome" == paused ]]; then incident=paused; fi
+            if [[ -z "$failures" ]]; then
+              if [[ "$SIMULATED" == true ]]; then
+                failures='Publisher failure was simulated.'
+              else
+                failures='The refresh job failed before recording a step failure.'
+              fi
+            fi
+          fi
+          if [[ "$outcome" == paused ]]; then
+            action='The provider blocked the runner. A person must investigate before resuming publication.'
+          elif [[ "$provider_status" == 403 || "$provider_status" == 451 ]]; then
+            action='The provider blocked the runner. Disable the workflow and cancel pending runs while a person investigates.'
+          fi
+
+          if [[ -z "$incident" ]]; then
+            if [[ "$REFRESH_RESULT" != success || "$freshness" != fresh || ( "$outcome" != published && "$outcome" != unchanged ) || -z "$commit" ]]; then
+              exit 0
+            fi
+            if [[ "$SIMULATED" == true && "$SIMULATION_RECOVERY" != true ]]; then exit 0; fi
+          fi
+
+          marker='**Simulated incident**'
+          issues=$(gh api --paginate --slurp --method GET "repos/$GH_REPO/issues" -f state=open -f labels=feed-refresh -F per_page=100)
+          issue=$(jq -r --arg marker "$marker" --arg simulated "$SIMULATED" '
+            [ .[][] | select(has("pull_request") | not) |
+              select(((.body // "") | startswith($marker)) == ($simulated == "true")) |
+              .number ] | first // empty' <<< "$issues")
+
+          if [[ -z "$incident" ]]; then
+            if [[ -n "$issue" ]]; then
+              prefix=
+              if [[ "$SIMULATED" == true ]]; then prefix='Simulated recovery. '; fi
+              gh issue close "$issue" --comment "${prefix}Feed refresh recovered at commit \`$commit\`. $RUN_URL"
+            fi
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/feed-issue.md"
+          {
+            if [[ "$SIMULATED" == true ]]; then printf '%s\n\n' "$marker"; fi
+            printf 'Incident: %s\n\nPublisher outcome: %s\n\n' "$incident" "${outcome:-not reported}"
+            if [[ "$incident" == cancelled && "$RECOVERY_LOOKUP" == failure ]]; then
+              printf 'The newer-recovery check was inconclusive. Review the cancellation and subsequent runs.\n\n'
+            fi
+            if [[ -n "$failures" ]]; then printf '%s\n\n' "$failures"; fi
+            if [[ -n "$commit" ]]; then printf "Publisher commit: \`%s\`\n\n" "$commit"; fi
+            jq -r 'if .providerStatus then "Provider status: \(.providerStatus)\n" else empty end,
+                   if .retryAfter then "Retry-After: \(.retryAfter)\n" else empty end' <<< "$PUBLICATION"
+            if [[ "$freshness" == stale ]]; then
+              age=$(jq -r '.listsVerifiedAtAgeMs' <<< "$FRESHNESS")
+              manifest_commit=$(jq -r '.commitId // empty' <<< "$FRESHNESS")
+              printf 'The manifest listsVerifiedAt was %s seconds old before publication.\n\n' "$((age / 1000))"
+              if [[ -n "$manifest_commit" ]]; then printf "Manifest commit: \`%s\`\n\n" "$manifest_commit"; fi
+            elif [[ "$freshness" == missing ]]; then
+              printf 'Production R2 did not contain current.json before publication.\n\n'
+            fi
+            printf 'Run: %s\n\n%s\n' "$RUN_URL" "$action"
+          } > "$body"
+
+          if [[ -n "$issue" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/$issue" -f title="$title" -F body="@$body" --silent
+            gh issue comment "$issue" --body-file "$body"
+          else
+            label=$(gh label list --search feed-refresh --json name --jq '.[] | select(.name == "feed-refresh").name')
+            if [[ -z "$label" ]]; then
+              gh label create feed-refresh --description 'Feed refresh incidents' --color B60205
+            fi
+            gh issue create --title "$title" --label feed-refresh --body-file "$body"
+          fi
