@@ -26,9 +26,9 @@ const replayList = { success: true, vods: [{ category: 'Archive', vods: [
   { id: 4, uri_name: 'omitted', name: 'Omitted' },
 ] }] }
 
-function fixture(includeDetail = true, detailPayload: object = detail, includeReplay = false, liveUri = 'sport/example', includeVodList = true) {
+function fixture(includeDetail = true, detailPayload: object = detail, includeReplay = false, liveUri = 'sport/example', includeVodList = true, streams: object = channels) {
   const data = [
-    ['streams', liveUri === 'sport/example' ? channels : { ...channels, streams: [{
+    ['streams', liveUri === 'sport/example' ? streams : { ...channels, streams: [{
       category: 'Sports', always_live: 0, streams: [{ id: 1, name: 'Example', uri: liveUri }],
     }] }],
     ...(includeVodList ? [['vods', replayList]] as const : []),
@@ -120,8 +120,49 @@ test('normalizes a validated VOD slug when the manifest omits the list', async (
   assert.equal(generation.get(vod)?.data.uri_name, 'replay')
 })
 
-const endedDetail = { ...detail, data: { ...detail.data, uri: '/replay', end_timestamp: 500 } }
+const endedDetail = { ...detail, data: { ...detail.data, uri: '/replay', start_timestamp: 400, end_timestamp: 500 } }
 const replayEndpoints = [{ kind: 'streams' }, { kind: 'stream', uriName: 'replay' }] as const
+
+test('listing deadlines follow home and category filters and ignore 24/7 schedules', async () => {
+  const event = (id: number, start: number, end: number, alwaysLive?: number) => ({
+    id, uri: `sport/${id}`, name: `Event ${id}`, starts_at: start, ends_at: end, always_live: alwaysLive,
+  })
+  const streams = { ...channels, streams: [
+    { category: 'Match Day', streams: [event(1, 130, 160)] },
+    { category: 'Other Sport', streams: [event(2, 110, 180), event(3, 101, 102, 1)] },
+    { category: 'Always On', always_live: 1, streams: [event(4, 103, 104)] },
+  ] }
+  const { bucket } = fixture(false, detail, false, 'sport/example', true, streams)
+  for (const [path, now, boundary] of [
+    ['/', 100, 110],
+    ['/c/Match%20Day/', 100, 130],
+    ['/c/match-day?filter=upcoming', 130, Infinity],
+    ['/c/match-day?filter=live', 100, 130],
+    ['/c/match-day?filter=live', 130, 160],
+    ['/c/match-day?filter=live', 160, Infinity],
+    ['/c/match-day', 130, 160],
+    ['/c/always-on', 100, Infinity],
+    ['/sitemap.xml', 100, Infinity],
+  ] as const) {
+    const generation = await readFeedGeneration(
+      bucket, unreachable, new URL(path, requestUrl), requestUrl.host, [{ kind: 'streams' }], undefined, [], now,
+    )
+    assert.equal(generation.cacheBoundary, boundary, path)
+  }
+})
+
+test('live cache coverage moves from kickoff to the whistle to ended replay', async () => {
+  for (const [now, boundary, replay] of [
+    [399, 400, undefined], [400, 500, undefined], [499, 500, undefined], [500, Infinity, true],
+  ] as const) {
+    const { bucket } = fixture(true, endedDetail, true, 'replay')
+    const generation = await readFeedGeneration(
+      bucket, unreachable, requestUrl, requestUrl.host, [...replayEndpoints], undefined, [], now,
+    )
+    assert.equal(generation.cacheBoundary, boundary)
+    assert.equal(generation.get(replayEndpoints[1])?.hasSnapshotReplay, replay)
+  }
+})
 
 test('reads the replay range only for ended streams with detail coverage', async () => {
   for (const [covered, now, hasReplay] of [[true, 499, false], [false, 500, false], [true, 500, true]] as const) {

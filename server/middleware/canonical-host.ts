@@ -1,3 +1,5 @@
+import { lookupEdgePage } from '../utils/edge-cache-handler'
+
 const LOCAL_DEV_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
 
 export default defineEventHandler((event) => {
@@ -9,7 +11,7 @@ export default defineEventHandler((event) => {
     .replace(/\/+$/, '')
 
   if (!canonicalHost) {
-    return
+    return lookupEdgePage(event)
   }
 
   const url = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true })
@@ -17,11 +19,11 @@ export default defineEventHandler((event) => {
   const requestHostname = url.hostname.toLowerCase()
 
   if (requestHost === canonicalHost) {
-    return
+    return lookupEdgePage(event)
   }
 
   if (!LOCAL_DEV_HOSTNAMES.has(canonicalHost) && LOCAL_DEV_HOSTNAMES.has(requestHostname)) {
-    return
+    return lookupEdgePage(event)
   }
 
   return sendRedirect(event, `https://${canonicalHost}${url.pathname}${url.search}`, 301)

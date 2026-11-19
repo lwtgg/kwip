@@ -227,20 +227,64 @@ function pageRequirements(requestUrl: URL): FeedEndpoint[] {
   return endpoints
 }
 
-function endedReplayPath(payloads: Map<string, SnapshotPayload>, streamPath: string | undefined, now: number) {
-  if (!streamPath) return
+type StreamCategory = {
+  category: string
+  always_live?: number
+  streams: { uri_name: string; always_live?: number; starts_at?: number | string; ends_at?: number | string }[]
+}
+
+function listingBoundary(payload: SnapshotPayload | undefined, url: URL, now: number) {
+  const path = url.pathname.replace(/\/+$/, '')
+  const home = path === ''
+  const categoryPath = /^\/c\/([^/]+)$/i.exec(path)
+  if (!home && !categoryPath) return Infinity
+
+  const categories = payload?.streams as StreamCategory[] | undefined
+  if (!categories) return Infinity
+  let selected = categories
+  if (categoryPath) {
+    const slugify = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    let slug: string
+    try {
+      slug = slugify(decodeURIComponent(categoryPath[1]!))
+    } catch {
+      slug = slugify(categoryPath[1]!)
+    }
+    const category = categories.find(candidate => slugify(candidate.category) === slug)
+    if (!category) return Infinity
+    selected = [category]
+  }
+
+  const filter = url.searchParams.get('filter')
+  let boundary = Infinity
+  for (const category of selected) {
+    for (const stream of category.streams) {
+      const alwaysLive = stream.always_live ?? category.always_live ?? 0
+      if (alwaysLive === 1 || (home && alwaysLive !== 0 && (filter === 'live' || filter === 'upcoming'))) continue
+      const start = Number(stream.starts_at)
+      const end = Number(stream.ends_at)
+      if (start > now && (filter !== 'live' || end > start)) boundary = Math.min(boundary, start)
+      if (end > now && filter !== 'upcoming' &&
+          (filter !== 'live' || start <= now)) boundary = Math.min(boundary, end)
+    }
+  }
+  return boundary
+}
+
+function liveDetailWindow(payloads: Map<string, SnapshotPayload>, streamPath: string) {
   const stream = payloads.get(streamPath)?.data as {
-    always_live?: number; ends_at?: number | string; end_timestamp?: number | string
+    always_live?: number
+    starts_at?: number | string
+    start_timestamp?: number | string
+    ends_at?: number | string
+    end_timestamp?: number | string
   } | undefined
   if (!stream) return
-  const end = Number(stream.ends_at ?? stream.end_timestamp)
-  if (!(end > 0 && now >= end)) return
-  const uri = streamPath.slice('streams/'.length)
-  const categories = payloads.get('streams')?.streams as {
-    always_live?: number; streams: { uri_name: string; always_live?: number }[]
-  }[] | undefined
+
   let alwaysLive = stream.always_live
   if (alwaysLive == null) {
+    const uri = streamPath.slice('streams/'.length)
+    const categories = payloads.get('streams')?.streams as StreamCategory[] | undefined
     for (const category of categories ?? []) {
       const item = category.streams.find(item => item.uri_name === uri)
       if (!item) continue
@@ -248,7 +292,18 @@ function endedReplayPath(payloads: Map<string, SnapshotPayload>, streamPath: str
       break
     }
   }
-  if (alwaysLive === 0) return feedDetailPath('vods', uri)
+
+  return {
+    alwaysLive,
+    start: Number(stream.starts_at ?? stream.start_timestamp),
+    end: Number(stream.ends_at ?? stream.end_timestamp),
+  }
+}
+
+function endedReplayPath(window: ReturnType<typeof liveDetailWindow>, streamPath: string, now: number) {
+  if (window?.alwaysLive === 0 && window.end > 0 && now >= window.end) {
+    return feedDetailPath('vods', streamPath.slice('streams/'.length))
+  }
 }
 
 function listsReplay(payload: SnapshotPayload | undefined, path: string): boolean {
@@ -267,12 +322,19 @@ export async function readFeedGeneration(
   assets?: FeedAssets,
   seedDetails: readonly string[] = [],
   now = Math.floor(Date.now() / 1000),
+  reader = createSnapshotReader(bucket),
 ) {
   const paths = endpoints.map(snapshotPath)
   const streamPath = paths.find(path => path.startsWith('streams/'))
   let payloads = new Map<string, SnapshotPayload>()
+  let window: ReturnType<typeof liveDetailWindow>
   let hasDetail: (path: string) => boolean = () => false
-  const reader = createSnapshotReader(bucket)
+  let identity: string | undefined
+  try {
+    identity = (await reader.open()).commitId
+  } catch {
+    identity = 'seed'
+  }
   try {
     const snapshot = await reader.read(paths)
     for (const [path, { payload, hasHostToken }] of snapshot.payloads) {
@@ -283,13 +345,16 @@ export async function readFeedGeneration(
         : resolved
       payloads.set(path, { ...normalized, fromCache: true, fromSnapshot: true })
     }
-    const replayPath = endedReplayPath(payloads, streamPath, now)
+    window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined
+    const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
     if (streamPath && replayPath && snapshot.has(replayPath)) {
       const vods = (await reader.read(['vods'])).payloads.get('vods')?.payload
       if (listsReplay(vods, replayPath)) payloads.get(streamPath)!.hasSnapshotReplay = true
     }
     hasDetail = snapshot.has
   } catch {
+    // A failed payload read can recover while this manifest remains current.
+    if (identity !== 'seed') identity = undefined
     payloads.clear()
     // Wait for the complete seed batch before making any payload visible to SSR.
     try {
@@ -300,7 +365,8 @@ export async function readFeedGeneration(
         path, { ...compactSnapshotPayload(path, seed[index]), fromCache: true, fromSnapshot: true },
       ]))
       const coverage = new Set(seedDetails)
-      const replayPath = endedReplayPath(seedPayloads, streamPath, now)
+      window = streamPath ? liveDetailWindow(seedPayloads, streamPath) : undefined
+      const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
       if (streamPath && replayPath && coverage.has(replayPath)) {
         const vods = await fetchFeedSnapshot<SnapshotPayload>(fetcher, requestUrl, { kind: 'vods' }, host, assets)
         if (listsReplay(compactSnapshotPayload('vods', vods), replayPath)) {
@@ -313,7 +379,13 @@ export async function readFeedGeneration(
       // SSR can mount with unavailable data and let the browser try the provider.
     }
   }
+  // Compare against the same clock SSR used, even if rendering crosses a boundary.
+  const cacheBoundary = window && window.alwaysLive !== 1
+    ? Math.min(window.start > now ? window.start : Infinity, window.end > now ? window.end : Infinity)
+    : listingBoundary(payloads.get('streams'), requestUrl, now)
   return {
+    cacheBoundary,
+    cacheIdentity: paths.every(path => payloads.has(path)) ? identity : undefined,
     get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
       return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
     },
@@ -321,7 +393,39 @@ export async function readFeedGeneration(
   }
 }
 
-const requestGeneration = Symbol('feedGeneration')
+// Nitro and the Nuxt SSR bundle each compile this module.
+const requestGeneration = Symbol.for('kwip.feedGeneration')
+const requestReader = Symbol.for('kwip.snapshotReader')
+
+type FeedContext = H3Event['context'] & {
+  [requestGeneration]?: ReturnType<typeof readFeedGeneration>
+  [requestReader]?: { bucket: SnapshotBucket; reader: ReturnType<typeof createSnapshotReader> }
+}
+
+function getRequestReader(event: H3Event, binding: string, config: FeedConfig) {
+  if (!isExternalFeed(config.feedBase)) return
+  const context: FeedContext = event.context
+  if (context[requestReader]) return context[requestReader]
+  const candidate = getCloudflareEnv(event)?.[binding] as Partial<SnapshotBucket> | undefined
+  if (typeof candidate?.get !== 'function') return
+  const bucket = candidate as SnapshotBucket
+  return context[requestReader] = { bucket, reader: createSnapshotReader(bucket) }
+}
+
+export async function getFeedCacheIdentity(event: H3Event, binding: string, config: FeedConfig) {
+  const pinned = getRequestReader(event, binding, config)
+  if (!pinned) return
+  try {
+    return (await pinned.reader.open()).commitId
+  } catch {
+    return 'seed'
+  }
+}
+
+export function getRenderedFeedGeneration(event: H3Event) {
+  const context: FeedContext = event.context
+  return context[requestGeneration]
+}
 
 export function getFeedGeneration(
   event: H3Event | undefined,
@@ -333,15 +437,13 @@ export function getFeedGeneration(
   seedDetails?: readonly string[],
   now?: number,
 ) {
-  if (!event || !isExternalFeed(config.feedBase)) return
-  const bucket = getCloudflareEnv(event)?.[binding] as Partial<SnapshotBucket> | undefined
-  if (typeof bucket?.get !== 'function') return
+  if (!event) return
+  const pinned = getRequestReader(event, binding, config)
+  if (!pinned) return
 
-  const context = event.context as H3Event['context'] & {
-    [requestGeneration]?: ReturnType<typeof readFeedGeneration>
-  }
+  const context: FeedContext = event.context
   return context[requestGeneration] ??= readFeedGeneration(
-    bucket as SnapshotBucket, fetcher, requestUrl, requestUrl.host || config.canonicalHost,
-    endpoints ?? pageRequirements(requestUrl), getFeedAssets(event), seedDetails, now,
+    pinned.bucket, fetcher, requestUrl, requestUrl.host || config.canonicalHost,
+    endpoints ?? pageRequirements(requestUrl), getFeedAssets(event), seedDetails, now, pinned.reader,
   )
 }
