@@ -65,7 +65,9 @@ when publication fails or pauses, or when the pre-publication manifest is
 missing or its last list verification is more than 45 minutes old. Recovery
 requires a fresh precheck and an outcome of `published` or `unchanged`.
 A separate completion-triggered workflow reports cancelled live runs on
-`main`, including pending runs GitHub replaces before they start.
+`main`, including pending runs GitHub replaces before they start. It checks the
+run history under the issue update lock and drops a delayed cancellation
+when a newer live run has already recorded confirmed recovery.
 
 To exercise the issue lifecycle without publishing, dispatch `failed`, `paused`
 and `stale` in order using the `simulate` input. Then dispatch `simulate=none`
@@ -77,3 +79,21 @@ GitHub disables scheduled workflows in public repositories after 60 days
 without repository activity. A commit that changes the workflow's cron schedule
 re-enables it. A disabled or unscheduled workflow cannot check the manifest age
 or raise an alert about its own absence. The GitHub issue is the only alert channel.
+
+### Verify the refresh workflows
+
+Run the following from the repository root with Git, Go, and ShellCheck
+installed. The pinned actionlint revision validates GitHub's
+`concurrency.queue` setting, which keeps pending issue updates in order.
+
+```sh
+kwip_lint_dir=$(mktemp -d)
+git init -q "$kwip_lint_dir"
+git -C "$kwip_lint_dir" fetch --depth=1 https://github.com/rhysd/actionlint.git 644076a59742c2d1540ebd4686eab3c308f0e562
+git -C "$kwip_lint_dir" checkout --detach FETCH_HEAD
+(cd "$kwip_lint_dir" && go build -o actionlint ./cmd/actionlint)
+"$kwip_lint_dir/actionlint" &&
+  pnpm build &&
+  pnpm test &&
+  pnpm exec wrangler deploy --dry-run
+```

@@ -29,6 +29,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 
 jobs:
   issue:
@@ -54,7 +55,38 @@ jobs:
       PUBLICATION: ${{ inputs.publication || '{}' }}
       STAGES: ${{ inputs.stages || '{}' }}
     steps:
+      - name: Check for a newer live recovery
+        id: newer_recovery
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          SOURCE_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          SOURCE_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          SOURCE_CREATED_AT: ${{ github.event.workflow_run.created_at }}
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          candidates=$(gh api --method GET --paginate --slurp \
+            "repos/$GH_REPO/actions/workflows/$SOURCE_WORKFLOW_ID/runs" \
+            -f branch="$SOURCE_BRANCH" -f created=">=$SOURCE_CREATED_AT" -F per_page=100 |
+            jq -r --arg repo "$GH_REPO" --argjson source "$SOURCE_RUN_NUMBER" '
+              .[].workflow_runs[] |
+              select(.run_number > $source and .display_title == "Feed refresh (live)" and
+                .head_repository.full_name == $repo) | .id')
+          while IFS= read -r candidate; do
+            if [[ -z "$candidate" ]]; then continue; fi
+            recovered=$(gh api --method GET --paginate --slurp \
+              "repos/$GH_REPO/actions/runs/$candidate/jobs" -f filter=all -F per_page=100 |
+              jq 'any(.[].jobs[] | select(.name == "refresh") | .steps[]?;
+                .name == "Record confirmed live recovery" and .conclusion == "success")')
+            if [[ "$recovered" == true ]]; then
+              echo "Dropping cancellation alert because newer run $candidate confirmed recovery."
+              echo 'superseded=true' >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done <<< "$candidates"
+
       - name: Update feed refresh issue
+        if: steps.newer_recovery.outputs.superseded != 'true'
         shell: bash
         run: |
           outcome=$(jq -r '.outcome // empty' <<< "$PUBLICATION")
