@@ -4,6 +4,16 @@ on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+    inputs:
+      simulate:
+        description: Exercise the issue alert without publishing
+        type: choice
+        default: none
+        options: [none, failed, paused, stale]
+      simulate_recovery:
+        description: Exercise issue closure without publishing (use with simulate=none)
+        type: boolean
+        default: false
 
 concurrency:
   group: feed-refresh
@@ -14,9 +24,13 @@ permissions:
 
 jobs:
   refresh:
+    if: (inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery
     runs-on: ubuntu-latest
     environment: feed-production
     timeout-minutes: 10
+    outputs:
+      freshness: ${{ steps.freshness.outputs.result }}
+      publication: ${{ steps.publication.outputs.result }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -28,24 +42,157 @@ jobs:
         with:
           version: '10.11.0'
       - name: Install publisher dependency
+        id: install
         run: pnpm --dir scripts --ignore-workspace install --frozen-lockfile
-      - name: Publish feed
+      - name: Check current manifest age
         shell: bash
-        timeout-minutes: 5
         env:
-          NUXT_PUBLIC_FEED_BASE: https://api.ppv.st/api
           R2_BUCKET: kwip-feed-prod
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: node scripts/collect-publish-feed.mjs --bucket "$R2_BUCKET" --check-freshness > "$RUNNER_TEMP/feed-freshness.json"
+      - name: Record freshness result
+        id: freshness
+        if: success() || failure()
+        shell: bash
+        env:
+          RESULT_FILE: ${{ runner.temp }}/feed-freshness.json
         run: |
-          status=0
-          output=$(pnpm publish:feed --bucket kwip-feed-prod) || status=$?
-          printf '%s\n' "$output"
+          if [[ -s "$RESULT_FILE" ]]; then
+            jq -c '{outcome, commitId, listsVerifiedAtAgeMs}' "$RESULT_FILE" | sed 's/^/result=/' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish feed
+        if: "!cancelled() && steps.install.outcome == 'success'"
+        shell: bash
+        timeout-minutes: 5
+        env:
+          R2_BUCKET: kwip-feed-prod
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          NUXT_PUBLIC_FEED_BASE: https://api.ppv.st/api
+        run: pnpm publish:feed --bucket "$R2_BUCKET" | tee "$RUNNER_TEMP/feed-publication.log"
+      - name: Record publication result
+        id: publication
+        if: success() || failure()
+        shell: bash
+        run: |
+          if [[ -s "$RUNNER_TEMP/feed-publication.log" ]]; then
+            result=$(sed -n '/^{.*}$/p' "$RUNNER_TEMP/feed-publication.log" | tail -n 1)
+            if [[ -n "$result" ]]; then
+              printf "\`\`\`json\n%s\n\`\`\`\n" "$result" >> "$GITHUB_STEP_SUMMARY"
+              printf '%s\n' "$result" | jq -c '{outcome, commitId, providerStatus, retryAfter}' |
+                sed 's/^/result=/' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  alert:
+    needs: refresh
+    if: "!cancelled()"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      SIMULATE: ${{ inputs.simulate }}
+      SIMULATE_RECOVERY: ${{ inputs.simulate_recovery }}
+    steps:
+      - name: Simulate a refresh result
+        id: simulation
+        if: (inputs.simulate != '' && inputs.simulate != 'none') || inputs.simulate_recovery
+        shell: bash
+        run: |
+          case "$SIMULATE" in
+            failed)
+              echo 'publication={"outcome":"failed","providerStatus":503}' >> "$GITHUB_OUTPUT"
+              exit 1 ;;
+            paused)
+              echo 'publication={"outcome":"paused","providerStatus":403}' >> "$GITHUB_OUTPUT"
+              exit 1 ;;
+            stale)
+              echo 'freshness={"outcome":"stale","listsVerifiedAtAgeMs":3600000}' >> "$GITHUB_OUTPUT" ;;
+            *)
+              if [[ "$SIMULATE_RECOVERY" == true ]]; then
+                echo 'publication={"outcome":"unchanged","commitId":"simulated-recovery"}' >> "$GITHUB_OUTPUT"
+              fi ;;
+          esac
+      - name: Update feed refresh issue
+        if: failure() || success()
+        env:
+          SIMULATED: ${{ steps.simulation.outcome != 'skipped' }}
+          FRESHNESS: ${{ steps.simulation.outputs.freshness || needs.refresh.outputs.freshness || '{}' }}
+          PUBLICATION: ${{ steps.simulation.outputs.publication || needs.refresh.outputs.publication || '{}' }}
+          REFRESH_FAILED: ${{ steps.simulation.outcome == 'failure' || needs.refresh.result == 'failure' }}
+        shell: bash
+        run: |
+          outcome=$(jq -r '.outcome // empty' <<< "$PUBLICATION")
+          commit=$(jq -r '.commitId // empty' <<< "$PUBLICATION")
+          age=$(jq -r 'select(.outcome == "stale") | .listsVerifiedAtAgeMs' <<< "$FRESHNESS")
+          title=
+          if [[ -n "$age" ]]; then
+            title='Feed has stopped advancing'
+            action='Check the refresh run and restore successful feed verification.'
+          elif [[ "$REFRESH_FAILED" == true ]]; then
+            title='Feed refresh is failing'
+            action='Inspect the run and resolve the refresh failure.'
+          elif [[ "$outcome" != published && "$outcome" != unchanged ]]; then
+            exit 0
+          fi
+          provider_status=$(jq -r '.providerStatus // empty' <<< "$PUBLICATION")
+          if [[ "$outcome" == paused ]]; then
+            action='The provider blocked the runner. A person must investigate before resuming publication.'
+          elif [[ "$provider_status" == 403 || "$provider_status" == 451 ]]; then
+            action='The provider blocked the runner. Disable the workflow and cancel pending runs while a person investigates.'
+          fi
+
+          issue=$(gh issue list --state open --label feed-refresh --limit 1 --json number --jq '.[0].number // empty')
+          if [[ "$SIMULATED" == true && -n "$issue" ]]; then
+            if ! gh api "repos/$GH_REPO/issues/$issue" | jq -e '.body | startswith("**Simulated incident**")' > /dev/null; then
+              echo "Skipping simulation because issue #$issue is already open for a live incident."
+              exit 0
+            fi
+          fi
+          if [[ -z "$title" ]]; then
+            if [[ -n "$issue" ]]; then
+              prefix=
+              if [[ "$SIMULATED" == true ]]; then prefix='Simulated recovery. '; fi
+              gh issue close "$issue" --comment "${prefix}Feed refresh recovered at commit \`$commit\`. $RUN_URL"
+            fi
+            exit 0
+          fi
+
+          if [[ "$SIMULATED" == true ]]; then printf '**Simulated incident**\n\n'; fi > "$RUNNER_TEMP/feed-issue.md"
           {
-            printf '%s\n' '```json'
-            printf '%s\n' "$output" | sed -n '/^{.*}$/p'
-            printf '%s\n' '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
+            if [[ -z "$outcome" ]]; then
+              outcome=failed
+              if [[ -n "$age" ]]; then outcome=stale; fi
+            fi
+            printf 'Outcome: %s\n\n' "$outcome"
+
+            if [[ -n "$commit" ]]; then printf "Publisher commit: \`%s\`\n\n" "$commit"; fi
+            jq -r 'if .providerStatus then "Provider status: \(.providerStatus)\n" else empty end,
+                   if .retryAfter then "Retry-After: \(.retryAfter)\n" else empty end' <<< "$PUBLICATION"
+            if [[ -n "$age" ]]; then
+              manifest_commit=$(jq -r '.commitId // empty' <<< "$FRESHNESS")
+              printf 'The manifest listsVerifiedAt was %s seconds old before publication.\n\n' "$((age / 1000))"
+              if [[ -n "$manifest_commit" ]]; then printf "Manifest commit: \`%s\`\n\n" "$manifest_commit"; fi
+            fi
+            printf 'Run: %s\n\n%s\n' "$RUN_URL" "$action"
+          } >> "$RUNNER_TEMP/feed-issue.md"
+
+          if [[ -n "$issue" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/$issue" -f title="$title" -F body="@$RUNNER_TEMP/feed-issue.md" --silent
+            gh issue comment "$issue" --body-file "$RUNNER_TEMP/feed-issue.md"
+          else
+            if [[ -z "$(gh label list --search feed-refresh --json name --jq '.[] | select(.name == "feed-refresh").name')" ]]; then
+              gh label create feed-refresh --description 'Feed refresh incidents' --color B60205
+            fi
+            gh issue create --title "$title" --label feed-refresh --body-file "$RUNNER_TEMP/feed-issue.md"
+          fi
