@@ -2,13 +2,14 @@
 import { NuxtLink } from '#components'
 import { useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
-import { sourceKey } from '~/utils/sourceIdentity'
+import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
+import { isSupplementHost, matchSupplement, type SupplementSource } from '~/utils/strmfree'
 import { formatViewersExact } from '~/utils/viewers'
 
 const route = useRoute()
 const router = useRouter()
-const { siteName, canonicalHost } = useRuntimeConfig().public
+const { siteName, canonicalHost, feedBase } = useRuntimeConfig().public
 
 const uriName = computed(() => {
   const raw = route.params.uri
@@ -80,15 +81,82 @@ const pageHeading = computed(
   () => detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value),
 )
 
-const sources = computed(() => detail.value ? usePlayerSources(detail.value) : [])
+type SupplementState =
+  | { status: 'idle' | 'loading' | 'none' | 'error' }
+  | { status: 'merged'; fetchedAt: number; sources: SupplementSource[] }
+
+const supplement = shallowRef<SupplementState>({ status: 'idle' })
+onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
+
+const sources = computed(() => usePlayerSources({
+  sources: [
+    ...(detail.value?.sources ?? []),
+    ...(supplement.value.status === 'merged' ? supplement.value.sources : []),
+  ],
+}))
+
+async function loadSupplement() {
+  const event = detail.value
+  const now = Date.now()
+  if (supplement.value.status !== 'idle' || !event || event.always_live === 1
+    || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
+
+  const storageKey = `supplement:${uriName.value}`
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null')
+    if (cached?.status === 'merged' && Array.isArray(cached.sources)
+      && cached.fetchedAt <= now && now - cached.fetchedAt < 600_000) {
+      supplement.value = cached
+      return
+    }
+  } catch {
+    // Storage may be unavailable in this browser.
+  }
+  if (isSupplementQuery(route.query.source)) return
+
+  const loading = { status: 'loading' } as const
+  const slug = categorySlug.value
+  supplement.value = loading
+  try {
+    const endpoint = /(?:^|\/)fixtures\/?$/.test(feedBase)
+      ? '/fixtures/strmfree.json'
+      : 'https://strmfree.pk/api/v1/streams'
+    const response = await fetch(endpoint)
+    if (!response.ok) throw new Error('Second provider request failed')
+    const matched = matchSupplement(event, slug, await response.json())
+    if (supplement.value !== loading) return
+    if (matched === null) {
+      supplement.value = { status: 'none' }
+      return
+    }
+
+    const merged = { status: 'merged', fetchedAt: Date.now(), sources: matched } as const
+    supplement.value = merged
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(merged))
+    } catch {
+      // The current page can still use the match.
+    }
+  } catch {
+    if (supplement.value === loading) supplement.value = { status: 'error' }
+  }
+}
 
 const feedSources = computed(() => (detail.value?.sources ?? []).filter((source) => source.data))
 
 const defaultSourceKey = computed(() => {
   const preferred = feedSources.value.find((source) => source.default)
-  return preferred ? sourceKey(preferred.data) : sources.value[0]?.key ?? null
+  const first = preferred ?? feedSources.value[0]
+  return first ? sourceKey(first.data) : null
 })
 
+function isSupplementQuery(query: unknown) {
+  return typeof query === 'string'
+    && !feedSources.value.some(source => sourceKey(source.data) === query)
+    && isSupplementHost(sourceHost('https://' + query))
+}
+
+const pickedSupplementKeys = new Set<string>()
 const selectedSourceKey = ref<string | null>(null)
 let chainExhausted = false
 const requestedSourceKey = ref<string | null>(null)
@@ -98,7 +166,7 @@ const seenKeys = new Set<string>()
 const beforeKeys = new Set<string>()
 let sourceWriteId = 0
 let pendingTargetKey: string | null = null
-let mounted = false
+const mounted = ref(false)
 let missingSourceKey: string | null = null
 const retryGeneration = ref(0)
 const playerWrapper = ref<HTMLElement | null>(null)
@@ -107,6 +175,8 @@ const posterLoaded = ref(false)
 const posterError = ref(false)
 
 watch(uriName, () => {
+  supplement.value = { status: 'idle' }
+  pickedSupplementKeys.clear()
   resetAttempt(null)
   retryGeneration.value = 0
   playerHelpOpen.value = false
@@ -127,6 +197,9 @@ const currentSource = computed(() =>
 )
 
 async function writeSourceQuery(key: string, replace = false) {
+  const target = sources.value.find(source => source.key === key)
+  if (target?.origin === 'supplement' && !pickedSupplementKeys.has(key)) return
+
   const writeId = ++sourceWriteId
   pendingTargetKey = key
 
@@ -139,7 +212,8 @@ async function writeSourceQuery(key: string, replace = false) {
 }
 
 onMounted(() => {
-  mounted = true
+  void loadSupplement()
+  mounted.value = true
   if (missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
 })
 
@@ -147,6 +221,9 @@ const activeSourceKey = computed({
   get: () => currentSource.value?.key ?? null,
   set: (key: string | null) => {
     if (key === null) return
+    if (sources.value.some(source => source.key === key && source.origin === 'supplement')) {
+      pickedSupplementKeys.add(key)
+    }
     resetAttempt(key)
     requestedSourceKey.value = key
     selectedSourceKey.value = key
@@ -231,6 +308,38 @@ function handleFrameError() {
   selectedSourceKey.value = nextPlayableKey(sources.value, key)
   chainExhausted = selectedSourceKey.value === null
   if (selectedSourceKey.value !== null) void writeSourceQuery(selectedSourceKey.value, true)
+}
+
+if (import.meta.client) {
+  watch([currentSource, retryGeneration], ([source], _, onCleanup) => {
+    if (source?.origin !== 'supplement') return
+
+    // An iframe load event does not expose cross-origin HTTP status.
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
+    void fetch(source.url, { signal: controller.signal })
+      .then((response) => {
+        void response.body?.cancel().catch(() => {})
+        if (!controller.signal.aborted && currentSource.value?.key === source.key && response.status === 404) {
+          handleFrameError()
+        }
+      })
+      .catch(() => {
+        // Embeds without CORS still use the frame's existing error handling.
+      })
+  })
+}
+
+function handleReloadPlayer() {
+  if (currentSource.value?.origin === 'supplement') {
+    const key = defaultSourceKey.value
+    requestedSourceKey.value = key
+    selectedSourceKey.value = key
+    resetAttempt(key)
+    if (key !== null && isSupplementQuery(route.query.source)) void writeSourceQuery(key, true)
+  }
+  supplement.value = { status: 'idle' }
+  retryGeneration.value += 1
 }
 
 function handleRetryChain() {
@@ -369,7 +478,7 @@ await Promise.all([feed, list])
 if (!detail.value) throw createError({ statusCode: 404, fatal: true })
 
 let pendingSourceQuery = true
-watch([uriName, () => route.query.source, sources], ([uri, query, options], [previousUri, previousQuery]) => {
+watch([uriName, () => route.query.source, sources, mounted], ([uri, query, options], [previousUri, previousQuery]) => {
   if (uri !== previousUri || query !== previousQuery) {
     const internal = uri === previousUri && pendingTargetKey !== null && pendingTargetKey === query
     if (!internal) {
@@ -394,12 +503,26 @@ watch([uriName, () => route.query.source, sources], ([uri, query, options], [pre
         requested = options.find((source) => source.key === key)
       }
     }
+    if (!requested && !mounted.value && isSupplementQuery(query)) {
+      selectedSourceKey.value = defaultSourceKey.value
+      resetAttempt(selectedSourceKey.value)
+      return
+    }
+    if (requested?.origin === 'supplement') pickedSupplementKeys.add(requested.key)
     requestedSourceKey.value = requested?.key ?? null
     selectedSourceKey.value = requestedSourceKey.value ?? defaultSourceKey.value
     resetAttempt(selectedSourceKey.value)
     pendingSourceQuery = false
     missingSourceKey = query !== undefined && !requested ? selectedSourceKey.value : null
-    if (mounted && missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
+    if (mounted.value && missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
+  } else if (chainExhausted && supplement.value.status === 'merged') {
+    const nextKey = options.find(source =>
+      source.origin === 'supplement' && !seenKeys.has(source.key),
+    )?.key
+    if (nextKey) {
+      selectedSourceKey.value = nextKey
+      chainExhausted = false
+    }
   } else if (!chainExhausted && !options.some((source) => source.key === selectedSourceKey.value)) {
     const nextKey = nextPlayableKey(options, selectedSourceKey.value)
     selectedSourceKey.value = nextKey
@@ -522,7 +645,7 @@ watch([uriName, () => route.query.source, sources], ([uri, query, options], [pre
             <button
               type="button"
               class="inline-flex items-center text-fg underline hover:text-accent max-md:min-h-11"
-              @click="retryGeneration += 1"
+              @click="handleReloadPlayer"
             >
               Reload player
             </button>
@@ -637,7 +760,9 @@ watch([uriName, () => route.query.source, sources], ([uri, query, options], [pre
               No working source available
             </p>
             <p class="text-sm text-muted">
-              Every embedded player source in the chain timed out or reported an error.
+              {{ supplement.status === 'merged' && sources.some(source => source.origin === 'supplement' && failedKeys.has(source.key))
+                ? 'The second provider’s players also timed out or reported an error.'
+                : 'Every embedded player source in the chain timed out or reported an error.' }}
             </p>
           </div>
           <div class="flex flex-wrap items-center justify-center gap-3">

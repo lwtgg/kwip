@@ -1,0 +1,20 @@
+{
+  "count": 1,
+  "streams": [
+    {
+      "name": "Miami Heat at Houston Rockets",
+      "category": "basketball",
+      "league": "NBA",
+      "stream_key": "hou-mia",
+      "match_timestamp": 1794875400,
+      "iframe": "https://strmfree.pk/embed/hou-mia",
+      "additional_sources": [
+        { "quality": "SD", "url": "https://strmfree.pk/embed/hou-mia-sd", "live": true },
+        { "quality": "HD", "url": "https://streamfree.top/embed/hou-mia-hd", "live": true },
+        { "quality": "4K", "url": "https://strmfree.st/embed/hou-mia-4k", "live": false },
+        { "quality": "FHD", "url": "https://strmfree.st/embed/hou-mia-fhd", "live": true }
+      ],
+      "viewers": 10
+    }
+  ]
+}

@@ -1,5 +1,8 @@
 import { sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
-import type { FeedStreamDetail, FeedSourceKind } from './useFeed'
+import type { SupplementSource } from '~/utils/strmfree'
+import type { FeedStreamSource, FeedSourceKind } from './useFeed'
+
+type PlayerSource = FeedStreamSource | SupplementSource
 
 export interface SourceOption {
   label: string
@@ -7,10 +10,12 @@ export interface SourceOption {
   kind: FeedSourceKind
   host: string
   key: string
+  origin?: SupplementSource['origin']
+  live?: boolean
 }
 
-export function usePlayerSources(stream: Pick<FeedStreamDetail, 'sources'>): SourceOption[] {
-  const uniqueSources = new Map<string, FeedStreamDetail['sources'][number]>()
+export function usePlayerSources(stream: { sources: PlayerSource[] }): SourceOption[] {
+  const uniqueSources = new Map<string, PlayerSource>()
 
   for (const source of stream.sources) {
     if (!source.data) continue
@@ -24,6 +29,7 @@ export function usePlayerSources(stream: Pick<FeedStreamDetail, 'sources'>): Sou
     kind: source.type,
     host: sourceHost(source.data),
     key,
+    ...('origin' in source ? { origin: source.origin, live: source.live } : {}),
   }))
 
   const labels = options.map(({ label }) => label.toLowerCase())
