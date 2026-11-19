@@ -60,16 +60,18 @@ To force a run, open **Actions → Feed refresh → Run workflow**, select
 result. A `paused` result means the provider blocked the runner and a
 person needs to investigate before resuming publication.
 
-The workflow opens or updates one GitHub issue labeled `feed-refresh` when
-publication fails or pauses, or when the manifest's last list verification
-is more than 45 minutes old before publication. A later run that publishes
-or verifies unchanged lists closes the issue if its pre-publish check finds
-no stale manifest. A run can report staleness even if it publishes successfully.
+The workflow opens or updates one live GitHub issue labeled `feed-refresh`
+when publication fails or pauses, or when the pre-publication manifest is
+missing or its last list verification is more than 45 minutes old. Recovery
+requires a fresh precheck and an outcome of `published` or `unchanged`.
+A separate completion-triggered workflow reports cancelled live runs on
+`main`, including pending runs GitHub replaces before they start.
 
 To exercise the issue lifecycle without publishing, dispatch `failed`, `paused`
 and `stale` in order using the `simulate` input. Then dispatch `simulate=none`
-with `simulate_recovery` enabled to close the simulated issue. These runs use
-the same label as live alerts and leave an open live incident untouched.
+with `simulate_recovery` enabled. The rehearsal uses its own marked issue
+with the `feed-refresh` label. Only explicit simulated recovery closes it.
+Live runs and rehearsals can each have one open issue.
 
 GitHub disables scheduled workflows in public repositories after 60 days
 without repository activity. A commit that changes the workflow's cron schedule

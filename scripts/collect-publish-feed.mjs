@@ -366,6 +366,10 @@ async function publish(result, deadline) {
     'retry-after': { type: 'string' },
   } })
   const { bucket, 'dry-run': dryRun, 'provider-status': providerStatus, 'retry-after': retryAfter } = values
+  if (values['check-freshness'] && (dryRun || providerStatus !== undefined || retryAfter !== undefined)) {
+    throw new Error('--check-freshness cannot be combined with --dry-run, --provider-status or --retry-after')
+  }
+  if (values['check-freshness']) delete result.commitId
   if (!buckets.includes(bucket)) throw new Error('Unknown snapshot bucket')
   if (providerStatus !== undefined && !['429', 'blocked'].includes(providerStatus)) throw new Error('Invalid provider status')
   if (retryAfter !== undefined && providerStatus !== '429') throw new Error('--retry-after requires --provider-status 429')
@@ -376,7 +380,6 @@ async function publish(result, deadline) {
   if (values['check-freshness']) {
     if (!r2) throw new Error('Missing R2 credentials for freshness check')
     const current = parseObject(await r2.get(manifestKey))
-    delete result.commitId
     if (!current) return 'missing'
     validateManifest(current)
     result.commitId = current.commitId

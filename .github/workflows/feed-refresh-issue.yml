@@ -1,0 +1,160 @@
+name: Feed refresh issue
+
+on:
+  workflow_call:
+    inputs:
+      refresh_result:
+        type: string
+        required: true
+      simulated:
+        type: boolean
+        default: false
+      simulation_recovery:
+        type: boolean
+        default: false
+      freshness:
+        type: string
+        default: '{}'
+      publication:
+        type: string
+        default: '{}'
+      stages:
+        type: string
+        default: '{}'
+  workflow_run:
+    workflows: [Feed refresh]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  issue:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'cancelled' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.display_title == 'Feed refresh (live)')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: feed-refresh-issue
+      queue: max
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || github.run_id }}
+      REFRESH_RESULT: ${{ github.event_name == 'workflow_run' && 'cancelled' || inputs.refresh_result }}
+      SIMULATED: ${{ inputs.simulated }}
+      SIMULATION_RECOVERY: ${{ inputs.simulation_recovery }}
+      FRESHNESS: ${{ inputs.freshness || '{}' }}
+      PUBLICATION: ${{ inputs.publication || '{}' }}
+      STAGES: ${{ inputs.stages || '{}' }}
+    steps:
+      - name: Update feed refresh issue
+        shell: bash
+        run: |
+          outcome=$(jq -r '.outcome // empty' <<< "$PUBLICATION")
+          commit=$(jq -r '.commitId // empty' <<< "$PUBLICATION")
+          freshness=$(jq -r '.outcome // empty' <<< "$FRESHNESS")
+          provider_status=$(jq -r '.providerStatus // empty' <<< "$PUBLICATION")
+          failures=$(jq -r '
+            to_entries[] | select(.value == "failure") | .key |
+            if . == "checkout" then "Checkout failed. Check repository access."
+            elif . == "node" then "Node setup failed. Check the runner and Node download."
+            elif . == "pnpm" then "pnpm setup failed. Check the runner and pnpm download."
+            elif . == "install" then "Dependency installation failed. Check the lockfile and registry access."
+            elif . == "freshness" then "Manifest age check failed. Check R2 access and manifest validity."
+            elif . == "publish" then "Publisher exited unsuccessfully. Check the publisher run log."
+            else empty end' <<< "$STAGES")
+
+          title=
+          incident=
+          action='Inspect the run and resolve the refresh failure.'
+          case "$freshness" in
+            stale)
+              incident=stale
+              title='Feed has stopped advancing'
+              action='Check the refresh run and restore successful feed verification.' ;;
+            missing)
+              incident=missing
+              title='Feed has stopped advancing'
+              action='Check the production R2 bucket and restore publication of current.json.' ;;
+          esac
+          if [[ "$REFRESH_RESULT" == cancelled ]]; then
+            incident=cancelled
+            title='Feed refresh is failing'
+            action='Check the run history for a cancellation or a newer queued refresh.'
+          elif [[ -z "$incident" && "$REFRESH_RESULT" == failure ]]; then
+            incident=failed
+            title='Feed refresh is failing'
+            if [[ "$outcome" == paused ]]; then incident=paused; fi
+            if [[ -z "$failures" ]]; then
+              if [[ "$SIMULATED" == true ]]; then
+                failures='Publisher failure was simulated.'
+              else
+                failures='The refresh job failed before recording a step failure.'
+              fi
+            fi
+          fi
+          if [[ "$outcome" == paused ]]; then
+            action='The provider blocked the runner. A person must investigate before resuming publication.'
+          elif [[ "$provider_status" == 403 || "$provider_status" == 451 ]]; then
+            action='The provider blocked the runner. Disable the workflow and cancel pending runs while a person investigates.'
+          fi
+
+          if [[ -z "$incident" ]]; then
+            if [[ "$freshness" != fresh || ( "$outcome" != published && "$outcome" != unchanged ) || -z "$commit" ]]; then
+              exit 0
+            fi
+            if [[ "$SIMULATED" == true && "$SIMULATION_RECOVERY" != true ]]; then exit 0; fi
+          fi
+
+          marker='**Simulated incident**'
+          issues=$(gh api --paginate --slurp --method GET "repos/$GH_REPO/issues" -f state=open -f labels=feed-refresh -F per_page=100)
+          issue=$(jq -r --arg marker "$marker" --arg simulated "$SIMULATED" '
+            [ .[][] | select(has("pull_request") | not) |
+              select(((.body // "") | startswith($marker)) == ($simulated == "true")) |
+              .number ] | first // empty' <<< "$issues")
+
+          if [[ -z "$incident" ]]; then
+            if [[ -n "$issue" ]]; then
+              prefix=
+              if [[ "$SIMULATED" == true ]]; then prefix='Simulated recovery. '; fi
+              gh issue close "$issue" --comment "${prefix}Feed refresh recovered at commit \`$commit\`. $RUN_URL"
+            fi
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/feed-issue.md"
+          {
+            if [[ "$SIMULATED" == true ]]; then printf '%s\n\n' "$marker"; fi
+            printf 'Incident: %s\n\nPublisher outcome: %s\n\n' "$incident" "${outcome:-not reported}"
+            if [[ -n "$failures" ]]; then printf '%s\n\n' "$failures"; fi
+            if [[ -n "$commit" ]]; then printf "Publisher commit: \`%s\`\n\n" "$commit"; fi
+            jq -r 'if .providerStatus then "Provider status: \(.providerStatus)\n" else empty end,
+                   if .retryAfter then "Retry-After: \(.retryAfter)\n" else empty end' <<< "$PUBLICATION"
+            if [[ "$freshness" == stale ]]; then
+              age=$(jq -r '.listsVerifiedAtAgeMs' <<< "$FRESHNESS")
+              manifest_commit=$(jq -r '.commitId // empty' <<< "$FRESHNESS")
+              printf 'The manifest listsVerifiedAt was %s seconds old before publication.\n\n' "$((age / 1000))"
+              if [[ -n "$manifest_commit" ]]; then printf "Manifest commit: \`%s\`\n\n" "$manifest_commit"; fi
+            elif [[ "$freshness" == missing ]]; then
+              printf 'Production R2 did not contain current.json before publication.\n\n'
+            fi
+            printf 'Run: %s\n\n%s\n' "$RUN_URL" "$action"
+          } > "$body"
+
+          if [[ -n "$issue" ]]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/$issue" -f title="$title" -F body="@$body" --silent
+            gh issue comment "$issue" --body-file "$body"
+          else
+            label=$(gh label list --search feed-refresh --json name --jq '.[] | select(.name == "feed-refresh").name')
+            if [[ -z "$label" ]]; then
+              gh label create feed-refresh --description 'Feed refresh incidents' --color B60205
+            fi
+            gh issue create --title "$title" --label feed-refresh --body-file "$body"
+          fi
