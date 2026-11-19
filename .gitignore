@@ -26,5 +26,8 @@ logs
 # Wrangler
 .wrangler
 
+# Local R2 credentials
+.r2-credentials.json
+
 # Build-time feed snapshot
 public/feed-cache/
