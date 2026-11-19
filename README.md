@@ -67,7 +67,9 @@ requires a fresh precheck and an outcome of `published` or `unchanged`.
 A separate completion-triggered workflow reports cancelled live runs on
 `main`, including pending runs GitHub replaces before they start. It checks the
 run history under the issue update lock and drops a delayed cancellation
-when a newer live run has already recorded confirmed recovery.
+when a later live attempt has already recorded confirmed recovery, including
+a rerun of an older run. If the lookup fails after retries, the cancellation
+still alerts and the issue marks the lookup as inconclusive.
 
 To exercise the issue lifecycle without publishing, dispatch `failed`, `paused`
 and `stale` in order using the `simulate` input. Then dispatch `simulate=none`
