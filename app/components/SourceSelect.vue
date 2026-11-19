@@ -86,13 +86,17 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           :aria-pressed="source.key === modelValue"
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
           class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
-          :class="source.key === modelValue ? 'border-accent bg-accent-strong text-accent-strong-fg' : ['border-border bg-surface-2 hover:border-accent', source.live === false ? 'text-muted' : 'text-fg']"
+          :class="[
+            source.key === modelValue ? 'border-accent' : 'border-border hover:border-accent',
+            source.live === false ? 'bg-surface-2 text-muted'
+              : source.key === modelValue ? 'bg-accent-strong text-accent-strong-fg' : 'bg-surface-2 text-fg',
+          ]"
           @click="emit('update:modelValue', source.key)"
           @keydown="onChipKeydown($event, index)"
         >
           <span class="min-w-0 wrap-anywhere">
             {{ source.label }}
-            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs" :class="source.key === modelValue ? 'text-accent-strong-fg' : 'text-muted'">
+            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs" :class="source.key === modelValue && source.live !== false ? 'text-accent-strong-fg' : 'text-muted'">
               {{ source.host }}
             </span>
             <span v-if="source.host" :id="`${id}-host-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>

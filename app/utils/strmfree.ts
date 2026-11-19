@@ -30,9 +30,11 @@ const qualities = ['4K', 'FHD', 'HD', 'SD']
 
 function teams(name: string): string[] {
   return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, '')
-    .split(/\s+(?:vs|at|v)\s+/)
-    .map(team => team.replace(/\b(?:fc|afc|cf|sc)\b/g, '').trim().replace(/\s+/g, ' '))
+    .split(/(?<![\p{L}\p{N}])(?:vs|v|at)(?![\p{L}\p{N}])/u)
+    .map(team => team.trim().split(/\s+/)
+      .map(token => token.replace(/[^\p{L}\p{N}]/gu, ''))
+      .filter(token => token && !/^(?:fc|afc|cf|sc)$/.test(token))
+      .join(' '))
     .sort()
 }
 
@@ -47,6 +49,24 @@ function allowedUrl(url: string): boolean {
   } catch {
     return false
   }
+}
+
+export function isCachedSupplement(value: unknown, now: number): value is {
+  status: 'merged'
+  fetchedAt: number
+  sources: SupplementSource[]
+} {
+  if (typeof value !== 'object' || value === null) return false
+  const { status, fetchedAt, sources } = value as Record<string, unknown>
+  return status === 'merged' && typeof fetchedAt === 'number' && Number.isSafeInteger(fetchedAt)
+    && fetchedAt > 0 && fetchedAt <= now && now - fetchedAt < 600_000
+    && Array.isArray(sources) && sources.every((source) =>
+      source !== null && typeof source === 'object' && !Array.isArray(source)
+      && typeof source.data === 'string' && allowedUrl(source.data)
+      && source.origin === 'supplement' && source.type === 'iframe' && source.default === false
+      && source.name === '' && source.substreamName === '' && typeof source.live === 'boolean'
+      && (source.sourceTag === undefined || typeof source.sourceTag === 'string'),
+    )
 }
 
 export function matchSupplement(

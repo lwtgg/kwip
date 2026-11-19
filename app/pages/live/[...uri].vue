@@ -4,7 +4,7 @@ import { useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
-import { isSupplementHost, matchSupplement, type SupplementSource } from '~/utils/strmfree'
+import { isCachedSupplement, isSupplementHost, matchSupplement, type SupplementSource } from '~/utils/strmfree'
 import { formatViewersExact } from '~/utils/viewers'
 
 const route = useRoute()
@@ -98,21 +98,20 @@ const sources = computed(() => usePlayerSources({
 async function loadSupplement() {
   const event = detail.value
   const now = Date.now()
-  if (supplement.value.status !== 'idle' || !event || event.always_live === 1
+  if (supplement.value.status !== 'idle' || isSupplementQuery(route.query.source)
+    || !event || event.always_live === 1
     || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
 
   const storageKey = `supplement:${uriName.value}`
   try {
     const cached = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null')
-    if (cached?.status === 'merged' && Array.isArray(cached.sources)
-      && cached.fetchedAt <= now && now - cached.fetchedAt < 600_000) {
+    if (isCachedSupplement(cached, now)) {
       supplement.value = cached
       return
     }
   } catch {
     // Storage may be unavailable in this browser.
   }
-  if (isSupplementQuery(route.query.source)) return
 
   const loading = { status: 'loading' } as const
   const slug = categorySlug.value
@@ -308,26 +307,6 @@ function handleFrameError() {
   selectedSourceKey.value = nextPlayableKey(sources.value, key)
   chainExhausted = selectedSourceKey.value === null
   if (selectedSourceKey.value !== null) void writeSourceQuery(selectedSourceKey.value, true)
-}
-
-if (import.meta.client) {
-  watch([currentSource, retryGeneration], ([source], _, onCleanup) => {
-    if (source?.origin !== 'supplement') return
-
-    // An iframe load event does not expose cross-origin HTTP status.
-    const controller = new AbortController()
-    onCleanup(() => controller.abort())
-    void fetch(source.url, { signal: controller.signal })
-      .then((response) => {
-        void response.body?.cancel().catch(() => {})
-        if (!controller.signal.aborted && currentSource.value?.key === source.key && response.status === 404) {
-          handleFrameError()
-        }
-      })
-      .catch(() => {
-        // Embeds without CORS still use the frame's existing error handling.
-      })
-  })
 }
 
 function handleReloadPlayer() {
