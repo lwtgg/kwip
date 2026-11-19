@@ -2,11 +2,11 @@
 
 Ordered by what unblocks what. Not a commitment; a queue.
 
-## 1. Freshness (designing now)
+## 1. Freshness (live)
 
 The Worker cannot reach the provider, so the directory only refreshes on deploy. Every other improvement is polish on stale data until this is solved. Target: listings and detail pages that are at most a few minutes old, without a human deploying.
 
-The [freshness design](docs/freshness-design.md) recommends a five-minute GitHub Actions pilot that publishes complete feed snapshots to private Cloudflare R2 independently of Worker deploys. The Worker keeps the bundled snapshot as a fallback and the browser continues to refresh directly. The pilot depends on approved provider access and sufficient runner minutes, with an independent alert for missed refreshes.
+**Shipped.** The [freshness design](docs/freshness-design.md) recommended a five-minute GitHub Actions pilot that publishes complete feed snapshots to private Cloudflare R2 independently of Worker deploys. The Worker keeps the bundled snapshot as a fallback and the browser continues to refresh directly. The pilot is running from GitHub Actions every 15 minutes against the production bucket, with the Worker serving the newest generation and an edge cache keyed to it. Still owed: an independent alert for a missed or `paused` refresh, and a provider answer on the permitted interval.
 
 ## 2. Sourcing
 
