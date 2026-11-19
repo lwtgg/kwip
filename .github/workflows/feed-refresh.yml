@@ -96,15 +96,6 @@ jobs:
             fi
           fi
 
-      - name: Record confirmed live recovery
-        if: >-
-          success() &&
-          fromJSON(steps.freshness.outputs.result || '{}').outcome == 'fresh' &&
-          (fromJSON(steps.publication.outputs.result || '{}').outcome == 'published' ||
-           fromJSON(steps.publication.outputs.result || '{}').outcome == 'unchanged') &&
-          fromJSON(steps.publication.outputs.result || '{}').commitId != ''
-        run: echo 'Confirmed a fresh manifest precheck and successful publication or verification.'
-
   simulation:
     if: (inputs.simulate != '' && inputs.simulate != 'none') || inputs.simulate_recovery
     runs-on: ubuntu-latest

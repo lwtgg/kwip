@@ -55,18 +55,24 @@ jobs:
       PUBLICATION: ${{ inputs.publication || '{}' }}
       STAGES: ${{ inputs.stages || '{}' }}
     steps:
-      - name: Check for a newer live recovery
-        id: newer_recovery
-        if: github.event_name == 'workflow_run'
-        continue-on-error: true
+      - name: Read or record live recovery
+        id: recovery_record
+        if: github.event_name == 'workflow_run' || (!inputs.simulated && inputs.refresh_result == 'success')
+        continue-on-error: ${{ github.event_name == 'workflow_run' }}
         shell: bash
         env:
-          SOURCE_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-          SOURCE_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          SOURCE_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
-          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || github.run_id }}
+          RUN_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || github.run_attempt }}
+          CANCELLED_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
         run: |
+          if [[ "$REFRESH_RESULT" != cancelled ]]; then
+            if ! jq -e '.outcome == "fresh"' <<< "$FRESHNESS" > /dev/null ||
+               ! jq -e '(.outcome == "published" or .outcome == "unchanged") and
+                        (.commitId | type == "string" and length > 0)' <<< "$PUBLICATION" > /dev/null; then
+              exit 0
+            fi
+          fi
+
           deadline=$((SECONDS + 60))
           read_api() {
             local try remaining response
@@ -83,43 +89,60 @@ jobs:
             return 1
           }
 
-          if [[ -n "$SOURCE_STARTED_AT" ]]; then
-            source_time=$(jq -ne --arg started "$SOURCE_STARTED_AT" '$started | fromdateiso8601')
-          else
-            source_time=$(read_api "repos/$GH_REPO/actions/runs/$SOURCE_RUN_ID/attempts/$SOURCE_ATTEMPT" |
-              jq -e --argjson attempt "$SOURCE_ATTEMPT" 'select(.run_attempt == $attempt) | .run_started_at | fromdateiso8601')
+          marker_label=feed-refresh-recovery
+          issues_api="repos/$GH_REPO/issues"
+          # One bounded request returns the singleton record and detects duplicates.
+          marker=$(read_api "$issues_api" -f state=all -f labels="$marker_label" -F per_page=2 |
+            jq -ce 'map(select(has("pull_request") | not)) |
+              if length > 1 then error("Multiple recovery records")
+              else first // {} end')
+          marker_number=$(jq -r '.number // empty' <<< "$marker")
+          recovery_time=0
+          if [[ -n "$marker_number" ]]; then
+            recovery_time=$(jq -e '.body | fromjson |
+              select(.version == 1) | .startedAt | fromdateiso8601' <<< "$marker")
+          elif [[ "$REFRESH_RESULT" == cancelled ]]; then
+            exit 0
           fi
-          # A rerun can update any run, regardless of when the run was created.
-          # Use update time only to shortlist runs. Compare exact attempt start times below.
-          candidates=$(read_api --paginate --slurp \
-            "repos/$GH_REPO/actions/workflows/$SOURCE_WORKFLOW_ID/runs" -F per_page=100 |
-            jq -r --arg repo "$GH_REPO" --arg branch "$SOURCE_BRANCH" --argjson source "$source_time" '
-              .[].workflow_runs[] |
-              select(.head_branch == $branch and .display_title == "Feed refresh (live)" and
-                .head_repository.full_name == $repo and (.updated_at | fromdateiso8601) >= $source) | .id')
-          while IFS= read -r candidate; do
-            if [[ -z "$candidate" ]]; then continue; fi
-            attempts=$(read_api --paginate --slurp \
-              "repos/$GH_REPO/actions/runs/$candidate/jobs" -f filter=all -F per_page=100 |
-              jq -r '[.[].jobs[] | select(.name == "refresh" and
-                any(.steps[]?; .name == "Record confirmed live recovery" and .conclusion == "success")) |
-                (.run_attempt // error("Missing recovery run attempt"))] | unique[]')
-            while IFS= read -r attempt; do
-              if [[ -z "$attempt" ]]; then continue; fi
-              recovery_time=$(read_api "repos/$GH_REPO/actions/runs/$candidate/attempts/$attempt" |
-                jq -e --argjson attempt "$attempt" 'select(.run_attempt == $attempt) | .run_started_at | fromdateiso8601')
-              if (( recovery_time > source_time )); then
-                echo "Dropping cancellation alert because run $candidate attempt $attempt confirmed recovery."
-                echo 'superseded=true' >> "$GITHUB_OUTPUT"
-                exit 0
+
+          started_at=$CANCELLED_STARTED_AT
+          if [[ -z "$started_at" ]]; then
+            started_at=$(read_api "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT" |
+              jq -er --argjson attempt "$RUN_ATTEMPT" 'select(.run_attempt == $attempt) | .run_started_at')
+          fi
+          source_time=$(jq -ne --arg started "$started_at" '$started | fromdateiso8601')
+
+          if [[ "$REFRESH_RESULT" == cancelled ]]; then
+            if (( recovery_time > source_time )); then
+              echo "Dropping cancellation alert because recovery record #$marker_number is newer."
+              echo 'superseded=true' >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          # Record proof before closing a live incident. Preserve the newest attempt across reruns.
+          if (( source_time > recovery_time )); then
+            body=$(jq -cn --arg startedAt "$started_at" --arg url "$RUN_URL" --argjson attempt "$RUN_ATTEMPT" \
+              '{version: 1, $startedAt, $url, $attempt}')
+            if [[ -n "$marker_number" ]]; then
+              gh api --method PATCH "$issues_api/$marker_number" -f body="$body" -f state=closed --silent
+            else
+              label=$(gh label list --search "$marker_label" --json name --jq '.[] | select(.name == "feed-refresh-recovery").name')
+              if [[ -z "$label" ]]; then
+                gh label create "$marker_label" --description 'Internal feed refresh recovery record' --color EDEDED
               fi
-            done <<< "$attempts"
-          done <<< "$candidates"
+              marker_number=$(gh api --method POST "$issues_api" -f title='Feed refresh recovery record' \
+                -f body="$body" -F "labels[]=$marker_label" --jq .number)
+              gh api --method PATCH "$issues_api/$marker_number" -f state=closed --silent
+            fi
+          elif [[ "$(jq -r .state <<< "$marker")" == open ]]; then
+            gh api --method PATCH "$issues_api/$marker_number" -f state=closed --silent
+          fi
 
       - name: Update feed refresh issue
-        if: steps.newer_recovery.outputs.superseded != 'true'
+        if: steps.recovery_record.outputs.superseded != 'true'
         env:
-          RECOVERY_LOOKUP: ${{ steps.newer_recovery.outcome }}
+          RECOVERY_LOOKUP: ${{ steps.recovery_record.outcome }}
         shell: bash
         run: |
           outcome=$(jq -r '.outcome // empty' <<< "$PUBLICATION")
