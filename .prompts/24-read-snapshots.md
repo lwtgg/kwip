@@ -30,7 +30,13 @@ Do not change `app/composables/useFeedFreshness.ts`. It keeps the origin timesta
 
 ## Budget
 
-Free CPU is 10 ms. Range reads cut I/O but parsing, validation and substitution all stay on that budget. Measure, on a preview Worker with cold reads: CPU for the largest listing, the largest detail and the sitemap, with p50 and p95 over at least 20 samples each. Print the numbers and the bundle delta. Require headroom under 10 ms on all three; if a path breaches it, say so and stop rather than shipping.
+Free CPU is 10 ms. Range reads cut I/O but parsing, validation and substitution all stay on that budget.
+
+Local `wrangler dev` CPU cannot be converted to deployed CPU, so **the gate is deployed evidence only**. Upload a preview version with `wrangler versions upload` and hit each route at least 20 times cold, capturing the platform's own `cpuTime` and `outcome` from `wrangler tail --format json`, including failed invocations. Report p50, p95, max and the bundle delta per route. A 1102 / `exceededCpu` counts as a breach.
+
+Required first, before measuring: an isolate-scoped cache of the parsed manifest keyed by ETag, and of validated payloads keyed by payload key plus range, so a repeated publication reuses the parse instead of redoing it. Keep request-bound R2 objects out of the cache. Trim hydration payloads and skip recursive host substitution when the payload carries no host token.
+
+If the listing still breaches after those, report the numbers and stop rather than shipping.
 
 ## Rules
 
