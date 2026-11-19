@@ -55,7 +55,9 @@ Dedupe runs after the append, so one URL listed by both providers collapses to o
 - Do not touch `useFeedFreshness.ts`, `PlayerFrame.vue`, `server/**`, `nuxt.config.ts`.
 - Tokens only. The `2nd` marker must not shift chip height at `sm` and below.
 
-Stop condition: `pnpm build`, `pnpm test`, `wrangler deploy --dry-run` pass. With the fixture: a match appends in quality order with `2nd` markers, a non-match leaves the picker unchanged, a 500 from the API is `error` and silent, a second mount inside 10 minutes does not refetch, `sessionStorage` holds one entry per event and none on `none`/`error`, the failover chain includes supplements, 390 px has no overflow, and a supplement that 404s during failover advances to the next source. Reply with files, outcomes and what you checked.
+Stop condition: `pnpm build`, `pnpm test`, `wrangler deploy --dry-run` pass. With the fixture: a match appends in quality order with `2nd` markers, a non-match leaves the picker unchanged, a 500 from the API is `error` and silent, a second mount inside 10 minutes does not refetch, `sessionStorage` holds one entry per event and none on `none`/`error`, the failover chain includes supplements, 390 px has no overflow, and a supplement that fails to load advances to the next source.
+
+Known limit, do not try to solve it in this task: a cross-origin iframe that returns a 404 *document* fires `load`, so the frame heuristic counts it as success. Without a `postMessage` from the host, a readable 404 is not detectable. Record that in the commit message and rely on the load timeout plus the "Not playing?" row.
 
 ## Commit note
 
