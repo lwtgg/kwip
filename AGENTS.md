@@ -6,15 +6,22 @@ Read `CONTRACT.md` (who may edit what), `DECISIONS.md` (binding rules), and `DES
 
 ## Skills
 
-`.agents/skills/` holds third-party and project skills; `.opencode/skill/` symlinks to the same folders. Load the ones that match the task:
+`.agents/skills/` holds third-party and project skills; `.opencode/skill/` symlinks to the same folders. Codex does not discover them on its own. **Before starting, open the `SKILL.md` files your task matches — this is mandatory, not optional.**
 
-- writing-plans, requesting-code-review, verification-before-completion — brief, review and completion discipline
-- webapp-testing — Playwright/browser verification
-- frontend-design, frontend-design-review, web-design-guidelines — visual and accessibility review
-- tailwind-best-practices — token use and class hygiene
-- nuxt-seo — canonical, robots, structured data
-- workers-best-practices, web-perf — the deploy target and its budgets
-- kwip-conventions, kwip-budgets — this project's own rules. Load both for any UI or deploy task.
+| If your task is | Read first |
+|---|---|
+| any UI, markup, CSS or component work | `kwip-conventions`, `tailwind-best-practices` |
+| reviewing UI, design or accessibility | `web-design-guidelines`, `frontend-design-review`, `kwip-conventions` |
+| a brief, spec or plan | `writing-plans` |
+| reviewing a diff | `requesting-code-review`, `verification-before-completion` |
+| about to claim something is done or shipped | `verification-before-completion` |
+| adding a dependency, route, image or version bump | `kwip-budgets`, `workers-best-practices` |
+| user-facing copy, meta, canonical, robots, sitemap | `nuxt-seo`, `kwip-conventions` |
+| verifying in a browser | `webapp-testing` |
+| performance, CWV or bundle work | `web-perf`, `kwip-budgets` |
+| new or changed UI direction | `frontend-design` |
+
+Two or more rows apply: read all of them. Say which you read at the top of your reply.
 
 ## Non-negotiables
 

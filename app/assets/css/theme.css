@@ -9,6 +9,8 @@
   --color-muted: #9aa3b5;
   --color-accent: #4f8cff;
   --color-accent-fg: #ffffff;
+  --color-accent-strong: #245bd1;
+  --color-accent-strong-fg: #ffffff;
   --color-live: #ef4444;
   --radius: 0.75rem;
   --radius-card: var(--radius);
@@ -40,6 +42,8 @@
   --color-muted: #4a5266;
   --color-accent: #1f5fd6;
   --color-accent-fg: #ffffff;
+  --color-accent-strong: #194ba8;
+  --color-accent-strong-fg: #ffffff;
   --color-live: #c81e1e;
   --focus-ring: var(--color-accent);
 }

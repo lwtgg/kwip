@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
 import { useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
-import { usePlayerSources } from '~/composables/usePlayerSources'
+import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
+import { sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { formatViewersExact } from '~/utils/viewers'
 
@@ -81,14 +82,24 @@ const pageHeading = computed(
 
 const sources = computed(() => detail.value ? usePlayerSources(detail.value) : [])
 
-const defaultSourceIndex = computed(() => {
-  const nonEmptyPrimary = (detail.value?.sources ?? []).filter((s) => s.data)
-  const idx = nonEmptyPrimary.findIndex((s) => s.default)
-  return idx >= 0 ? idx : 0
+const feedSources = computed(() => (detail.value?.sources ?? []).filter((source) => source.data))
+
+const defaultSourceKey = computed(() => {
+  const preferred = feedSources.value.find((source) => source.default)
+  return preferred ? sourceKey(preferred.data) : sources.value[0]?.key ?? null
 })
 
-const selectedSourceIndex = ref<number | null>(null)
-const lastFailedIndex = ref(-1)
+const selectedSourceKey = ref<string | null>(null)
+let chainExhausted = false
+const requestedSourceKey = ref<string | null>(null)
+const anchorKey = ref<string | null>(null)
+const failedKeys = new Set<string>()
+const seenKeys = new Set<string>()
+const beforeKeys = new Set<string>()
+let sourceWriteId = 0
+let pendingTargetKey: string | null = null
+let mounted = false
+let missingSourceKey: string | null = null
 const retryGeneration = ref(0)
 const playerWrapper = ref<HTMLElement | null>(null)
 const playerHelpOpen = ref(false)
@@ -96,8 +107,7 @@ const posterLoaded = ref(false)
 const posterError = ref(false)
 
 watch(uriName, () => {
-  selectedSourceIndex.value = null
-  lastFailedIndex.value = -1
+  resetAttempt(null)
   retryGeneration.value = 0
   playerHelpOpen.value = false
   posterLoaded.value = false
@@ -112,38 +122,46 @@ watch(
   },
 )
 
-const requestedSourceIndex = computed(() => {
-  const raw = route.query.source
-  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) return null
-  const index = Number(raw)
-  return index < sources.value.length ? index : null
+const currentSource = computed(() =>
+  sources.value.find((source) => source.key === selectedSourceKey.value) ?? null,
+)
+
+async function writeSourceQuery(key: string, replace = false) {
+  const writeId = ++sourceWriteId
+  pendingTargetKey = key
+
+  try {
+    await router.push({ query: { ...route.query, source: key }, replace })
+    await nextTick()
+  } finally {
+    if (writeId === sourceWriteId) pendingTargetKey = null
+  }
+}
+
+onMounted(() => {
+  mounted = true
+  if (missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
 })
 
-watch(() => route.query.source, () => {
-  selectedSourceIndex.value = null
-})
-
-const activeSourceIndex = computed({
-  get: () => selectedSourceIndex.value ?? requestedSourceIndex.value ?? defaultSourceIndex.value,
-  set: (next: number) => {
-    selectedSourceIndex.value = next
-    void router.push({ query: { ...route.query, source: String(next) } })
+const activeSourceKey = computed({
+  get: () => currentSource.value?.key ?? null,
+  set: (key: string | null) => {
+    if (key === null) return
+    resetAttempt(key)
+    requestedSourceKey.value = key
+    selectedSourceKey.value = key
+    void writeSourceQuery(key)
   },
 })
-
-const chainExhausted = computed(
-  () => sources.value.length === 0 || activeSourceIndex.value >= sources.value.length,
-)
-
-const currentSource = computed(() =>
-  !chainExhausted.value ? sources.value[activeSourceIndex.value] ?? null : null,
-)
 
 const { isShielded, toggleShield } = usePlayerShield()
 const shieldSourceKey = computed(() => {
   const source = currentSource.value
   if (!source || source.kind === 'link') return null
-  return JSON.stringify([uriName.value, source.label.trim().toLowerCase(), activeSourceIndex.value])
+  // Keep stored preferences keyed to the original feed name and position.
+  const feedIndex = feedSources.value.findIndex((entry) => entry.data === source.url)
+  const feedSource = feedSources.value[feedIndex]
+  return feedSource ? JSON.stringify([uriName.value, feedSource.name.trim().toLowerCase(), feedIndex]) : null
 })
 const shieldEnabled = computed(() => shieldSourceKey.value !== null && isShielded(shieldSourceKey.value))
 
@@ -176,27 +194,54 @@ async function enterFullscreen() {
   }
 }
 
-const firstRemainingLink = computed<SelectableSourceOption | null>(() => {
-  return (
-    sources.value.find((s, idx) => idx > lastFailedIndex.value && s.kind === 'link') ??
-    sources.value.find((s) => s.kind === 'link') ??
-    null
-  )
-})
+const firstRemainingLink = computed<SelectableSourceOption | null>(() =>
+  sources.value.find((source) => source.kind === 'link') ?? null,
+)
 
-// Review #8: advance linearly in chain order without skipping `link` entries and without wrapping to earlier iframes.
+function setAttemptAnchor(key: string | null) {
+  anchorKey.value = key
+  beforeKeys.clear()
+  const anchorAt = sources.value.findIndex((source) => source.key === anchorKey.value)
+  if (anchorAt < 0) return
+
+  for (const source of sources.value.slice(0, anchorAt)) beforeKeys.add(source.key)
+}
+
+function resetAttempt(key: string | null) {
+  chainExhausted = false
+  setAttemptAnchor(key)
+  failedKeys.clear()
+  seenKeys.clear()
+  for (const source of sources.value) seenKeys.add(source.key)
+}
+
+function nextPlayableKey(options: SourceOption[], activeKey: string | null): string | null {
+  const activeAt = options.findIndex((source) => source.key === activeKey)
+  return options.find((source, index) =>
+    index > activeAt && !failedKeys.has(source.key)
+    && (!seenKeys.has(source.key) || !beforeKeys.has(source.key)),
+  )?.key ?? null
+}
+
 function handleFrameError() {
-  const failedAt = activeSourceIndex.value
-  lastFailedIndex.value = failedAt
-  selectedSourceIndex.value = failedAt + 1
+  const key = currentSource.value?.key
+  if (key === undefined) return
+
+  failedKeys.add(key)
+  selectedSourceKey.value = nextPlayableKey(sources.value, key)
+  chainExhausted = selectedSourceKey.value === null
+  if (selectedSourceKey.value !== null) void writeSourceQuery(selectedSourceKey.value, true)
 }
 
 function handleRetryChain() {
   if (sources.value.length === 0) {
     refreshStream()
   }
-  lastFailedIndex.value = -1
-  selectedSourceIndex.value = null
+  const key = sources.value.find((source) => source.key === requestedSourceKey.value)?.key
+    ?? defaultSourceKey.value
+  resetAttempt(key)
+  selectedSourceKey.value = key
+  if (key !== null) void writeSourceQuery(key, true)
   retryGeneration.value += 1
 }
 
@@ -322,6 +367,49 @@ useHead({
 })
 await Promise.all([feed, list])
 if (!detail.value) throw createError({ statusCode: 404, fatal: true })
+
+let pendingSourceQuery = true
+watch([uriName, () => route.query.source, sources], ([uri, query, options], [previousUri, previousQuery]) => {
+  if (uri !== previousUri || query !== previousQuery) {
+    const internal = uri === previousUri && pendingTargetKey !== null && pendingTargetKey === query
+    if (!internal) {
+      sourceWriteId += 1
+      pendingTargetKey = null
+      pendingSourceQuery = true
+    }
+  }
+
+  if (pendingSourceQuery) {
+    if (options.length === 0) {
+      requestedSourceKey.value = null
+      selectedSourceKey.value = null
+      return
+    }
+
+    let requested = options.find((source) => source.key === query)
+    if (!requested && typeof query === 'string' && /^\d+$/.test(query)) {
+      const entry = feedSources.value[Number(query)]
+      if (entry?.data) {
+        const key = sourceKey(entry.data)
+        requested = options.find((source) => source.key === key)
+      }
+    }
+    requestedSourceKey.value = requested?.key ?? null
+    selectedSourceKey.value = requestedSourceKey.value ?? defaultSourceKey.value
+    resetAttempt(selectedSourceKey.value)
+    pendingSourceQuery = false
+    missingSourceKey = query !== undefined && !requested ? selectedSourceKey.value : null
+    if (mounted && missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
+  } else if (!chainExhausted && !options.some((source) => source.key === selectedSourceKey.value)) {
+    const nextKey = nextPlayableKey(options, selectedSourceKey.value)
+    selectedSourceKey.value = nextKey
+    if (anchorKey.value === null) setAttemptAnchor(nextKey)
+    if (nextKey !== null) void writeSourceQuery(nextKey, true)
+  }
+
+  // Compare against earlier snapshots before recording the refreshed keys.
+  for (const source of options) seenKeys.add(source.key)
+}, { immediate: true })
 </script>
 
 <template>
@@ -383,7 +471,7 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
 
         <div v-if="detail" class="relative z-10 flex flex-wrap items-center gap-3">
           <SourceSelect
-            v-model="activeSourceIndex"
+            v-model="activeSourceKey"
             :sources="sources"
           />
           <button
@@ -481,7 +569,7 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
           </ClientOnly>
         </p>
         <div
-          v-if="!chainExhausted && currentSource && currentSource.kind === 'link'"
+          v-if="currentSource && currentSource.kind === 'link'"
           class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
           :style="{ backgroundColor: placeholderColor }"
         >
@@ -526,12 +614,12 @@ if (!detail.value) throw createError({ statusCode: 404, fatal: true })
         </div>
 
         <div
-          v-else-if="!chainExhausted && currentSource"
+          v-else-if="currentSource"
           ref="playerWrapper"
           class="[&:fullscreen>*]:h-full"
         >
           <PlayerFrame
-            :key="`${activeSourceIndex}-${retryGeneration}`"
+            :key="`${retryGeneration}:${currentSource.key}`"
             :src="currentSource.url"
             :title="`${detail.name} — ${currentSource.label}`"
             :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"

@@ -29,7 +29,7 @@
         "name": "Team stream",
         "default": false,
         "type": "link",
-        "data": "//{host}/fixtures/away.html"
+        "data": "//{host}/fixtures/team-stream.html"
       },
       {
         "name": "Fixture embed",

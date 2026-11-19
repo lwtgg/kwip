@@ -18,7 +18,8 @@ Read `.agents/skills/kwip-conventions/SKILL.md` first.
 ## Rules
 
 - No dependency. Client-safe only: these run in the browser and at build.
-- Do not touch `server/**`, `nuxt.config.ts`, `public/**`, or `useFeedFreshness.ts`.
+- Do not touch `server/**`, `nuxt.config.ts`, `public/feed-cache/**`, or `useFeedFreshness.ts`.
+- `public/fixtures/**` may change where a fixture needs a second host to exercise the behaviour; say which file and why in the reply.
 - `useFeed.ts`: the only permitted edit is inside the substream flattening, so the substream name+tag survives as separate fields rather than pre-joined with ` · `. Keep the existing combined form working for anything already reading it.
 - Tokens only, no literals for colour or spacing. Chips stay 44 px at `sm` and below.
 

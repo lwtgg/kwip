@@ -6,6 +6,8 @@ Ordered by what unblocks what. Not a commitment; a queue.
 
 The Worker cannot reach the provider, so the directory only refreshes on deploy. Every other improvement is polish on stale data until this is solved. Target: listings and detail pages that are at most a few minutes old, without a human deploying.
 
+The [freshness design](docs/freshness-design.md) recommends a five-minute GitHub Actions pilot that publishes complete feed snapshots to private Cloudflare R2 independently of Worker deploys. The Worker keeps the bundled snapshot as a fallback and the browser continues to refresh directly. The pilot depends on approved provider access and sufficient runner minutes, with an independent alert for missed refreshes.
+
 ## 2. Sourcing
 
 Today's provider is the best found so far, but it is one provider with one failure mode and one CDN. Goals:

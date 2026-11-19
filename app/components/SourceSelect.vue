@@ -5,11 +5,11 @@ export type SelectableSourceOption = SourceOption
 
 const props = defineProps<{
   sources: SelectableSourceOption[]
-  modelValue: number
+  modelValue: string | null
 }>()
 
 const emit = defineEmits<{
-  'update:modelValue': [index: number]
+  'update:modelValue': [key: string]
 }>()
 
 const id = useId()
@@ -20,11 +20,11 @@ onMounted(() => { mounted.value = true })
 // Remounting the player frame can pull focus into it; put it back on the chip.
 let holdTimer: ReturnType<typeof setTimeout> | null = null
 
-function holdFocus(index: number) {
+function holdFocus(key: string) {
   if (holdTimer) clearTimeout(holdTimer)
   let tries = 0
   const tick = () => {
-    const chip = group.value?.querySelectorAll('button')[index]
+    const chip = findChip(key)
     if (chip && document.activeElement?.tagName === 'IFRAME') chip.focus()
     if (++tries < 12) holdTimer = setTimeout(tick, 100)
   }
@@ -36,8 +36,13 @@ onBeforeUnmount(() => {
 })
 
 const hasSelection = computed(() =>
-  Number.isInteger(props.modelValue) && props.modelValue >= 0 && props.modelValue < props.sources.length,
+  props.sources.some((source) => source.key === props.modelValue),
 )
+
+function findChip(key: string) {
+  return Array.from(group.value?.querySelectorAll('button') ?? [])
+    .find((chip) => chip.value === key)
+}
 
 function onChipKeydown(event: KeyboardEvent, index: number) {
   const count = props.sources.length
@@ -50,10 +55,13 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
     default: return
   }
 
+  const source = props.sources[next]
+  if (!source) return
+
   event.preventDefault()
-  emit('update:modelValue', next)
-  void nextTick(() => group.value?.querySelectorAll('button')[next]?.focus())
-  holdFocus(next)
+  emit('update:modelValue', source.key)
+  void nextTick(() => findChip(source.key)?.focus())
+  holdFocus(source.key)
 }
 </script>
 
@@ -70,17 +78,24 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
       >
         <button
           v-for="(source, index) in sources"
-          :key="`${index}-${source.url}`"
+          :key="source.key"
           type="button"
-          role="button"
-          :aria-pressed="index === modelValue"
-          :tabindex="index === (hasSelection ? modelValue : 0) ? 0 : -1"
-          class="inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium min-[641px]:min-h-0"
-          :class="index === modelValue ? 'border-accent bg-accent text-accent-fg' : 'border-border bg-surface-2 text-fg hover:border-accent'"
-          @click="emit('update:modelValue', index)"
+          :value="source.key"
+          :aria-describedby="source.host ? `${id}-host-${index}` : undefined"
+          :aria-pressed="source.key === modelValue"
+          :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
+          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
+          :class="source.key === modelValue ? 'border-accent bg-accent-strong text-accent-strong-fg' : 'border-border bg-surface-2 text-fg hover:border-accent'"
+          @click="emit('update:modelValue', source.key)"
           @keydown="onChipKeydown($event, index)"
         >
-          {{ source.label }}
+          <span class="min-w-0 wrap-anywhere">
+            {{ source.label }}
+            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs" :class="source.key === modelValue ? 'text-accent-strong-fg' : 'text-muted'">
+              {{ source.host }}
+            </span>
+            <span v-if="source.host" :id="`${id}-host-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
+          </span>
           <svg
             aria-hidden="true"
             viewBox="0 0 24 24"
@@ -110,10 +125,10 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
         >
           <option value="" disabled :selected="!hasSelection">Change source</option>
           <option
-            v-for="(source, index) in sources"
-            :key="`${index}-${source.url}`"
-            :value="index"
-            :selected="index === modelValue"
+            v-for="source in sources"
+            :key="source.key"
+            :value="source.key"
+            :selected="source.key === modelValue"
           >
             {{ source.kind === 'link' ? `${source.label} (Link ↗)` : source.label }}
           </option>

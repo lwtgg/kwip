@@ -261,11 +261,12 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       ? fixtureItem.substreams : raw.substreams
     const alternatives = (substreams ?? []).flatMap((substream) => {
       const name = [substream.name, substream.source_tag].filter(Boolean).join(' · ')
+      const identity = { name, substreamName: substream.name ?? '', sourceTag: substream.source_tag }
       if (substream.sources?.length) {
-        return substream.sources.map((source) => ({ ...source, name, default: false }))
+        return substream.sources.map((source) => ({ ...source, ...identity, default: false }))
       }
       return substream.iframe
-        ? [{ name, type: 'iframe' as const, data: substream.iframe, default: false }]
+        ? [{ ...identity, type: 'iframe' as const, data: substream.iframe, default: false }]
         : []
     })
 
