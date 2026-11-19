@@ -129,7 +129,9 @@ jobs:
 
   alert:
     needs: [refresh, simulation]
-    if: (success() || failure()) && needs.refresh.result != 'cancelled' && (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
+    if: >-
+      !cancelled() && needs.refresh.result != 'cancelled' &&
+      (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
     permissions:
       contents: read
       issues: write
