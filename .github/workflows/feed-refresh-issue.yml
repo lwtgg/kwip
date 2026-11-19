@@ -29,7 +29,7 @@ on:
 permissions:
   contents: read
   issues: write
-  actions: read
+  actions: write
 
 jobs:
   issue:
@@ -54,15 +54,17 @@ jobs:
       FRESHNESS: ${{ inputs.freshness || '{}' }}
       PUBLICATION: ${{ inputs.publication || '{}' }}
       STAGES: ${{ inputs.stages || '{}' }}
+      RECOVERY_ARTIFACT: feed-refresh-recovery
     steps:
       - name: Read or record live recovery
         id: recovery_record
-        if: github.event_name == 'workflow_run' || (!inputs.simulated && inputs.refresh_result == 'success')
+        if: github.event_name == 'workflow_run' || (github.ref == 'refs/heads/main' && !inputs.simulated && inputs.refresh_result == 'success')
         continue-on-error: ${{ github.event_name == 'workflow_run' }}
         shell: bash
         env:
           RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || github.run_id }}
           RUN_ATTEMPT: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.run_attempt || github.run_attempt }}
+          REPOSITORY_ID: ${{ github.repository_id }}
           CANCELLED_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
         run: |
           if [[ "$REFRESH_RESULT" != cancelled ]]; then
@@ -75,13 +77,13 @@ jobs:
 
           deadline=$((SECONDS + 60))
           read_api() {
-            local try remaining response
+            local destination=$1 try remaining
+            shift
             for try in 1 2 3; do
               remaining=$((deadline - SECONDS))
               if (( remaining <= 0 )); then return 1; fi
               if (( remaining > 15 )); then remaining=15; fi
-              if response=$(timeout --kill-after=2s "${remaining}s" gh api --method GET "$@"); then
-                printf '%s\n' "$response"
+              if timeout --kill-after=2s "${remaining}s" gh api --method GET "$@" > "$destination"; then
                 return 0
               fi
               if (( try < 3 && SECONDS < deadline )); then sleep "$try"; fi
@@ -89,55 +91,72 @@ jobs:
             return 1
           }
 
-          marker_label=feed-refresh-recovery
-          issues_api="repos/$GH_REPO/issues"
-          # One bounded request returns the singleton record and detects duplicates.
-          marker=$(read_api "$issues_api" -f state=all -f labels="$marker_label" -F per_page=2 |
-            jq -ce 'map(select(has("pull_request") | not)) |
-              if length > 1 then error("Multiple recovery records")
-              else first // {} end')
-          marker_number=$(jq -r '.number // empty' <<< "$marker")
+          artifacts_api="repos/$GH_REPO/actions/artifacts"
+          response="$RUNNER_TEMP/feed-recovery-response"
+          read_api "$response" "$artifacts_api" -f name="$RECOVERY_ARTIFACT" -F per_page=2
+          artifact_ids=$(jq -r --arg repo "$REPOSITORY_ID" '
+            if .total_count > 2 then error("Too many recovery artifacts") else
+              .artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and
+                (.workflow_run.head_repository_id | tostring) == $repo) |
+                if .size_in_bytes > 4096 then error("Oversized recovery artifact") else .id end
+            end' "$response")
           recovery_time=0
-          if [[ -n "$marker_number" ]]; then
-            recovery_time=$(jq -e '.body | fromjson |
-              select(.version == 1) | .startedAt | fromdateiso8601' <<< "$marker")
-          elif [[ "$REFRESH_RESULT" == cancelled ]]; then
-            exit 0
-          fi
+          newest_id=
+          older_id=
+          while IFS= read -r artifact_id; do
+            if [[ -z "$artifact_id" ]]; then continue; fi
+            read_api "$response" "$artifacts_api/$artifact_id/zip"
+            timestamp=$(unzip -p "$response" feed-recovery.json |
+              jq -e 'select(.version == 1) | .startedAt | fromdateiso8601')
+            if (( timestamp > recovery_time )); then
+              recovery_time=$timestamp
+              older_id=$newest_id
+              newest_id=$artifact_id
+            else
+              older_id=$artifact_id
+            fi
+          done <<< "$artifact_ids"
+          if [[ -z "$newest_id" && "$REFRESH_RESULT" == cancelled ]]; then exit 0; fi
 
           started_at=$CANCELLED_STARTED_AT
           if [[ -z "$started_at" ]]; then
-            started_at=$(read_api "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT" |
-              jq -er --argjson attempt "$RUN_ATTEMPT" 'select(.run_attempt == $attempt) | .run_started_at')
+            read_api "$response" "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT"
+            started_at=$(jq -er --argjson attempt "$RUN_ATTEMPT" '
+              select(.run_attempt == $attempt) | .run_started_at' "$response")
           fi
           source_time=$(jq -ne --arg started "$started_at" '$started | fromdateiso8601')
 
           if [[ "$REFRESH_RESULT" == cancelled ]]; then
             if (( recovery_time > source_time )); then
-              echo "Dropping cancellation alert because recovery record #$marker_number is newer."
+              echo "Dropping cancellation alert because recovery artifact $newest_id is newer."
               echo 'superseded=true' >> "$GITHUB_OUTPUT"
             fi
             exit 0
           fi
 
-          # Record proof before closing a live incident. Preserve the newest attempt across reruns.
-          if (( source_time > recovery_time )); then
-            body=$(jq -cn --arg startedAt "$started_at" --arg url "$RUN_URL" --argjson attempt "$RUN_ATTEMPT" \
-              '{version: 1, $startedAt, $url, $attempt}')
-            if [[ -n "$marker_number" ]]; then
-              gh api --method PATCH "$issues_api/$marker_number" -f body="$body" -f state=closed --silent
-            else
-              label=$(gh label list --search "$marker_label" --json name --jq '.[] | select(.name == "feed-refresh-recovery").name')
-              if [[ -z "$label" ]]; then
-                gh label create "$marker_label" --description 'Internal feed refresh recovery record' --color EDEDED
-              fi
-              marker_number=$(gh api --method POST "$issues_api" -f title='Feed refresh recovery record' \
-                -f body="$body" -F "labels[]=$marker_label" --jq .number)
-              gh api --method PATCH "$issues_api/$marker_number" -f state=closed --silent
-            fi
-          elif [[ "$(jq -r .state <<< "$marker")" == open ]]; then
-            gh api --method PATCH "$issues_api/$marker_number" -f state=closed --silent
-          fi
+          # Keep the strongest record if a prior upload succeeded but its cleanup failed.
+          if [[ -n "$older_id" ]]; then gh api --method DELETE "$artifacts_api/$older_id" --silent; fi
+          if (( source_time <= recovery_time )); then exit 0; fi
+
+          jq -cn --arg startedAt "$started_at" --arg url "$RUN_URL" --argjson attempt "$RUN_ATTEMPT" \
+            '{version: 1, $startedAt, $url, $attempt}' > "$RUNNER_TEMP/feed-recovery.json"
+          echo 'upload=true' >> "$GITHUB_OUTPUT"
+          echo "previous_id=$newest_id" >> "$GITHUB_OUTPUT"
+
+      - name: Publish confirmed recovery artifact
+        if: steps.recovery_record.outputs.upload == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ env.RECOVERY_ARTIFACT }}
+          path: ${{ runner.temp }}/feed-recovery.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Retire previous recovery artifact
+        if: steps.recovery_record.outputs.upload == 'true' && steps.recovery_record.outputs.previous_id != ''
+        env:
+          PREVIOUS_ARTIFACT_ID: ${{ steps.recovery_record.outputs.previous_id }}
+        run: gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$PREVIOUS_ARTIFACT_ID" --silent
 
       - name: Update feed refresh issue
         if: steps.recovery_record.outputs.superseded != 'true'

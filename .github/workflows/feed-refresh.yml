@@ -135,7 +135,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      actions: read
+      actions: write
     uses: ./.github/workflows/feed-refresh-issue.yml
     with:
       refresh_result: ${{ needs.simulation.result != 'skipped' && needs.simulation.result || needs.refresh.result }}
