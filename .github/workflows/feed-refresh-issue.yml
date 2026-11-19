@@ -69,6 +69,8 @@ jobs:
             elif . == "install" then "Dependency installation failed. Check the lockfile and registry access."
             elif . == "freshness" then "Manifest age check failed. Check R2 access and manifest validity."
             elif . == "publish" then "Publisher exited unsuccessfully. Check the publisher run log."
+            elif . == "record_freshness" then "Recording the manifest check result failed. Check the result recording step."
+            elif . == "record_publication" then "Recording the publisher result failed. Check the result recording step."
             else empty end' <<< "$STAGES")
 
           title=
@@ -107,7 +109,7 @@ jobs:
           fi
 
           if [[ -z "$incident" ]]; then
-            if [[ "$freshness" != fresh || ( "$outcome" != published && "$outcome" != unchanged ) || -z "$commit" ]]; then
+            if [[ "$REFRESH_RESULT" != success || "$freshness" != fresh || ( "$outcome" != published && "$outcome" != unchanged ) || -z "$commit" ]]; then
               exit 0
             fi
             if [[ "$SIMULATED" == true && "$SIMULATION_RECOVERY" != true ]]; then exit 0; fi

@@ -32,7 +32,7 @@ jobs:
     outputs:
       freshness: ${{ steps.freshness.outputs.result }}
       publication: ${{ steps.publication.outputs.result }}
-      stages: ${{ format('{{"checkout":"{0}","node":"{1}","pnpm":"{2}","install":"{3}","freshness":"{4}","publish":"{5}"}}', steps.checkout.outcome, steps.node.outcome, steps.pnpm.outcome, steps.install.outcome, steps.check.outcome, steps.publish.outcome) }}
+      stages: ${{ format('{{"checkout":"{0}","node":"{1}","pnpm":"{2}","install":"{3}","freshness":"{4}","publish":"{5}","record_freshness":"{6}","record_publication":"{7}"}}', steps.checkout.outcome, steps.node.outcome, steps.pnpm.outcome, steps.install.outcome, steps.check.outcome, steps.publish.outcome, steps.freshness.outcome, steps.publication.outcome) }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         id: checkout
@@ -129,7 +129,7 @@ jobs:
 
   alert:
     needs: [refresh, simulation]
-    if: (success() || failure() || needs.refresh.result == 'cancelled') && (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
+    if: (success() || failure()) && needs.refresh.result != 'cancelled' && (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
     permissions:
       contents: read
       issues: write
