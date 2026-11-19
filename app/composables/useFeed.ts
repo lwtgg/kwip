@@ -4,6 +4,7 @@ import {
   fetchFeed,
   fetchFeedSnapshot,
   getFeedAssets,
+  getFeedGeneration,
   isCrossOriginFeed,
   type FeedEndpoint,
   type FeedProvenance,
@@ -83,6 +84,7 @@ export interface FeedStreamDetail extends FeedStreamItem {
 }
 
 export interface FeedVodItem {
+  slug?: string
   id: number
   name: string
   tag: string
@@ -149,6 +151,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const fetcher = useRequestFetch()
   const requestUrl = useRequestURL()
   const event = import.meta.server ? useRequestEvent() : undefined
+  const now = import.meta.server ? useState('feed-initial-now', () => Math.floor(Date.now() / 1000)) : undefined
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
   const browserRefresh = import.meta.client
     && isCrossOriginFeed(config.public.feedBase, requestUrl, resolveEndpoint())
@@ -163,6 +166,21 @@ function useFeedEndpoint<T extends { success: boolean }>(
       try {
         if (browserRefresh) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
+        }
+        if (import.meta.server) {
+          const generation = endpoint.kind !== 'ping' &&
+            getFeedGeneration(event, config.feedSnapshotBinding, fetcher, config.public, requestUrl, undefined, config.seedDetailPaths, now?.value)
+          if (generation) {
+            const payload = (await generation).get<T>(endpoint)
+            if (!payload) {
+              throw createError({
+                statusCode: 503,
+                statusMessage: 'Feed endpoint unavailable',
+                data: { snapshotUnavailable: true },
+              })
+            }
+            return payload
+          }
         }
         const assets = import.meta.server ? getFeedAssets(event) : undefined
         return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
@@ -187,18 +205,21 @@ function useFeedEndpoint<T extends { success: boolean }>(
     },
   )
 
-  if (browserRefresh) {
-    onMounted(() => {
-      if (!nuxtApp.isHydrating) return
-      if (!feed.data.value?.fromCache) return
-      // Paint the hydrated snapshot first; replacing data mid-hydration reads as a DOM mismatch.
-      if (nuxtApp.isHydrating) {
-        nuxtApp.hooks.hookOnce('app:mounted', () => { void feed.refresh({ dedupe: 'defer' }) })
+  if (browserRefresh && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
+    // Keep the SSR payload in place until Nuxt has finished hydrating.
+    onNuxtReady(() => {
+      if (!feed.data.value || feed.data.value.fromCache) {
+        void feed.refresh({ dedupe: 'defer' })
       }
     })
   }
 
   return feed
+}
+
+export function isSnapshotUnavailable(error: { data?: unknown } | null | undefined): boolean {
+  const data = error?.data
+  return !!data && typeof data === 'object' && 'snapshotUnavailable' in data && data.snapshotUnavailable === true
 }
 
 export function usePing() {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
-import { useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
+import { validFeedPath } from '~~/server/utils/feed-path'
+import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
@@ -59,15 +60,13 @@ const ReplayLink = defineComponent({
     const hasReplay = computed(() => data.value?.vods.some(category =>
       category.vods.some(vod => vod.uri_name === uriName.value),
     ))
-
     return () => hasReplay.value
-      ? h(NuxtLink, {
-          to: `/vods/${uriName.value}`,
-          class: 'text-fg underline hover:text-accent max-md:inline-flex max-md:min-h-11 max-md:items-center',
-        }, () => 'Watch the replay')
+      ? h(NuxtLink, { to: `/vods/${encodeURIComponent(uriName.value)}`, class: replayLinkClass }, () => 'Watch the replay')
       : replayFallback
   },
 })
+const replayLinkClass = 'text-fg underline hover:text-accent max-md:inline-flex max-md:min-h-11 max-md:items-center'
+
 function humanizeUri(uri: string): string {
   const last = uri.split('/').filter(Boolean).pop() || ''
   if (!last) return 'Live Event'
@@ -454,7 +453,9 @@ useHead({
       : [],
 })
 await Promise.all([feed, list])
-if (!detail.value) throw createError({ statusCode: 404, fatal: true })
+if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnavailable(streamError.value))) {
+  throw createError({ statusCode: 404, fatal: true })
+}
 
 let pendingSourceQuery = true
 watch([uriName, () => route.query.source, sources, mounted], ([uri, query, options], [previousUri, previousQuery]) => {
@@ -665,10 +666,18 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
       <section aria-label="Event player">
         <p v-if="hasEnded" class="w-full border-t border-border py-2 text-xs text-muted">
           This event has ended.
-          <ClientOnly>
+          <NuxtLink
+            v-if="streamResp?.fromSnapshot && streamResp.hasSnapshotReplay"
+            :to="`/vods/${encodeURIComponent(uriName)}`"
+            :class="replayLinkClass"
+          >Watch the replay</NuxtLink>
+          <ClientOnly
+            v-else-if="!streamResp?.fromSnapshot && validFeedPath('vods', uriName)"
+          >
             <ReplayLink />
             <template #fallback>{{ replayFallback }}</template>
           </ClientOnly>
+          <template v-else>{{ replayFallback }}</template>
         </p>
         <div
           v-if="currentSource && currentSource.kind === 'link'"

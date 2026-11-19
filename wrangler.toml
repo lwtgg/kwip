@@ -23,3 +23,8 @@ not_found_handling = "none"
 
 [observability]
 enabled = true
+
+[[r2_buckets]]
+binding = "FEED_SNAPSHOTS"
+bucket_name = "kwip-feed-prod"
+preview_bucket_name = "kwip-feed-preview"

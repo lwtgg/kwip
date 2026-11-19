@@ -1,5 +1,7 @@
 import type { FeedStreamsResponse, FeedVodsResponse } from '../../app/composables/useFeed'
-import { fetchFeed, getFeedAssets } from '../utils/feed'
+import { fetchFeed, getFeedAssets, getFeedGeneration } from '../utils/feed.ts'
+
+import { feedDetailPath } from '../utils/feed-path.ts'
 
 const STATIC_PATHS = ['/', '/vods', '/mirrors', '/about']
 
@@ -25,13 +27,23 @@ export default defineEventHandler(async (event) => {
   const origin = canonicalOrigin(event)
   const entries: Entry[] = STATIC_PATHS.map((path) => ({ path }))
 
-  const config = useRuntimeConfig(event).public
+  const { public: config, feedSnapshotBinding, seedDetailPaths } = useRuntimeConfig(event)
   const requestUrl = getRequestURL(event)
   const assets = getFeedAssets(event)
-  const [streams, vods] = await Promise.all([
+  const generation = await getFeedGeneration(event, feedSnapshotBinding, $fetch, config, requestUrl, [
+    { kind: 'streams' }, { kind: 'vods' },
+  ], seedDetailPaths)
+  const [streams, vods] = generation ? [
+    generation.get<FeedStreamsResponse>({ kind: 'streams' }),
+    generation.get<FeedVodsResponse>({ kind: 'vods' }),
+  ] : await Promise.all([
     fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }, assets).catch(() => null),
     fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }, assets).catch(() => null),
   ])
+
+  const seedCoverage = new Set(seedDetailPaths)
+  const covered = (path: string, fromCache?: true) =>
+    generation ? generation.hasDetail(path) : !fromCache || seedCoverage.has(path)
 
   const seen = new Set(entries.map((e) => e.path))
   const push = (path: string, lastmod?: string) => {
@@ -42,12 +54,18 @@ export default defineEventHandler(async (event) => {
 
   for (const cat of streams?.streams ?? []) {
     for (const s of cat.streams ?? []) {
-      if (s.uri_name) push(`/live/${encodePath(s.uri_name)}`, toLastmod(s.starts_at))
+      const path = feedDetailPath('streams', s.uri_name)
+      if (path && covered(path, streams?.fromCache)) {
+        push(`/live/${encodePath(path.slice('streams/'.length))}`, toLastmod(s.starts_at))
+      }
     }
   }
   for (const cat of vods?.vods ?? []) {
     for (const v of cat.vods ?? []) {
-      if (v.uri_name) push(`/vods/${encodePath(v.uri_name)}`, toLastmod(v.added))
+      const path = feedDetailPath('vods', v.slug ?? v.uri_name)
+      if (path && covered(path, vods?.fromCache)) {
+        push(`/vods/${encodePath(path.slice('vods/'.length))}`, toLastmod(v.added))
+      }
     }
   }
 

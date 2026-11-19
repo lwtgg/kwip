@@ -6,6 +6,7 @@ import { loadEnvFile } from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { AwsClient } from 'aws4fetch'
+import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
 // Collection starts after the publisher pins the manifest ETag.
 // For an upstream failure, run with --provider-status
@@ -31,14 +32,6 @@ function canonical(value) {
     return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + canonical(value[key])).join(',') + '}'
   }
   return JSON.stringify(value)
-}
-
-function pathKey(value) {
-  if (typeof value !== 'string') throw new Error('Missing detail path')
-  const path = value.replace(/^\/+/, '')
-  if (!path.split('/').every((segment) => segment && segment !== '.' && segment !== '..' &&
-      !/[\\\x00-\x1f\x7f]/.test(segment))) throw new Error('Invalid detail path')
-  return path
 }
 
 function validateSources(value) {
@@ -137,7 +130,8 @@ async function collectFeed(base, directory, current, result, deadline) {
     for (const category of payload[collection]) {
       if (!Array.isArray(category?.[collection])) throw new Error(`Invalid ${collection} category`)
       for (const item of category[collection]) {
-        const path = `${collection}/${pathKey(collection === 'vods' ? item?.slug ?? item?.uri_name : item?.uri_name)}`
+        const path = feedDetailPath(collection, collection === 'vods' ? item?.slug ?? item?.uri_name : item?.uri_name)
+        if (!path) throw new Error('Invalid detail path')
         if (!Number.isSafeInteger(item.id) && !(typeof item.id === 'string' && /^\d+$/.test(item.id))) {
           throw new Error(`Invalid list ID for ${path}`)
         }
@@ -280,8 +274,9 @@ function parseObject(object) {
 
 function validateManifest(manifest) {
   const id = '[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}'
+  const payloadId = new RegExp(`^snapshots/(${id})\\.bin$`).exec(manifest.payloadKey)?.[1]
   if (manifest.schema !== 1 || !new RegExp(`^${id}$`).test(manifest.commitId) ||
-      !new RegExp(`^snapshots/${id}\\.bin$`).test(manifest.payloadKey) ||
+      !payloadId || (manifest.payloadId !== undefined && manifest.payloadId !== payloadId) ||
       !['streams', 'vods', 'details'].every((key) => /^[a-f0-9]{64}$/.test(manifest.hashes?.[key])) ||
       !['publishedAt', 'listsVerifiedAt', 'detailsVerifiedAt'].every((key) => Number.isFinite(Date.parse(manifest[key]))) ||
       !Array.isArray(manifest.endpoints) || !Number.isSafeInteger(manifest.size) ||
@@ -292,7 +287,7 @@ function validateManifest(manifest) {
   const paths = new Set()
   for (const endpoint of manifest.endpoints) {
     const { path, offset, length } = endpoint
-    if (!/^(streams|vods)(\/|$)/.test(path) || pathKey(path) !== path || paths.has(path) ||
+    if (typeof path !== 'string' || !isSnapshotPath(path) || paths.has(path) ||
         offset !== end || !Number.isSafeInteger(length) || length <= 0 || length > fileLimit) {
       throw new Error('Invalid endpoint in current snapshot manifest')
     }
@@ -302,6 +297,7 @@ function validateManifest(manifest) {
   if (end !== manifest.size || !paths.has('streams') || !paths.has('vods')) {
     throw new Error('Invalid endpoint coverage in current snapshot manifest')
   }
+  return payloadId
 }
 
 function retryTime(retryAfter) {
@@ -388,7 +384,7 @@ async function publish(result, deadline) {
 
   const currentObject = await r2?.get(manifestKey)
   const current = parseObject(currentObject)
-  if (current) validateManifest(current)
+  const currentPayloadId = current ? validateManifest(current) : undefined
   let collected
   try {
     collected = await collectSnapshot(current, result, publicationDeadline, dryRun)
@@ -403,9 +399,9 @@ async function publish(result, deadline) {
   const { unchanged, snapshot } = collected
   const now = new Date().toISOString()
   const manifest = unchanged
-    ? { ...current, commitId: result.commitId, listsVerifiedAt: now }
+    ? { ...current, commitId: result.commitId, payloadId: currentPayloadId, listsVerifiedAt: now }
     : {
-        schema: 1, commitId: result.commitId, payloadKey: `snapshots/${result.commitId}.bin`,
+        schema: 1, commitId: result.commitId, payloadId: result.commitId, payloadKey: `snapshots/${result.commitId}.bin`,
         size: snapshot.size, hashes: snapshot.hashes, publishedAt: now,
         listsVerifiedAt: now, detailsVerifiedAt: now, endpoints: snapshot.endpoints,
       }

@@ -42,6 +42,10 @@ const mock = `
     } else if (path.endsWith('/current.json')) {
       assert.equal(request.headers.get('if-match'), '"original"')
       const manifest = await request.json()
+      assert.equal(manifest.payloadKey, 'snapshots/' + manifest.payloadId + '.bin')
+      assert.notEqual(manifest.commitId, current.commitId)
+      if (packed) assert.equal(manifest.payloadId, manifest.commitId)
+      else assert.equal(manifest.payloadId, current.payloadKey.slice(10, -4))
       assert.deepEqual(manifest.endpoints.map(({ path }) => path), Object.keys(fixture))
       if (packed) {
         let end = 0
@@ -96,7 +100,7 @@ test('republishes matching list hashes with incomplete or incorrect endpoint cov
   const [missingResult, wrongResult, completeResult] = await Promise.all([
     publish([], missing),
     publish([], wrong),
-    publish([], dryRun.manifest),
+    publish([], { ...dryRun.manifest, payloadId: undefined }),
   ])
   for (const result of [missingResult, wrongResult]) {
     assert.equal(result.outcome, 'published')

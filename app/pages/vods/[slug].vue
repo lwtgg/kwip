@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { validFeedPath } from '~~/server/utils/feed-path'
 import {
+  isSnapshotUnavailable,
   useVod,
   useVods,
   type FeedStreamItem,
@@ -47,7 +49,7 @@ const { isStale, nowSeconds, retry } = useFeedFreshness(
 const matchedListContext = computed<{ item: FeedVodItem; category: string } | null>(() => {
   for (const cat of vodsListResp.value?.vods ?? []) {
     for (const item of cat.vods) {
-      if (item.uri_name === slug.value) {
+      if ((item.slug ?? item.uri_name) === slug.value) {
         return { item, category: cat.category }
       }
     }
@@ -60,7 +62,7 @@ const detail = computed<FeedVodDetail | null>(() => {
   const raw = vodResp.value?.data
   if (!raw) return null
   const matched = matchedListContext.value?.item
-  // Live detail responses omit `uri_name`; only a present-but-different key proves a mismatch.
+  // URI-less VODs can use the route's existing list metadata in unbound runs.
   if (!matched) return raw.uri_name && raw.uri_name !== slug.value ? null : raw
   if (raw.uri_name === slug.value && !isFixture) return raw
   return {
@@ -225,7 +227,9 @@ useSeoMeta({
 })
 useOgImage(() => detail.value?.poster, pageHeading)
 await Promise.all([vod, vods])
-if (!detail.value) throw createError({ statusCode: 404, fatal: true })
+if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailable(vodError.value))) {
+  throw createError({ statusCode: 404, fatal: true })
+}
 </script>
 
 <template>

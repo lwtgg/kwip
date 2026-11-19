@@ -1,4 +1,22 @@
+import { readdirSync } from 'node:fs'
+import { feedDetailPath, type FeedCollection } from './server/utils/feed-path'
+
 import tailwindcss from '@tailwindcss/vite'
+
+const seedDetailPaths = (['streams', 'vods'] as const).flatMap((collection: FeedCollection) => {
+  const directory = new URL(`./public/feed-cache/${collection}/`, import.meta.url)
+  try {
+    return readdirSync(directory, { recursive: true, withFileTypes: true }).flatMap((entry) => {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) return []
+      const parent = entry.parentPath.slice(decodeURIComponent(directory.pathname).length)
+      const path = feedDetailPath(collection, [parent, entry.name.slice(0, -5)].filter(Boolean).join('/'))
+      return path ? [path] : []
+    }).sort()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return []
+  }
+})
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
@@ -20,6 +38,8 @@ export default defineNuxtConfig({
     },
   },
   runtimeConfig: {
+    feedSnapshotBinding: 'FEED_SNAPSHOTS',
+    seedDetailPaths,
     public: {
       siteName: process.env.NUXT_PUBLIC_SITE_NAME || 'kwip',
       canonicalHost: process.env.NUXT_PUBLIC_CANONICAL_HOST || 'kwip.fyi',
