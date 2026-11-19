@@ -1,0 +1,7 @@
+{
+  "name": "kwip-snapshot-publisher",
+  "private": true,
+  "devDependencies": {
+    "aws4fetch": "^1.0.20"
+  }
+}

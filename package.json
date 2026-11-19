@@ -10,6 +10,7 @@
     "deploy": "pnpm snapshot && pnpm build && wrangler deploy",
     "test": "node --test tests/*.test.ts",
     "postinstall": "nuxt prepare",
+    "publish:feed": "node scripts/collect-publish-feed.mjs",
     "snapshot": "node scripts/snapshot-feed.mjs"
   },
   "dependencies": {

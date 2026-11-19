@@ -35,3 +35,13 @@ pnpm preview           # local wrangler dev against .output/
 ```
 
 Rollback: `pnpm wrangler rollback <version-id>`.
+
+## Feed snapshots
+
+Install the isolated publisher dependency once per runner checkout. Use a credential file scoped to the preview bucket and set `NUXT_PUBLIC_FEED_BASE` to the feed URL.
+
+```sh
+pnpm --dir scripts --ignore-workspace install --frozen-lockfile
+pnpm publish:feed --credentials-file .r2-preview-credentials.json --dry-run
+pnpm publish:feed --credentials-file .r2-preview-credentials.json
+```
