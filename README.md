@@ -66,12 +66,13 @@ missing or its last list verification is more than 45 minutes old. Recovery
 requires a fresh precheck and an outcome of `published` or `unchanged`.
 A separate completion-triggered workflow reports cancelled live runs on
 `main`, including pending runs GitHub replaces before they start. It reads the
-`feed-refresh-recovery` Actions artifact under the issue update lock. The
+Actions recovery artifacts under the issue update lock. The
 artifact holds the latest confirmed live attempt by start time, including
 reruns of older runs, and expires after seven days. Live recovery uploads it
-before closing any incident and retires the previous artifact. The check lists
-at most two matching artifacts and fetches the exact cancelled attempt only
-if the event omits its start time. Healthy runs leave no issue activity. If the lookup
+before closing any incident and retires the previous artifact. It alternates between two fixed
+artifact names so a rerun can upload before retiring its predecessor. The
+check reads at most one artifact in each slot and fetches the exact cancelled
+attempt only if the event omits its start time. Healthy runs leave no issue activity. If the lookup
 fails after retries, the cancellation still alerts and the issue marks
 the lookup as inconclusive.
 

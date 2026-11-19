@@ -93,17 +93,31 @@ jobs:
 
           artifacts_api="repos/$GH_REPO/actions/artifacts"
           response="$RUNNER_TEMP/feed-recovery-response"
-          read_api "$response" "$artifacts_api" -f name="$RECOVERY_ARTIFACT" -F per_page=2
-          artifact_ids=$(jq -r --arg repo "$REPOSITORY_ID" '
-            if .total_count > 2 then error("Too many recovery artifacts") else
-              .artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and
-                (.workflow_run.head_repository_id | tostring) == $repo) |
-                if .size_in_bytes > 4096 then error("Oversized recovery artifact") else .id end
-            end' "$response")
+          artifact_ids=
+          for slot in a b; do
+            read_api "$response" "$artifacts_api" -f name="$RECOVERY_ARTIFACT-$slot" -F per_page=2
+            if [[ "$REFRESH_RESULT" != cancelled ]]; then
+              expired_id=$(jq -r --arg repo "$REPOSITORY_ID" '
+                if .total_count == 1 then .artifacts[] |
+                  select(.expired and .workflow_run.head_branch == "main" and
+                    (.workflow_run.head_repository_id | tostring) == $repo) | .id
+                else empty end' "$response")
+              if [[ -n "$expired_id" ]]; then gh api --method DELETE "$artifacts_api/$expired_id" --silent; fi
+            fi
+            ids=$(jq -r --arg repo "$REPOSITORY_ID" --arg slot "$slot" '
+              if .total_count > 1 then error("Multiple artifacts in one recovery slot") else
+                .artifacts[] | select(.expired == false and .workflow_run.head_branch == "main" and
+                  (.workflow_run.head_repository_id | tostring) == $repo) |
+                  if .size_in_bytes > 4096 then error("Oversized recovery artifact")
+                  else [.id, $slot] | @tsv end
+              end' "$response")
+            artifact_ids+="$ids"$'\n'
+          done
           recovery_time=0
           newest_id=
+          newest_slot=
           older_id=
-          while IFS= read -r artifact_id; do
+          while IFS=$'\t' read -r artifact_id slot; do
             if [[ -z "$artifact_id" ]]; then continue; fi
             read_api "$response" "$artifacts_api/$artifact_id/zip"
             timestamp=$(unzip -p "$response" feed-recovery.json |
@@ -112,6 +126,7 @@ jobs:
               recovery_time=$timestamp
               older_id=$newest_id
               newest_id=$artifact_id
+              newest_slot=$slot
             else
               older_id=$artifact_id
             fi
@@ -140,14 +155,19 @@ jobs:
 
           jq -cn --arg startedAt "$started_at" --arg url "$RUN_URL" --argjson attempt "$RUN_ATTEMPT" \
             '{version: 1, $startedAt, $url, $attempt}' > "$RUNNER_TEMP/feed-recovery.json"
-          echo 'upload=true' >> "$GITHUB_OUTPUT"
-          echo "previous_id=$newest_id" >> "$GITHUB_OUTPUT"
+          next_slot=a
+          if [[ "$newest_slot" == a ]]; then next_slot=b; fi
+          {
+            echo "name=$RECOVERY_ARTIFACT-$next_slot"
+            echo 'upload=true'
+            echo "previous_id=$newest_id"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish confirmed recovery artifact
         if: steps.recovery_record.outputs.upload == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ env.RECOVERY_ARTIFACT }}
+          name: ${{ steps.recovery_record.outputs.name }}
           path: ${{ runner.temp }}/feed-recovery.json
           retention-days: 7
           if-no-files-found: error
