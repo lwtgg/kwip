@@ -45,3 +45,17 @@ pnpm --dir scripts --ignore-workspace install --frozen-lockfile
 pnpm publish:feed --credentials-file .r2-preview-credentials.json --dry-run
 pnpm publish:feed --credentials-file .r2-preview-credentials.json
 ```
+
+## Refreshing the feed
+
+The **Feed refresh** workflow runs every 15 minutes on GitHub's default
+branch and publishes to `kwip-feed-prod`. Configure the repository Actions
+secrets `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and
+`R2_ENDPOINT` using credentials scoped to that bucket. Configure the
+`feed-production` environment to allow only the protected `main` branch
+without requiring approval for scheduled runs.
+
+To force a run, open **Actions → Feed refresh → Run workflow**, select
+`main`, and click **Run workflow**. Check the run summary for the publisher
+result. A `paused` result means the provider blocked the runner and a
+person needs to investigate before resuming publication.
