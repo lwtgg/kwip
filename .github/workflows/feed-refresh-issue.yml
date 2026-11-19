@@ -174,9 +174,10 @@ jobs:
 
       - name: Retire previous recovery artifact
         if: steps.recovery_record.outputs.upload == 'true' && steps.recovery_record.outputs.previous_id != ''
+        continue-on-error: true
         env:
           PREVIOUS_ARTIFACT_ID: ${{ steps.recovery_record.outputs.previous_id }}
-        run: gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$PREVIOUS_ARTIFACT_ID" --silent
+        run: timeout --kill-after=2s 15s gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$PREVIOUS_ARTIFACT_ID" --silent
 
       - name: Update feed refresh issue
         if: steps.recovery_record.outputs.superseded != 'true'

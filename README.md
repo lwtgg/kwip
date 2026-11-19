@@ -70,7 +70,9 @@ Actions recovery artifacts under the issue update lock. The
 artifact holds the latest confirmed live attempt by start time, including
 reruns of older runs, and expires after seven days. Live recovery uploads it
 before closing any incident and retires the previous artifact. It alternates between two fixed
-artifact names so a rerun can upload before retiring its predecessor. The
+artifact names so a rerun can upload before retiring its predecessor. If
+retirement fails after the upload, incident closure proceeds and the next
+healthy refresh retries the cleanup. The
 check reads at most one artifact in each slot and fetches the exact cancelled
 attempt only if the event omits its start time. Healthy runs leave no issue activity. If the lookup
 fails after retries, the cancellation still alerts and the issue marks
