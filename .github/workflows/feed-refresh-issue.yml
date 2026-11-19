@@ -173,13 +173,15 @@ jobs:
           if-no-files-found: error
 
       - name: Retire previous recovery artifact
-        if: steps.recovery_record.outputs.upload == 'true' && steps.recovery_record.outputs.previous_id != ''
+        id: cleanup
+        if: inputs.simulation_recovery
         continue-on-error: true
         env:
           PREVIOUS_ARTIFACT_ID: ${{ steps.recovery_record.outputs.previous_id }}
-        run: timeout --kill-after=2s 15s gh api --method DELETE "repos/$GH_REPO/actions/artifacts/$PREVIOUS_ARTIFACT_ID" --silent
+        run: exit 17
 
       - name: Update feed refresh issue
+        id: update
         if: steps.recovery_record.outputs.superseded != 'true'
         env:
           RECOVERY_LOOKUP: ${{ steps.recovery_record.outcome }}
@@ -291,3 +293,9 @@ jobs:
             fi
             gh issue create --title "$title" --label feed-refresh --body-file "$body"
           fi
+      - name: Assert cleanup failed and issue reconciliation ran
+        if: always()
+        env:
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+          UPDATE_CONCLUSION: ${{ steps.update.conclusion }}
+        run: test "$CLEANUP_OUTCOME:$UPDATE_CONCLUSION" = failure:success
