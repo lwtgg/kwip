@@ -1,131 +1,125 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { pathToFileURL } from 'node:url'
 
 const dependencies = process.env.KWIP_WORKFLOW_TEST_DIR
 assert.ok(dependencies, 'Set KWIP_WORKFLOW_TEST_DIR as shown in the README')
-const require = createRequire(join(dependencies, 'package.json'))
-const expressions = pathToFileURL(join(dependencies, 'node_modules/@actions/expressions/dist/index.js'))
-const { data, Evaluator, Lexer, Parser } = await import(expressions)
-const { parse } = require('yaml')
-const workflow = (file) => parse(readFileSync(new URL(`../.github/workflows/${file}.yml`, import.meta.url), 'utf8'))
-const refresh = workflow('feed-refresh')
-const issue = workflow('feed-refresh-issue')
-const cancelled = { name: 'cancelled', minArgs: 0, maxArgs: 0, call: () => new data.BooleanData(false) }
+const { parse, stringify } = createRequire(join(dependencies, 'package.json'))('yaml')
 
-function evaluate(expression, context) {
-  if (typeof expression !== 'string') return expression
-  const source = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '').trim()
-  const tree = new Parser(new Lexer(source).lex().tokens, ['github', 'inputs', 'needs', 'steps'], [cancelled]).parse()
-  const values = JSON.parse(JSON.stringify(context), data.reviver)
-  const result = new Evaluator(tree, values, new Map([['cancelled', cancelled]])).evaluate()
-  return JSON.parse(JSON.stringify(result, data.replacer))
-}
-
-function alertInputs(job, source, result, outputs) {
-  const needs = { [source]: { result, outputs } }
-  assert.equal(job.needs, source)
-  assert.equal(evaluate(job.if, { needs }), true)
-  return {
-    ...Object.fromEntries(Object.entries(issue.on.workflow_call.inputs)
-      .filter(([, input]) => 'default' in input).map(([key, input]) => [key, input.default])),
-    ...Object.fromEntries(Object.entries(job.with).map(([key, expression]) => [key, evaluate(expression, { needs })])),
+function runWorkflow(t, event, payload) {
+  const directory = mkdtempSync(join(tmpdir(), 'kwip-refresh-test-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const workflows = join(directory, '.github/workflows')
+  mkdirSync(workflows, { recursive: true })
+  mkdirSync(join(directory, 'scripts'))
+  for (const file of ['feed-refresh.yml', 'feed-refresh-issue.yml']) {
+    const source = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8')
+    const workflow = parse(source)
+    // The Actions runner executes the real jobs and shell steps. External setup
+    // actions are stubbed because this fixture already provides the tools.
+    for (const job of Object.values(workflow.jobs)) {
+      // act's schema predates queue: max. The fixture runs one event at a time.
+      if (job.concurrency) delete job.concurrency.queue
+      if (!job.steps) continue
+      job.steps = job.steps.map((step) => {
+        if (!step.uses) return step
+        const { uses, with: _inputs, ...rest } = step
+        return { ...rest, run: `echo 'Stubbed ${uses}'` }
+      })
+    }
+    writeFileSync(join(workflows, file), stringify(workflow))
   }
-}
 
-const schedule = {
-  github: { event_name: 'schedule', event: { schedule: '*/15 * * * *' }, ref: 'refs/heads/main' },
-}
-const bareDispatch = { github: { event_name: 'workflow_dispatch', event: {} }, inputs: {} }
-
-function checkLiveRouting(context) {
-  assert.equal(evaluate(refresh['run-name'], context), 'Feed refresh (live)')
-  assert.equal(evaluate(refresh.concurrency.group, context), 'feed-refresh')
-  assert.equal(evaluate(refresh.jobs.refresh.if, context), true)
-  const publish = refresh.jobs.refresh.steps.find((step) => step.id === 'publish')
-  assert.equal(evaluate(publish.if, { ...context, steps: { install: { outcome: 'success' } } }), true)
-  assert.equal(evaluate(refresh.jobs.simulation.if, context), false)
-  assert.equal(evaluate(refresh.jobs.alert_simulation.if, { needs: { simulation: { result: 'skipped' } } }), false)
-}
-
-test('a cron event without inputs follows the same live route as a bare dispatch', () => {
-  checkLiveRouting(schedule)
-  checkLiveRouting(bareDispatch)
-  checkLiveRouting({ ...bareDispatch, inputs: { simulate: 'none', simulate_recovery: false } })
-  checkLiveRouting({ ...schedule, inputs: null })
-})
-
-test('a healthy no-input cron run closes the live incident and leaves the rehearsal issue open', () => {
-  checkLiveRouting(schedule)
-  const inputs = alertInputs(refresh.jobs.alert, 'refresh', 'success', {
-    freshness: '{"outcome":"fresh"}',
-    publication: '{"outcome":"unchanged","commitId":"20261119T120000Z-12345678"}',
-    stages: '{"publish":"success"}',
-  })
-  assert.equal(inputs.simulated, false)
-  assert.equal(inputs.simulation_recovery, false)
-  const env = Object.fromEntries(Object.entries(issue.jobs.issue.env)
-    .filter(([, value]) => value.includes('inputs.'))
-    .map(([key, value]) => [key, String(evaluate(value, { ...schedule, inputs }))]))
-  const update = issue.jobs.issue.steps.find((step) => step.name === 'Update feed refresh issue')
-  const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', `
+  writeFileSync(join(directory, 'scripts/collect-publish-feed.mjs'), `
+    if (process.argv.slice(2).join(' ') !== '--bucket kwip-feed-prod --check-freshness') process.exit(90)
+    console.log(JSON.stringify({ outcome: 'fresh' }))
+  `)
+  const traces = join(directory, 'trace')
+  writeFileSync(traces, '')
+  const stubs = join(directory, 'stubs.bash')
+  writeFileSync(stubs, `
+    node() {
+      [[ "$1" == scripts/collect-publish-feed.mjs ]] || return 89
+      shift
+      command node "$KWIP_TEST_FIXTURE/scripts/collect-publish-feed.mjs" "$@"
+    }
+    pnpm() {
+      case "$*" in
+        '--dir scripts --ignore-workspace install --frozen-lockfile') return 0 ;;
+        'publish:feed --bucket kwip-feed-prod')
+          echo 'published by stub' >> "$KWIP_TEST_TRACE"
+          echo '{"outcome":"unchanged","commitId":"fixture-recovery"}' ;;
+        *) return 91 ;;
+      esac
+    }
     gh() {
       case "$1 $2" in
         'api --paginate')
           echo '[[{"number":91,"body":"**Simulated incident**"},{"number":42,"body":"Incident: failed"}]]' ;;
+        'api --method')
+          [[ "$3" == PATCH && "$4" == */issues/91 ]] || return 92
+          printf '%s\\n' "$*" >> "$KWIP_TEST_TRACE" ;;
+        'issue comment')
+          [[ "$3" == 91 && "$4" == --body-file ]] || return 93
+          cat "$5" >> "$KWIP_TEST_TRACE" ;;
         'issue close')
-          printf '%s\\n' "$@" ;;
-        *) return 99 ;;
+          printf '%s\\n' "$*" >> "$KWIP_TEST_TRACE" ;;
+        *) return 94 ;;
       esac
     }
-    ${update.run}
-  `], { encoding: 'utf8', env: {
-    ...process.env, ...env, GH_REPO: 'example/kwip', RUN_URL: 'https://example.test/runs/1',
-  } })
-  assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(result.stdout.trim().split('\n'), [
-    'issue', 'close', '42', '--comment',
-    'Feed refresh recovered at commit `20261119T120000Z-12345678`. https://example.test/runs/1',
-  ])
+  `)
+  const eventFile = join(directory, 'event.json')
+  writeFileSync(eventFile, JSON.stringify(payload))
+  for (const args of [
+    ['init', '-q', '-b', 'schedule-fixture'],
+    ['remote', 'add', 'origin', 'https://github.com/example/kwip.git'],
+    ['add', '.'],
+    ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'Create workflow fixture'],
+  ]) {
+    const git = spawnSync('git', args, { cwd: directory, encoding: 'utf8' })
+    assert.equal(git.status, 0, git.stderr)
+  }
+
+  const run = spawnSync(process.env.KWIP_ACT || 'act', [
+    event, '-W', '.github/workflows/feed-refresh.yml', '-e', eventFile,
+    '-P', 'ubuntu-latest=-self-hosted', '--secret', 'GITHUB_TOKEN=fixture-token',
+    '--env', `BASH_ENV=${stubs}`, '--env', `KWIP_TEST_TRACE=${traces}`, '--env', `KWIP_TEST_FIXTURE=${directory}`,
+  ], { cwd: directory, encoding: 'utf8', timeout: 60_000 })
+  if (run.error) throw run.error
+  return { status: run.status, log: run.stdout + run.stderr, trace: readFileSync(traces, 'utf8') }
+}
+
+function assertLiveRun(run) {
+  assert.equal(run.status, 0, run.log)
+  assert.match(run.log, /Run Main Publish feed/)
+  assert.match(run.trace, /^published by stub$/m)
+  assert.match(run.trace, /^issue close 42 --comment Feed refresh recovered at commit `fixture-recovery`\./m)
+  assert.doesNotMatch(run.trace, /issue close 91|Simulated recovery/)
+}
+
+test('the no-input schedule runs the publisher and closes the live incident', (t) => {
+  assertLiveRun(runWorkflow(t, 'schedule', { schedule: '*/15 * * * *' }))
 })
 
-for (const [simulate, recovery, status, freshness, publication] of [
-  ['failed', false, 1, {}, { outcome: 'failed', providerStatus: 503 }],
-  ['paused', false, 1, {}, { outcome: 'paused', providerStatus: 403 }],
-  ['stale', false, 0, { outcome: 'stale', listsVerifiedAtAgeMs: 3600000 }, {}],
-  ['none', true, 0, { outcome: 'fresh' }, { outcome: 'unchanged', commitId: 'simulated-recovery' }],
-]) {
-  test(`dispatch retains the ${recovery ? 'recovery' : simulate} simulation shape`, (t) => {
-    const context = { ...bareDispatch, inputs: { simulate, simulate_recovery: recovery } }
-    assert.equal(evaluate(refresh['run-name'], context), 'Feed refresh (simulation)')
-    assert.equal(evaluate(refresh.concurrency.group, context), 'feed-refresh-simulation')
-    assert.equal(evaluate(refresh.jobs.refresh.if, context), false)
-    assert.equal(evaluate(refresh.jobs.simulation.if, context), true)
-    assert.equal(evaluate(refresh.jobs.alert.if, { needs: { refresh: { result: 'skipped' } } }), false)
+test('a bare dispatch takes the same live path', (t) => {
+  assertLiveRun(runWorkflow(t, 'workflow_dispatch', {}))
+})
 
-    const temp = mkdtempSync(join(tmpdir(), 'kwip-refresh-test-'))
-    t.after(() => rmSync(temp, { recursive: true, force: true }))
-    const file = join(temp, 'output')
-    const job = refresh.jobs.simulation
-    const env = Object.fromEntries(Object.entries(job.env)
-      .map(([key, expression]) => [key, String(evaluate(expression, context))]))
-    const run = spawnSync('bash', ['-e', '-c', job.steps[0].run], {
-      encoding: 'utf8', env: { ...process.env, ...env, GITHUB_OUTPUT: file },
-    })
-    assert.equal(run.status, status, run.stderr)
-    const outputs = Object.fromEntries(readFileSync(file, 'utf8').trim().split('\n').map((line) => {
-      const separator = line.indexOf('=')
-      return [line.slice(0, separator), line.slice(separator + 1)]
-    }))
-    const inputs = alertInputs(refresh.jobs.alert_simulation, 'simulation', status ? 'failure' : 'success', outputs)
-    assert.equal(inputs.simulated, true)
-    assert.equal(inputs.simulation_recovery, recovery)
-    assert.deepEqual(JSON.parse(inputs.freshness), freshness)
-    assert.deepEqual(JSON.parse(inputs.publication), publication)
+for (const [mode, recovery, status, evidence] of [
+  ['failed', false, 1, /Provider status: 503/],
+  ['paused', false, 1, /The provider blocked the runner/],
+  ['stale', false, 0, /listsVerifiedAt was 3600 seconds old/],
+  ['none', true, 0, /issue close 91 --comment Simulated recovery/],
+]) {
+  test(`dispatch retains the ${recovery ? 'recovery' : mode} simulation shape`, (t) => {
+    const run = runWorkflow(t, 'workflow_dispatch', { inputs: { simulate: mode, simulate_recovery: String(recovery) } })
+    assert.equal(run.status, status, run.log)
+    assert.doesNotMatch(run.log, /Run Main Publish feed/)
+    assert.doesNotMatch(run.trace, /published by stub|issue close 42/)
+    assert.match(run.trace, evidence, run.log)
   })
 }

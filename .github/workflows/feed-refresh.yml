@@ -24,10 +24,32 @@ permissions:
   contents: read
 
 jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      mode: ${{ steps.inputs.outputs.mode }}
+      recovery: ${{ steps.inputs.outputs.recovery }}
+      simulation: ${{ steps.inputs.outputs.simulation }}
+    steps:
+      - name: Resolve refresh inputs
+        id: inputs
+        shell: bash
+        env:
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.simulate || 'none' }}
+          RECOVERY: ${{ github.event_name == 'workflow_dispatch' && inputs.simulate_recovery == true }}
+        run: |
+          simulation=false
+          if [[ "$MODE" != none || "$RECOVERY" == true ]]; then simulation=true; fi
+          {
+            printf 'mode=%s\n' "$MODE"
+            printf 'recovery=%s\n' "$RECOVERY"
+            printf 'simulation=%s\n' "$simulation"
+          } >> "$GITHUB_OUTPUT"
+
   refresh:
-    if: >-
-      github.event_name != 'workflow_dispatch' ||
-      ((inputs.simulate || 'none') == 'none' && inputs.simulate_recovery != true)
+    needs: configure
+    if: needs.configure.outputs.simulation == 'false'
     runs-on: ubuntu-latest
     environment: feed-production
     timeout-minutes: 10
@@ -99,9 +121,8 @@ jobs:
           fi
 
   simulation:
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true)
+    needs: configure
+    if: needs.configure.outputs.simulation == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -109,8 +130,8 @@ jobs:
       publication: ${{ steps.simulation.outputs.publication }}
       recovery: ${{ steps.simulation.outputs.recovery }}
     env:
-      SIMULATE: ${{ inputs.simulate || 'none' }}
-      SIMULATE_RECOVERY: ${{ inputs.simulate_recovery }}
+      SIMULATE: ${{ needs.configure.outputs.mode }}
+      SIMULATE_RECOVERY: ${{ needs.configure.outputs.recovery }}
     steps:
       - name: Simulate a refresh result
         id: simulation
