@@ -1,18 +1,26 @@
-import { bannerPlacements, getAdDestination, type BannerPlacement } from '../../shared/utils/banner.ts'
+import { bannerPlacements, getAdDestination, getBannerCreative, type BannerCreatives } from '../../shared/utils/banner.ts'
 
 export function adRedirect(
   placement: string | undefined,
   enabled: boolean,
   destination: string,
-  bannerCreatives: Partial<Record<BannerPlacement, { destination: string }>> = {},
+  bannerCreatives: BannerCreatives = {},
+  creativeKey?: unknown,
 ): Response {
   const banner = bannerPlacements.find(candidate => candidate === placement)
-  const target = banner ? bannerCreatives[banner]?.destination : destination
-  const location = enabled && (banner || placement === 'source' || placement === 'play')
-    ? getAdDestination(target) ?? 'https://kwip.fyi/'
-    : 'https://kwip.fyi/'
+  const headers = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }
+  let location = 'https://kwip.fyi/'
+  if (enabled && banner) {
+    const creative = getBannerCreative(enabled, bannerCreatives, banner)
+    if (!creative?.key || creative.key !== creativeKey) {
+      return new Response('This advertisement is no longer available.', { status: 410, headers })
+    }
+    location = creative.destination
+  } else if (enabled && (placement === 'source' || placement === 'play')) {
+    location = getAdDestination(destination) ?? location
+  }
   return new Response(null, {
     status: 302,
-    headers: { 'cache-control': 'no-store', location, 'referrer-policy': 'no-referrer' },
+    headers: { ...headers, location },
   })
 }

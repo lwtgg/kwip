@@ -7,5 +7,6 @@ export default defineEventHandler((event) => {
     config.public.ads === true,
     config.adDestination,
     config.public.bannerCreatives,
+    getQuery(event).creative,
   )
 })
