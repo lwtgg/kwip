@@ -1,11 +1,15 @@
 name: Feed refresh
-run-name: ${{ github.event_name == 'workflow_dispatch' && ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true) && 'Feed refresh (simulation)' || 'Feed refresh (live)' }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true) && 'Feed refresh (simulation)' || (github.event_name == 'workflow_dispatch' && inputs.cron_attempt && format('Feed refresh (cron {0})', inputs.cron_attempt)) || 'Feed refresh (live)' }}
 
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
+      cron_attempt:
+        description: Correlation identifier for an external cron dispatch
+        type: string
+        required: false
       simulate:
         description: Exercise the issue alert without publishing
         type: choice

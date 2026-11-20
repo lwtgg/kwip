@@ -2,10 +2,15 @@ import { AwsClient } from 'aws4fetch'
 
 const maxAgeMs = 12 * 60_000
 const maxClockSkewMs = 60_000
-const cooldownMs = 10 * 60_000
+const stalledAfterTicks = 6
+const searchSliceMs = 5 * 60_000
+const githubRunPageSize = 100
+const githubRunSearchLimit = 1_000
+const legacyCooldownMs = 10 * 60_000
 const cooldownKey = 'cron-dispatch-cooldown.json'
 const activeStatuses = ['requested', 'waiting', 'pending', 'queued', 'in_progress']
-const workflowUrl = 'https://api.github.com/repos/lwtgg/kwip/actions/workflows/feed-refresh.yml'
+const actionsUrl = 'https://api.github.com/repos/lwtgg/kwip/actions'
+const workflowPath = 'workflows/feed-refresh.yml'
 
 export function decideRefresh(listsVerifiedAt, now, statuses = []) {
   let ageMs = null
@@ -106,6 +111,7 @@ export async function runTick(env, now, request = fetch) {
   let stage = 'manifest'
   let dispatch = 'skipped'
   let dispatchStatus
+  let recordUnresolved
   try {
     const bucket = bucketClient(env, request)
     const manifest = await bucket.read('current.json')
@@ -123,7 +129,7 @@ export async function runTick(env, now, request = fetch) {
     }
     const record = cooldown?.value
     // Older deployments stored only the end of the visibility window.
-    const legacyAttemptAt = Number.isSafeInteger(record?.until) ? record.until - cooldownMs : null
+    const legacyAttemptAt = Number.isSafeInteger(record?.until) ? record.until - legacyCooldownMs : null
     const attemptAt = record?.attemptAt ?? legacyAttemptAt
     const unresolved = Number.isSafeInteger(attemptAt) && attemptAt >= 0 && attemptAt <= now + maxClockSkewMs
     const cleared = Number.isSafeInteger(record?.clearedAt)
@@ -139,54 +145,128 @@ export async function runTick(env, now, request = fetch) {
     }
     if (!unresolved && freshness.decision === 'fresh') return { ...freshness, dispatch }
 
-    stage = 'list-runs'
-    if (!env.GITHUB_REFRESH_TOKEN) throw new TickFailure('missing-github-token')
-    const github = (path, options = {}) => request(`${workflowUrl}/${path}`, {
-      redirect: 'manual',
-      signal: AbortSignal.timeout(10_000),
-      ...options,
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${env.GITHUB_REFRESH_TOKEN}`,
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'kwip-feed-cron',
-        ...options.headers,
-      },
-    })
+    const github = (path, options = {}) => {
+      if (!env.GITHUB_REFRESH_TOKEN) throw new TickFailure('missing-github-token')
+      return request(`${actionsUrl}/${path}`, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+        ...options,
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${env.GITHUB_REFRESH_TOKEN}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'kwip-feed-cron',
+          ...options.headers,
+        },
+      })
+    }
     if (unresolved) {
       stage = 'reconcile-run'
-      // GitHub reports creation times to the second. Include the entire second
-      // in which the reservation was made.
-      const since = new Date(Math.floor(attemptAt / 1000) * 1000).toISOString()
-      const query = new URLSearchParams({ branch: 'main', event: 'workflow_dispatch', created: `>=${since}`, per_page: '100' })
-      const runs = await github(`runs?${query}`)
+      const { attemptId, runId } = record
+      const misses = Number.isSafeInteger(record.unresolvedTicks) && record.unresolvedTicks > 0
+        ? record.unresolvedTicks : 0
+      recordUnresolved = async (details, cursor = {}) => {
+        stage = 'cooldown-write'
+        const unresolvedTicks = Math.min(misses + 1, stalledAfterTicks)
+        const updated = await bucket.writeReservation({ ...record, ...cursor, unresolvedTicks }, cooldown)
+        if (!updated) return { ageMs, dispatch, ...details, counterWriteConflict: true }
+        return {
+          ageMs, dispatch, ...details, unresolvedTicks,
+          decision: unresolvedTicks === stalledAfterTicks ? 'stalled' : details.decision,
+        }
+      }
+      if (Number.isSafeInteger(runId) && runId > 0) {
+        const response = await github(`runs/${runId}`)
+        if (response.status === 404) {
+          await discardBody(response)
+          return await recordUnresolved({ decision: 'cooldown', stage, reason: 'run-not-visible' })
+        }
+        if (!response.ok) {
+          await discardBody(response)
+          throw new TickFailure('http-error', response.status)
+        }
+        const run = parseJson(await response.text())
+        if (run?.id !== runId) throw new TickFailure('invalid-run-identity')
+        if (run.status === 'completed') return await release(cooldown, 'attempt-dead')
+        if (activeStatuses.includes(run.status)) {
+          if (misses) {
+            stage = 'cooldown-write'
+            await bucket.writeReservation({ ...record, unresolvedTicks: 0 }, cooldown)
+          }
+          return { ageMs, decision: 'active-run', dispatch }
+        }
+        throw new TickFailure('invalid-run-status')
+      }
+
+      if (!attemptId) {
+        return await recordUnresolved({ decision: 'cooldown', stage, reason: 'legacy-reservation' })
+      }
+
+      // GitHub creation timestamps have one-second precision. Use inclusive
+      // bounds and start the next slice one second past the previous end.
+      // Restart cursors saved with different clock-skew bounds.
+      const origin = Math.floor((attemptAt - maxClockSkewMs) / 1000) * 1000
+      const latest = Math.floor(now / 1000) * 1000
+      const validCursor = record.searchOrigin === origin && Number.isSafeInteger(record.searchFrom) && record.searchFrom >= origin &&
+        Number.isSafeInteger(record.searchUntil) && record.searchFrom <= record.searchUntil &&
+        record.searchUntil <= latest && Number.isSafeInteger(record.searchThrough) &&
+        record.searchThrough >= record.searchFrom && record.searchThrough < record.searchFrom + searchSliceMs
+      const searchUntil = validCursor ? record.searchUntil : Math.max(origin, latest)
+      const searchFrom = validCursor ? record.searchFrom : origin
+      const searchThrough = validCursor ? record.searchThrough : searchFrom + searchSliceMs - 1000
+      const page = validCursor && Number.isSafeInteger(record.searchPage) && record.searchPage > 1
+        ? record.searchPage : 1
+      const query = new URLSearchParams({
+        branch: 'main', event: 'workflow_dispatch',
+        created: `${new Date(searchFrom).toISOString()}..${new Date(searchThrough).toISOString()}`,
+        per_page: String(githubRunPageSize), page: String(page),
+      })
+      const runs = await github(`${workflowPath}/runs?${query}`)
       if (!runs.ok) {
         await discardBody(runs)
         throw new TickFailure('http-error', runs.status)
       }
       const { total_count: count, workflow_runs: entries } = parseJson(await runs.text()) ?? {}
-      if (!Array.isArray(entries) || !Number.isSafeInteger(count) || count < entries.length ||
-          entries.some((entry) => !['completed', ...activeStatuses].includes(entry?.status))) {
+      if (!Array.isArray(entries) || !Number.isSafeInteger(count) || count < entries.length) {
         throw new TickFailure('invalid-run-list')
       }
-      if (entries.some((entry) => activeStatuses.includes(entry.status))) {
-        return { ageMs, decision: 'active-run', dispatch }
+      const match = entries.find(
+        (run) => run?.display_title === `Feed refresh (cron ${attemptId})`,
+      )
+      if (!match) {
+        const capped = count >= githubRunSearchLimit
+        const hasNext = /\brel\s*=\s*"?next\b/i.test(runs.headers.get('link') ?? '')
+        let cursor
+        if (capped && searchFrom < searchThrough) {
+          // Search the older half first so newer runs cannot hide the attempt
+          // behind GitHub's result cap. Later slices cover the remaining time.
+          const midpoint = Math.floor((searchThrough - searchFrom) / 2000) * 1000
+          cursor = { searchFrom, searchThrough: searchFrom + midpoint, searchPage: 1 }
+        } else if (hasNext && page * githubRunPageSize < githubRunSearchLimit) {
+          cursor = { searchFrom, searchThrough, searchPage: page + 1 }
+        } else {
+          const nextFrom = searchThrough < searchUntil ? searchThrough + 1000 : origin
+          cursor = {
+            searchFrom: nextFrom, searchThrough: nextFrom + searchSliceMs - 1000, searchPage: 1,
+            searchUntil: nextFrom === origin ? null : searchUntil,
+          }
+        }
+        return await recordUnresolved({
+          decision: 'cooldown', stage, reason: capped ? 'run-search-capped' : 'run-not-visible',
+        }, { searchOrigin: origin, searchUntil, ...cursor })
       }
-      if (count !== entries.length || /\brel\s*=\s*"?next\b/i.test(runs.headers.get('link') ?? '')) {
-        return { ageMs, decision: 'inconclusive', dispatch, stage, reason: 'incomplete-run-list' }
-      }
-      if (now - attemptAt < cooldownMs) return { ageMs, decision: 'cooldown', dispatch }
+      if (!Number.isSafeInteger(match.id) || match.id <= 0) throw new TickFailure('invalid-run-identity')
 
-      // A complete lookup after the visibility window found only terminal runs
-      // or no matching run. Release first so the next tick checks for active
-      // runs and reads the manifest again before it can dispatch.
-      return await release(cooldown, 'attempt-dead')
+      stage = 'cooldown-write'
+      const updated = await bucket.writeReservation({ attemptAt, attemptId, runId: match.id }, cooldown)
+      return { ageMs, decision: updated ? 'run-identified' : 'cooldown', dispatch }
     }
 
+    stage = 'list-runs'
     // Check earlier lifecycle states first so a transition to queued or
     // in_progress can still be seen by a later query.
     for (const status of activeStatuses) {
-      const runs = await github(`runs?branch=main&status=${status}&per_page=1`)
+      const runs = await github(`${workflowPath}/runs?branch=main&status=${status}&per_page=1`)
       if (!runs.ok) {
         await discardBody(runs)
         throw new TickFailure('http-error', runs.status)
@@ -204,15 +284,16 @@ export async function runTick(env, now, request = fetch) {
 
     // Reserve only after the idle check, using the ETag from this tick.
     stage = 'cooldown-write'
-    const claim = await bucket.writeReservation({ attemptAt: now }, cooldown)
+    const attemptId = crypto.randomUUID()
+    const claim = await bucket.writeReservation({ attemptAt: now, attemptId }, cooldown)
     if (!claim) return { ageMs, decision: 'cooldown', dispatch }
 
     stage = 'dispatch'
     dispatch = 'failed'
-    const response = await github('dispatches', {
+    const response = await github(`${workflowPath}/dispatches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref: 'main' }),
+      body: JSON.stringify({ ref: 'main', inputs: { cron_attempt: attemptId } }),
     })
     dispatchStatus = response.status
     await discardBody(response)
@@ -225,7 +306,7 @@ export async function runTick(env, now, request = fetch) {
 
     // An explicit rejection can retry next tick. A timeout or 5xx may have queued
     // a run, so leave the reservation for the next tick to reconcile.
-    if (response.status < 500) {
+    if (response.status < 500 && response.status !== 408) {
       await release(claim, 'attempt-dead')
     }
     stage = 'dispatch'
@@ -236,6 +317,17 @@ export async function runTick(env, now, request = fetch) {
     if (error instanceof TickFailure) reason = error.reason
     else if (error?.name === 'TimeoutError') reason = 'request-timeout'
     else if (error?.name === 'AbortError') reason = 'request-aborted'
+    if (stage === 'reconcile-run' && recordUnresolved) {
+      const failure = { decision: 'error', stage, reason, ...(status === undefined ? {} : { status }) }
+      try {
+        return await recordUnresolved(failure)
+      } catch (writeError) {
+        return {
+          ageMs, dispatch, ...failure,
+          counterWriteError: writeError instanceof TickFailure ? writeError.reason : 'request-failed',
+        }
+      }
+    }
     return {
       ageMs,
       decision: 'error',

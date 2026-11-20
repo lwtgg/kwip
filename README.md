@@ -121,23 +121,29 @@ The Worker accepts up to one minute of future clock skew. Malformed or
 further-future timestamps are logged as manifest errors.
 
 The Worker checks the queued, in-progress, pending, requested, and waiting
-statuses on `main` with one result per filter. An active run or inconclusive
-lookup skips dispatch. Before POSTing, the Worker conditionally reserves a
-ten-minute cooldown in `cron-dispatch-cooldown.json` in R2. This covers delayed
-GitHub run visibility and competing cron ticks. Only one tick can successfully
-dispatch per ten-minute cooldown. An explicit rejection releases the
-reservation so a later tick can retry. An ambiguous timeout or server error
-leaves it in place until expiry. If the cooldown record is corrupt, the
-Worker first confirms GitHub is idle, then repairs it with a conditional
-write. The GitHub schedule stays enabled and both triggers still use the
-workflow's existing concurrency group.
+statuses on `main` before claiming a reservation in
+`cron-dispatch-cooldown.json` in R2. An unresolved reservation blocks another
+dispatch. On each tick the Worker checks whether the manifest advanced past
+the attempt or reconciles the reserved dispatch with GitHub. It finds the run
+using the dispatch's unique identifier in the workflow run title, records the
+run ID, then checks that run directly. A completed matching run, an explicit
+dispatch rejection, or an advanced manifest clears the reservation. An
+empty result or GitHub error leaves it in place for the next tick. The Worker
+saves its position in bounded time slices and logs `decision: "stalled"`
+after six consecutive unresolved ticks, including failed GitHub lookups. See the [reservation recovery and rollout
+procedure](worker-cron/README.md#recover-a-stalled-or-legacy-reservation).
+The GitHub schedule stays enabled and both triggers use the existing
+concurrency group.
 
-The pinger runs 288 ticks per day on Workers Paid, with a deployment budget
-of 1,000 subrequests per invocation. The original three-subrequest figure
-was an estimate. The Worker now enforces a ceiling of ten per tick. A fresh
-tick uses one R2 read. A stale tick can use two R2 reads and five small
-GitHub lookups. An idle tick adds a conditional R2 write and the dispatch
-POST, and an explicit rejection can add one release write.
+The approved ceiling is ten subrequests per tick on Workers Paid, against
+the deployment budget of 1,000 subrequests per invocation. A fresh tick
+without a pending attempt reads both the manifest and reservation. A
+reconciliation tick uses at most four subrequests. A dispatch tick uses nine,
+with a tenth if GitHub explicitly rejects the dispatch and the Worker releases
+the reservation.
+
+Merge the workflow input `cron_attempt` to `main` before deploying the updated
+pinger, so GitHub accepts and labels its dispatches.
 
 Provision `GITHUB_REFRESH_TOKEN` as a fine-grained GitHub token for
 `lwtgg/kwip` with **Actions: Read and write**. Install it directly with

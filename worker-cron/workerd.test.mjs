@@ -63,12 +63,17 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       }
       if (url.host === 'api.github.com') {
         if (url.pathname.endsWith('/runs')) {
+          if (redirectAt === 'list-runs') return redirect()
           if (reservation) {
             assert.equal(url.searchParams.get('event'), 'workflow_dispatch')
-            assert.match(url.searchParams.get('created'), /^>=/)
+            assert.match(url.searchParams.get('created'), /Z\.\..+Z$/)
+            return Response.json({
+              total_count: 1, workflow_runs: [{ id: 42, display_title: 'Feed refresh (cron test-attempt)' }],
+            })
           }
-          return redirectAt === 'list-runs' ? redirect() : Response.json({ total_count: 0, workflow_runs: [] })
+          return Response.json({ total_count: 0, workflow_runs: [] })
         }
+        if (url.pathname.endsWith('/actions/runs/42')) return Response.json({ id: 42, status: 'completed' })
         if (url.pathname.endsWith('/dispatches')) {
           return redirectAt === 'dispatch' ? redirect() : new Response(null, { status: 204 })
         }
@@ -104,11 +109,15 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
     assert.equal(seen.length, phase === 'list-runs' ? 3 : 10)
   }
 
-  reservation = { attemptAt: Date.now() - 11 * 60_000 }
+  reservation = { attemptAt: Date.now() - 11 * 60_000, attemptId: 'test-attempt' }
   const failure = await tick('list-runs')
   assert.equal(failure.stage, 'reconcile-run')
   assert.equal(failure.status, 302)
-  assert.equal(seen.length, 3)
+  assert.equal(seen.length, 4)
+  assert.equal(reservation.unresolvedTicks, 1)
+  assert.equal((await tick()).decision, 'run-identified')
+  assert.equal(reservation.runId, 42)
+  assert.equal(seen.length, 4)
   assert.equal((await tick()).decision, 'attempt-dead')
   assert.ok(Number.isSafeInteger(reservation.clearedAt))
   assert.equal(seen.length, 4)
