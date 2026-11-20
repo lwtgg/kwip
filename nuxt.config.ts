@@ -50,6 +50,7 @@ export default defineNuxtConfig({
     adDestination: '',
     public: {
       ads: false,
+      bannerAssetOrigin: '',
       bannerCreatives: {
         'home-banner': { image: '', alt: '', destination: '' },
         'event-banner': { image: '', alt: '', destination: '' },

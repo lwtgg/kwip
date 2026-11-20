@@ -57,7 +57,7 @@ def check_page(browser, origin, placement, width, has_creative, *, failure=False
         html = response.text()
         path = MISSING_IMAGE if failure else IMAGE
         assert (f'src="{path}"' in html) == (has_creative and not missing)
-        assert f'href="/go/{placement}?' not in html
+        assert (f'href="/go/{placement}?' in html) == (has_creative and not missing)
         slot = page.locator('[data-ad-format]')
         expect(slot).to_have_count(int(has_creative))
         page.wait_for_timeout(250)
@@ -72,7 +72,7 @@ def check_page(browser, origin, placement, width, has_creative, *, failure=False
             assert (box['width'], box['height']) == ((320, 100) if width == 390 else (970, 90)), box
             link = slot.get_by_role('link')
             if not missing:
-                expect(link).to_have_count(0)
+                expect(link).to_have_accessible_name(f'House {placement}')
                 for _ in range(20):
                     if pending:
                         break
@@ -150,10 +150,10 @@ def check_without_javascript(browser, origin, *, failure=False):
         slot = page.locator('[data-ad-format]')
         slot.scroll_into_view_if_needed()
         image = slot.locator('img')
-        if failure:
-            expect(slot.get_by_role('link', include_hidden=True)).to_have_count(0)
-            expect(slot.get_by_role('img')).to_have_count(0)
-            assert slot.aria_snapshot().strip() == '- text: Advertisement'
+        if not failure:
+            link = slot.get_by_role('link', name='House home-banner')
+            expect(link).to_have_accessible_description('Advertisement')
+            expect(image).to_have_accessible_name('House home-banner')
             slot.evaluate("""slot => {
               for (const [name, place] of [['Before banner', 'before'], ['After banner', 'after']]) {
                 const button = document.createElement('button');
@@ -163,6 +163,8 @@ def check_without_javascript(browser, origin, *, failure=False):
               }
             }""")
             page.get_by_role('button', name='Before banner').focus()
+            page.keyboard.press('Tab')
+            expect(link).to_be_focused()
             page.keyboard.press('Tab')
             expect(page.get_by_role('button', name='After banner')).to_be_focused()
             slot.evaluate("""slot => {
@@ -174,8 +176,39 @@ def check_without_javascript(browser, origin, *, failure=False):
         # Ignore corner antialiasing differences between one and two painted surfaces.
         slot.evaluate("slot => slot.style.borderRadius = '0'")
         with_image = slot.screenshot()
-        image.evaluate("image => image.remove()")
+        image.evaluate("image => image.closest('a').remove()")
         assert (with_image == slot.screenshot()) is failure
+    finally:
+        context.close()
+
+
+def check_hosted_image(browser, origin, output, asset_url):
+    context = browser.new_context(java_script_enabled=False)
+    try:
+        requests = []
+
+        def intercept(route):
+            url = route.request.url
+            if url.startswith(origin + '/'):
+                route.continue_()
+            elif url == asset_url:
+                requests.append(url)
+                route.fulfill(path=output / 'public/og-default.jpg', content_type='image/jpeg')
+            else:
+                raise AssertionError(f'Unexpected request: {url}')
+
+        context.route('**/*', intercept)
+        page = context.new_page()
+        response = page.goto(origin, wait_until='domcontentloaded')
+        assert f'src="{asset_url}"' in response.text()
+        slot = page.locator('[data-ad-format]')
+        slot.scroll_into_view_if_needed()
+        image = slot.get_by_role('img', name='House home-banner')
+        image.evaluate('image => image.decode()')
+        assert requests == [asset_url]
+        link = slot.get_by_role('link', name='House home-banner')
+        redirect = context.request.get(origin + link.get_attribute('href'), max_redirects=0)
+        assert redirect.status == 302 and redirect.headers['location'] == f'{origin}/fixtures/away'
     finally:
         context.close()
 
@@ -188,13 +221,16 @@ def main():
         directory = Path(temp)
         output = args.output.resolve()
 
-        def start(name, enabled, images):
+        def start(name, enabled, images, asset_origin=''):
             def variables(origin):
                 creatives = {
                     placement: {'image': image, 'alt': f'House {placement}', 'destination': f'{origin}/fixtures/away'}
                     for placement, image in images.items()
                 }
-                return {'NUXT_PUBLIC_BANNER_CREATIVES': json.dumps(creatives)}
+                return {
+                    'NUXT_PUBLIC_BANNER_CREATIVES': json.dumps(creatives),
+                    'NUXT_PUBLIC_BANNER_ASSET_ORIGIN': asset_origin,
+                }
 
             return stack.enter_context(worker(directory, name, output, EXTERNAL_DESTINATION, enabled, player='/fixtures',
                                               variables=variables, prepare_assets=prepare_banner_assets))
@@ -203,6 +239,9 @@ def main():
         off = start('banner-off', False, dict.fromkeys(PAGES, IMAGE))
         replacement = start('banner-replacement', True, {'home-banner': IMAGE})
         partial = start('banner-partial', True, {'home-banner': '/go/source', 'event-banner': MISSING_IMAGE, 'vods-banner': ''})
+        asset_origin = 'https://assets.example.test'
+        asset_url = f'{asset_origin}/campaigns/house.jpg'
+        hosted = start('banner-hosted', True, {'home-banner': asset_url}, asset_origin)
         browser = pw.chromium.launch()
         for width in (390, 1280):
             for placement in PAGES:
@@ -221,7 +260,9 @@ def main():
         assert stale.status == 410 and 'location' not in stale.headers
         check_without_javascript(browser, on)
         check_without_javascript(browser, partial, failure=True)
-        print('JavaScript disabled: loaded image paints, failed image matches the label-only fallback, and Tab skips it')
+        check_hosted_image(browser, hosted, output, asset_url)
+        print('JavaScript disabled: loaded image paints, alt is exposed, and Tab reaches the sponsored link')
+        print('Hosted creative loads only from the configured asset origin and its redirect resolves')
         browser.close()
 
 

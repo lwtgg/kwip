@@ -6,12 +6,13 @@ export function adRedirect(
   destination: string,
   bannerCreatives: BannerCreatives = {},
   creativeKey?: unknown,
+  assetOrigin = '',
 ): Response {
   const banner = bannerPlacements.find(candidate => candidate === placement)
   const headers = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }
   let location = 'https://kwip.fyi/'
   if (enabled && banner) {
-    const creative = getBannerCreative(enabled, bannerCreatives, banner)
+    const creative = getBannerCreative(enabled, bannerCreatives, banner, assetOrigin)
     if (!creative?.key || creative.key !== creativeKey) {
       return new Response('This advertisement is no longer available.', { status: 410, headers })
     }

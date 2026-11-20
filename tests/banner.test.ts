@@ -78,3 +78,24 @@ test('stale, missing and substituted creative keys cannot redirect to the curren
   }
   assert.equal(adRedirect(placement, true, '', replacement, newKey).headers.get('location'), replacement[placement].destination)
 })
+
+
+test('hosted raster images require a configured HTTPS origin and a normalized static path', () => {
+  const placement = 'home-banner'
+  const origin = 'https://assets.example.com'
+  const image = origin + '/campaigns/house.webp'
+  const creatives = { [placement]: { ...creative, image } }
+  const banner = getBannerCreative(true, creatives, placement, origin)
+  assert.equal(banner?.image, image)
+  assert.equal(adRedirect(placement, true, '', creatives, banner?.key, origin).headers.get('location'), creative.destination)
+  for (const invalidOrigin of ['', 'http://assets.example.com', origin + '/campaigns', 'https://other.example.com']) {
+    assert.equal(getBannerCreative(true, creatives, placement, invalidOrigin), undefined)
+  }
+  for (const invalidImage of [
+    origin + '/go/source', origin + '/house.html', origin + '/house.webp?x=1', origin + '/house.webp#fragment',
+    origin + '/campaigns/../house.webp', origin + '/%2e%2e/house.webp', origin + '/campaigns//house.webp',
+    'https://user@assets.example.com/house.webp', origin + '.other.example.com/house.webp',
+  ]) {
+    assert.equal(getBannerCreative(true, { [placement]: { ...creative, image: invalidImage } }, placement, origin), undefined)
+  }
+})
