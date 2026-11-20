@@ -1,17 +1,26 @@
-export function adRedirect(placement: string | undefined, enabled: boolean, destination: string): Response {
+import { bannerPlacements, getAdDestination, getBannerCreative, type BannerCreatives } from '../../shared/utils/banner.ts'
+
+export function adRedirect(
+  placement: string | undefined,
+  enabled: boolean,
+  destination: string,
+  bannerCreatives: BannerCreatives = {},
+  creativeKey?: unknown,
+): Response {
+  const banner = bannerPlacements.find(candidate => candidate === placement)
+  const headers = { 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }
   let location = 'https://kwip.fyi/'
-  if (enabled && (placement === 'source' || placement === 'play')) {
-    try {
-      const url = new URL(destination)
-      if ((url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password) {
-        location = url.href
-      }
-    } catch {
-      // Missing or invalid destination uses the canonical homepage.
+  if (enabled && banner) {
+    const creative = getBannerCreative(enabled, bannerCreatives, banner)
+    if (!creative?.key || creative.key !== creativeKey) {
+      return new Response('This advertisement is no longer available.', { status: 410, headers })
     }
+    location = creative.destination
+  } else if (enabled && (placement === 'source' || placement === 'play')) {
+    location = getAdDestination(destination) ?? location
   }
   return new Response(null, {
     status: 302,
-    headers: { 'cache-control': 'no-store', location, 'referrer-policy': 'no-referrer' },
+    headers: { ...headers, location },
   })
 }

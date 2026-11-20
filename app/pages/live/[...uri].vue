@@ -828,8 +828,7 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
         </div>
       </section>
 
-      <!-- Review #2: Reserved 970×90 / 320×100 AdSlot immediately below player, before related streams -->
-      <AdSlot format="leaderboard" />
+      <AdSlot format="leaderboard" placement="event-banner" />
 
       <!-- Related streams in same category -->
       <section class="space-y-3">

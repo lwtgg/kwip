@@ -18,10 +18,17 @@
 
 :root {
   --focus-ring: var(--color-accent);
+  --focus-ring-inset: -2px;
   --card-pad: 0.875rem;
   --card-gap: 0.5rem;
   --grid-gap: 1rem;
   --rail-gap: 1rem;
+  --banner-leaderboard-width: 970px;
+  --banner-leaderboard-height: 90px;
+  --banner-mobile-width: 320px;
+  --banner-mobile-height: 100px;
+  --banner-rail-width: 300px;
+  --banner-rail-height: 250px;
 }
 
 [data-density='compact'] {
@@ -72,7 +79,7 @@
   }
 
   nav.overflow-x-auto a:focus-visible {
-    outline-offset: -2px;
+    outline-offset: var(--focus-ring-inset);
     box-shadow: inset 0 0 0 4px var(--color-bg);
   }
 

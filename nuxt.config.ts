@@ -35,6 +35,10 @@ export default defineNuxtConfig({
       route: '/go/:placement',
       method: 'get',
       handler: fileURLToPath(new URL('./server/handlers/ad-redirect.ts', import.meta.url)),
+    }, {
+      route: '/banners/:file',
+      method: 'get',
+      handler: fileURLToPath(new URL('./server/handlers/banner-image.ts', import.meta.url)),
     }],
     // Rule 11: HTML 30s + SWR, hashed assets immutable, own /api/* uncached
     routeRules: {
@@ -50,6 +54,11 @@ export default defineNuxtConfig({
     adDestination: '',
     public: {
       ads: false,
+      bannerCreatives: {
+        'home-banner': { image: '', alt: '', destination: '' },
+        'event-banner': { image: '', alt: '', destination: '' },
+        'vods-banner': { image: '', alt: '', destination: '' },
+      },
       siteName: process.env.NUXT_PUBLIC_SITE_NAME || 'kwip',
       canonicalHost: process.env.NUXT_PUBLIC_CANONICAL_HOST || 'kwip.fyi',
       feedBase: process.env.NUXT_PUBLIC_FEED_BASE || '/fixtures',

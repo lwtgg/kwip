@@ -20,6 +20,7 @@ NUXT_PUBLIC_FEED_MIRROR_BASE = "https://api.ppv.cx/api"
 binding = "ASSETS"
 directory = ".output/public"
 not_found_handling = "none"
+run_worker_first = ["/banners/*"]
 
 [observability]
 enabled = true
@@ -28,3 +29,8 @@ enabled = true
 binding = "FEED_SNAPSHOTS"
 bucket_name = "kwip-feed-prod"
 preview_bucket_name = "kwip-feed-preview"
+
+[[r2_buckets]]
+binding = "BANNER_ASSETS"
+bucket_name = "kwip-banners-prod"
+preview_bucket_name = "kwip-banners-preview"
