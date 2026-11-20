@@ -154,10 +154,16 @@ def check_source(browser, origin, width, label, ads):
         if ads:
             expect(chip(page, 'Second embed')).to_have_accessible_name(
                 'Second embed. Opens an advertiser in a new tab')
-            with context.expect_page() as popup:
-                chip(page, 'Second embed').click()
+            with context.expect_event('request', predicate=lambda req: req.url.endswith('/campaign.html')) as advertiser:
+                with context.expect_page() as popup:
+                    chip(page, 'Second embed').click()
             tab = popup.value
             expect(tab.get_by_text('Ad fixture')).to_be_visible()
+            destination = advertiser.value
+            redirect = destination.redirected_from
+            assert redirect is not None and redirect.url == origin + '/go/source'
+            assert 'referer' not in redirect.all_headers()
+            assert 'referer' not in destination.all_headers()
             assert tab.evaluate('window.opener === null && document.referrer === ""')
             assert len(opened) == 1
         else:

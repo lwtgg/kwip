@@ -20,6 +20,7 @@ test('a blocked popup leaves the session available for the next qualifying click
   const session = {
     getItem: (key: string) => storage.get(key) ?? null,
     setItem: (key: string, value: string) => { storage.set(key, value) },
+    removeItem: (key: string) => { storage.delete(key) },
   }
   assert.equal(canClickUnder(false, session, true), false)
   assert.equal(canClickUnder(true, session, false), false)
@@ -30,18 +31,23 @@ test('a blocked popup leaves the session available for the next qualifying click
   assert.equal(canClickUnder(true, session, true), true)
 
   const opens: string[][] = []
-  const navigations: { url: string; opener: unknown }[] = []
+  const navigations: { href: string; rel: string; opener: unknown }[] = []
+  const link = {
+    href: '',
+    rel: '',
+    click() { navigations.push({ href: link.href, rel: link.rel, opener: popup.opener }) },
+  }
   const popup = {
     opener: {} as unknown,
     close() {},
-    location: { replace(url: string) { navigations.push({ url, opener: popup.opener }) } },
+    document: { createElement: () => link },
   }
   assert.equal(openClickUnder(session, 'source', (...args) => {
     opens.push(args)
     return popup
   }), true)
   assert.deepEqual(opens, [['about:blank', '_blank']])
-  assert.deepEqual(navigations, [{ url: '/go/source', opener: null }])
+  assert.deepEqual(navigations, [{ href: '/go/source', rel: 'noreferrer', opener: null }])
   assert.equal(canClickUnder(true, session, true), false)
   assert.equal(openClickUnder(session, 'play', (...args) => {
     opens.push(args)
@@ -50,19 +56,41 @@ test('a blocked popup leaves the session available for the next qualifying click
   assert.equal(opens.length, 1)
 })
 
+test('throwing navigation closes the popup and rolls back the session cap', () => {
+  const storage = new Map<string, string>()
+  const session = {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value) },
+    removeItem: (key: string) => { storage.delete(key) },
+  }
+  let closed = false
+  const popup = {
+    opener: {},
+    close() { closed = true },
+    document: { createElement: () => ({
+      href: '',
+      rel: '',
+      click() { throw new Error('Navigation rejected') },
+    }) },
+  }
+  assert.equal(openClickUnder(session, 'source', () => popup), false)
+  assert.equal(closed, true)
+  assert.equal(canClickUnder(true, session, true), true)
+})
+
 test('unavailable session storage suppresses ad navigation', () => {
   assert.equal(canClickUnder(true, null, true), false)
   const unavailable = () => { throw new Error('Storage blocked') }
-  assert.equal(canClickUnder(true, { getItem: unavailable, setItem: unavailable }, true), false)
+  assert.equal(canClickUnder(true, { getItem: unavailable, setItem: unavailable, removeItem: unavailable }, true), false)
   let closed = false
   let navigated = false
-  assert.equal(openClickUnder({ getItem: () => null, setItem: unavailable }, 'play', () => ({
+  assert.equal(openClickUnder({ getItem: () => null, setItem: unavailable, removeItem: unavailable }, 'play', () => ({
     opener: {},
     close() {
       closed = true
       throw new Error('Popup cleanup rejected')
     },
-    location: { replace() { navigated = true } },
+    document: { createElement: () => ({ href: '', rel: '', click() { navigated = true } }) },
   })), false)
   assert.equal(closed, true)
   assert.equal(navigated, false)

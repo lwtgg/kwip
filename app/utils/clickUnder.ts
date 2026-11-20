@@ -1,8 +1,10 @@
 const sessionKey = 'ads:click-under'
 
 type EventWindow = { always_live?: number; starts_at: number; ends_at: number }
-type ClickSession = Pick<Storage, 'getItem' | 'setItem'>
-type Popup = Pick<Window, 'opener' | 'close'> & { location: Pick<Location, 'replace'> }
+type ClickSession = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+type Popup = Pick<Window, 'opener' | 'close'> & {
+  document: { createElement(tag: 'a'): Pick<HTMLAnchorElement, 'href' | 'rel' | 'click'> }
+}
 
 export function isClickUnderEligible(event: EventWindow | null | undefined, now: number): boolean {
   return !!event && event.always_live !== 1 && event.starts_at > 0 &&
@@ -25,15 +27,26 @@ export function openClickUnder(
 ): boolean {
   if (!canClickUnder(true, session, true)) return false
   let popup: Popup | null = null
+  let reserved = false
   try {
     popup = open('about:blank', '_blank')
     if (!popup) return false
     // Disconnect the opener before any third-party content can load.
     popup.opener = null
+    const link = popup.document.createElement('a')
+    link.href = `/go/${placement}`
+    link.rel = 'noreferrer'
     session.setItem(sessionKey, '1')
-    // The redirect sets Referrer-Policy: no-referrer for the outbound request.
-    popup.location.replace(`/go/${placement}`)
+    reserved = true
+    link.click()
   } catch {
+    if (reserved) {
+      try {
+        session.removeItem(sessionKey)
+      } catch {
+        // Storage can become unavailable during recovery.
+      }
+    }
     try {
       popup?.close()
     } catch {
