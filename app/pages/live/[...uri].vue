@@ -7,10 +7,11 @@ import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
 import { formatViewersExact } from '~/utils/viewers'
+import { canClickUnder, isClickUnderEligible, openClickUnder } from '~/utils/clickUnder'
 
 const route = useRoute()
 const router = useRouter()
-const { siteName, canonicalHost, feedBase } = useRuntimeConfig().public
+const { siteName, canonicalHost, feedBase, ads } = useRuntimeConfig().public
 
 const uriName = computed(() => {
   const raw = route.params.uri
@@ -197,6 +198,31 @@ const currentSource = computed(() =>
   sources.value.find((source) => source.key === selectedSourceKey.value) ?? null,
 )
 
+let clickSession: Storage | null = null
+let openAdvertiser: Window['open'] | undefined
+const adAvailable = ref(false)
+const announceAd = computed(() =>
+  adAvailable.value && isClickUnderEligible(detail.value, nowSeconds.value),
+)
+
+function handleAdvertiserClick(event: MouseEvent, placement: 'source' | 'play', alreadySelected = false) {
+  if (!event.isTrusted || !clickSession || !openAdvertiser ||
+    !canClickUnder(ads === true, clickSession,
+      isClickUnderEligible(detail.value, Date.now() / 1000), alreadySelected)) return false
+  const attempted = openClickUnder(clickSession, placement, openAdvertiser)
+  adAvailable.value = false
+  return attempted
+}
+
+function handlePrimaryPlay(event: MouseEvent) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+  if (!handleAdvertiserClick(event, 'play')) return
+  // Reserve the new tab for the advertiser and let the link open in this tab.
+  const link = event.currentTarget as HTMLAnchorElement
+  link.target = '_self'
+  setTimeout(() => { link.target = '_blank' }, 0)
+}
+
 async function writeSourceQuery(key: string, replace = false) {
   const target = sources.value.find(source => source.key === key)
   if (target?.origin === 'supplement' && !pickedSupplementKeys.has(key)) return
@@ -213,6 +239,15 @@ async function writeSourceQuery(key: string, replace = false) {
 }
 
 onMounted(() => {
+  if (ads === true) {
+    try {
+      clickSession = window.sessionStorage
+      openAdvertiser = window.open.bind(window)
+      adAvailable.value = canClickUnder(true, clickSession, true)
+    } catch {
+      // A session without storage cannot be capped reliably.
+    }
+  }
   void loadSupplement()
   mounted.value = true
   if (missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
@@ -579,6 +614,8 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
           <SourceSelect
             v-model="activeSourceKey"
             :sources="sources"
+            :click-under="announceAd"
+            @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
           <button
             v-if="shieldSourceKey !== null"
@@ -708,7 +745,9 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
               :href="currentSource.url"
               target="_blank"
               rel="noopener noreferrer"
+              :aria-label="announceAd ? `Open at source · ${currentSource.label} in this tab. Opens an advertiser in a new tab` : undefined"
               class="inline-flex items-center gap-2 rounded-[var(--radius)] bg-accent px-6 py-3 text-sm font-semibold text-accent-fg shadow-sm hover:opacity-90"
+              @click="handlePrimaryPlay"
             >
               <span>Open at source · {{ currentSource.label }}</span>
               <svg

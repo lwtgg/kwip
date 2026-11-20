@@ -28,8 +28,11 @@ export async function lookupEdgePage(event: H3Event) {
   const identity = await getFeedCacheIdentity(event, feedSnapshotBinding, config)
   if (!identity) return
   const query = renderSearch(url)
-  const key = edgeCacheKey(url, identity, query)
   const timed = /^(?:\/$|\/(?:live|c)\/)/i.test(url.pathname)
+  // Nuxt serializes public runtime config on every page, including navigation entry points.
+  const cacheQuery = new URLSearchParams(query)
+  if (config.ads === true) cacheQuery.set('ads', '1')
+  const key = edgeCacheKey(url, identity, cacheQuery)
   try {
     const cached = await cache.match(key)
     // The absolute deadline also excludes entries written before the current TTL rules.

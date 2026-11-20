@@ -1,4 +1,5 @@
 import { readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { feedDetailPath, type FeedCollection } from './server/utils/feed-path'
 
 import tailwindcss from '@tailwindcss/vite'
@@ -30,17 +31,25 @@ export default defineNuxtConfig({
   nitro: {
     // Rule 7: node-server stays usable via NITRO_PRESET=node-server
     preset: process.env.NITRO_PRESET || 'cloudflare_module',
+    handlers: [{
+      route: '/go/:placement',
+      method: 'get',
+      handler: fileURLToPath(new URL('./server/handlers/ad-redirect.ts', import.meta.url)),
+    }],
     // Rule 11: HTML 30s + SWR, hashed assets immutable, own /api/* uncached
     routeRules: {
       '/**': { headers: { 'cache-control': 'public, max-age=30, stale-while-revalidate=300' } },
       '/_nuxt/**': { headers: { 'cache-control': 'public, max-age=31536000, immutable' } },
       '/api/**': { headers: { 'cache-control': 'no-store' } },
+      '/go/**': { headers: { 'cache-control': 'no-store' } },
     },
   },
   runtimeConfig: {
     feedSnapshotBinding: 'FEED_SNAPSHOTS',
     seedDetailPaths,
+    adDestination: '',
     public: {
+      ads: false,
       siteName: process.env.NUXT_PUBLIC_SITE_NAME || 'kwip',
       canonicalHost: process.env.NUXT_PUBLIC_CANONICAL_HOST || 'kwip.fyi',
       feedBase: process.env.NUXT_PUBLIC_FEED_BASE || '/fixtures',

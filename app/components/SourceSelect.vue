@@ -6,10 +6,12 @@ export type SelectableSourceOption = SourceOption
 const props = defineProps<{
   sources: SelectableSourceOption[]
   modelValue: string | null
+  clickUnder?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [key: string]
+  'source-click': [event: MouseEvent, key: string]
 }>()
 
 const id = useId()
@@ -38,6 +40,20 @@ onBeforeUnmount(() => {
 const hasSelection = computed(() =>
   props.sources.some((source) => source.key === props.modelValue),
 )
+
+function chipLabel(source: SelectableSourceOption) {
+  const opensAd = props.clickUnder && source.key !== props.modelValue
+  if (!opensAd && source.origin !== 'supplement') return undefined
+  return source.label +
+    (source.live === false ? ', Not live' : '') +
+    (source.origin === 'supplement' ? ', second provider' : '') +
+    (opensAd ? '. Opens an advertiser in a new tab' : '')
+}
+
+function onChipClick(event: MouseEvent, key: string) {
+  emit('source-click', event, key)
+  emit('update:modelValue', key)
+}
 
 function findChip(key: string) {
   return Array.from(group.value?.querySelectorAll('button') ?? [])
@@ -82,7 +98,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           type="button"
           :value="source.key"
           :aria-describedby="source.host ? `${id}-host-${index}` : undefined"
-          :aria-label="source.origin === 'supplement' ? `${source.label}${source.live === false ? ', Not live' : ''}, second provider` : undefined"
+          :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
           class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
@@ -91,7 +107,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
             source.live === false ? 'bg-surface-2 text-muted'
               : source.key === modelValue ? 'bg-accent-strong text-accent-strong-fg' : 'bg-surface-2 text-fg',
           ]"
-          @click="emit('update:modelValue', source.key)"
+          @click="onChipClick($event, source.key)"
           @keydown="onChipKeydown($event, index)"
         >
           <span class="min-w-0 wrap-anywhere">
