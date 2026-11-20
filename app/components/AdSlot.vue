@@ -7,11 +7,12 @@ const config = useRuntimeConfig().public
 const image = ref<HTMLImageElement>()
 const failedImage = ref('')
 const creative = computed(() => getBannerCreative(
-  config.ads === true, config.bannerCreatives, props.placement, config.bannerAssetOrigin,
+  config.ads === true, config.bannerCreatives, props.placement,
 ))
 const clickUrl = computed(() => creative.value?.key
   ? `/go/${props.placement}?${new URLSearchParams({ creative: creative.value.key })}`
   : '')
+const showImage = computed(() => !!creative.value?.image && creative.value.image !== failedImage.value)
 const mobileSize = 'h-(--banner-mobile-height) w-(--banner-mobile-width)'
 const formats = {
   leaderboard: {
@@ -44,14 +45,16 @@ onMounted(settleImage)
       class="pointer-events-none absolute top-0 left-0 z-10 bg-surface px-2 py-1 text-xs text-muted"
     >Advertisement</span>
     <a
-      v-if="clickUrl && creative.image !== failedImage"
+      v-if="clickUrl"
       :href="clickUrl"
+      :aria-labelledby="showImage ? undefined : `label-${placement}`"
       :aria-describedby="`label-${placement}`"
       rel="sponsored noopener noreferrer"
       target="_blank"
       class="block size-full focus-visible:outline-offset-(--focus-ring-inset)"
     >
       <img
+        v-if="showImage"
         ref="image"
         :src="creative.image"
         :alt="creative.alt"

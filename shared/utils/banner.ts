@@ -5,7 +5,6 @@ export type BannerCreatives = Partial<Record<BannerPlacement, { image?: string; 
 
 // Reserve a static-only namespace and disallow URL normalization or route syntax.
 const bannerAssetPath = /^\/banners\/[a-zA-Z0-9][a-zA-Z0-9_-]*\.(?:avif|gif|jpe?g|png|webp)$/
-const hostedAssetPath = /^\/(?:[a-zA-Z0-9][a-zA-Z0-9_-]*\/)*[a-zA-Z0-9][a-zA-Z0-9_-]*\.(?:avif|gif|jpe?g|png|webp)$/
 const unsafeUrl = /[\\\u0000-\u0020\u007f-\u009f]|%(?![\da-f]{2})/i
 
 export function getAdDestination(destination: unknown) {
@@ -20,21 +19,11 @@ export function getAdDestination(destination: unknown) {
   }
 }
 
-function isBannerImage(image: string, assetOrigin: string) {
-  if (unsafeUrl.test(image)) return false
-  if (bannerAssetPath.test(image)) return true
-  if (!image.startsWith('https://')) return false
-  const resolved = getAdDestination(image)
-  if (!resolved) return false
-  const { origin, pathname } = new URL(resolved)
-  return (assetOrigin === origin || assetOrigin === origin + '/')
-    && image === origin + pathname
-    && hostedAssetPath.test(pathname)
+export function isBannerAssetPath(path: string) {
+  return bannerAssetPath.test(path) && !unsafeUrl.test(path)
 }
 
-export function getBannerCreative(
-  enabled: boolean, creatives: BannerCreatives, placement: BannerPlacement, assetOrigin = '',
-) {
+export function getBannerCreative(enabled: boolean, creatives: BannerCreatives, placement: BannerPlacement) {
   if (!enabled) return
   const creative = creatives?.[placement]
   const alt = typeof creative?.alt === 'string' ? creative.alt.trim() : ''
@@ -42,10 +31,10 @@ export function getBannerCreative(
   if (!alt || !destination) return
 
   const image = creative?.image ?? ''
-  if (image !== '' && (typeof image !== 'string' || !isBannerImage(image, assetOrigin))) return
+  if (image !== '' && (typeof image !== 'string' || !isBannerAssetPath(image))) return
 
   // Bind the click to the creative shown in cached HTML. This key is only
   // compared with config; request data never supplies a redirect destination.
-  const key = image ? JSON.stringify([placement, image, alt, destination]) : ''
+  const key = JSON.stringify([placement, image, alt, destination])
   return { image, alt, destination, key }
 }

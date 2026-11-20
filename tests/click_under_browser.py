@@ -61,18 +61,16 @@ def fixture_assets(output, directory, player=PLAYER):
 
 
 @contextmanager
-def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER, prepare_assets=None):
+def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER, banner_fixture=None):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     assets = directory / f'{name}-assets'
     origin = f'http://127.0.0.1:{port}'
     fixture_assets(output, assets, origin + player if player.startswith('/') else player)
-    if prepare_assets:
-        prepare_assets(assets)
     overrides = variables(origin) if variables else {}
     config = directory / f'{name}.toml'
-    config.write_text(f'''name = "kwip-click-under-{name}"
+    config_text = f'''name = "kwip-click-under-{name}"
 main = {json.dumps(str(output / 'server/index.mjs'))}
 compatibility_date = "2025-07-15"
 compatibility_flags = ["nodejs_compat"]
@@ -84,10 +82,21 @@ not_found_handling = "none"
 NUXT_PUBLIC_FEED_BASE = "/fixtures"
 NUXT_PUBLIC_ADS = "{str(enabled).lower()}"
 NUXT_AD_DESTINATION = "{destination}"
-''' + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in overrides.items()))
+''' + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in overrides.items())
+    persist = []
+    if banner_fixture:
+        config_text += '\n[[r2_buckets]]\nbinding = "BANNER_ASSETS"\nbucket_name = "kwip-test-banners"\n'
+        persist = ['--persist-to', str(directory / f'{name}-r2')]
+    config.write_text(config_text)
+    if banner_fixture:
+        subprocess.run(
+            ['pnpm', 'exec', 'wrangler', 'r2', 'object', 'put', 'kwip-test-banners/house.jpg',
+             '--local', '--config', str(config), '--file', str(banner_fixture), *persist],
+            check=True, capture_output=True,
+        )
     with tempfile.TemporaryFile() as logs, subprocess.Popen(
         ['pnpm', 'exec', 'wrangler', 'dev', '--config', str(config),
-         '--ip', '127.0.0.1', '--port', str(port), '--inspector-port', '0'],
+         '--ip', '127.0.0.1', '--port', str(port), '--inspector-port', '0', *persist],
         stdout=logs, stderr=subprocess.STDOUT,
     ) as process:
         try:

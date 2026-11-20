@@ -1,3 +1,4 @@
+import { isBannerAssetPath } from '../../shared/utils/banner'
 import { lookupEdgePage } from '../utils/edge-cache-handler'
 
 const LOCAL_DEV_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]'])
@@ -15,6 +16,7 @@ export default defineEventHandler((event) => {
   }
 
   const url = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true })
+  if (isBannerAssetPath(url.pathname)) return
   const requestHost = url.host.toLowerCase()
   const requestHostname = url.hostname.toLowerCase()
 

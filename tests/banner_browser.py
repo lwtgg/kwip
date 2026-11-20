@@ -6,7 +6,6 @@ import argparse
 from contextlib import ExitStack
 import json
 from pathlib import Path
-import shutil
 import tempfile
 from urllib.parse import urlsplit
 
@@ -20,10 +19,24 @@ MISSING_IMAGE = '/banners/missing.webp'
 EXTERNAL_DESTINATION = 'https://advertiser.example/landing'
 
 
-def prepare_banner_assets(assets):
-    target = assets / IMAGE.lstrip('/')
-    target.parent.mkdir(exist_ok=True)
-    shutil.copyfile(assets / 'og-default.jpg', target)
+def expect_keyboard_link(page, slot, link):
+    slot.evaluate("""slot => {
+      for (const [name, place] of [['Before banner', 'before'], ['After banner', 'after']]) {
+        const button = document.createElement('button');
+        button.textContent = name;
+        button.style.position = 'absolute';
+        slot[place](button);
+      }
+    }""")
+    page.get_by_role('button', name='Before banner').focus()
+    page.keyboard.press('Tab')
+    expect(link).to_be_focused()
+    page.keyboard.press('Tab')
+    expect(page.get_by_role('button', name='After banner')).to_be_focused()
+    slot.evaluate("""slot => {
+      slot.previousElementSibling.remove();
+      slot.nextElementSibling.remove();
+    }""")
 
 
 def check_page(browser, origin, placement, width, has_creative, *, failure=False, missing=False):
@@ -57,7 +70,7 @@ def check_page(browser, origin, placement, width, has_creative, *, failure=False
         html = response.text()
         path = MISSING_IMAGE if failure else IMAGE
         assert (f'src="{path}"' in html) == (has_creative and not missing)
-        assert (f'href="/go/{placement}?' in html) == (has_creative and not missing)
+        assert (f'href="/go/{placement}?' in html) == has_creative
         slot = page.locator('[data-ad-format]')
         expect(slot).to_have_count(int(has_creative))
         page.wait_for_timeout(250)
@@ -78,36 +91,25 @@ def check_page(browser, origin, placement, width, has_creative, *, failure=False
                         break
                     page.wait_for_timeout(100)
                 assert len(pending) == 1
+                pending.pop().continue_()
                 if failure:
-                    pending.pop().fulfill(status=404)
                     expect(slot.locator('img')).to_have_count(0)
-                    expect(link).to_have_count(0)
                     expect(label).to_be_visible()
                 else:
-                    pending.pop().continue_()
-                    expect(link).to_have_accessible_name(f'House {placement}')
-                    expect(link).to_have_accessible_description('Advertisement')
-                    expect(link).to_have_attribute('rel', 'sponsored noopener noreferrer')
-                    click_url = link.get_attribute('href')
+                    slot.locator('img').evaluate('image => image.decode()')
             else:
-                expect(slot.locator('img, a')).to_have_count(0)
+                expect(slot.locator('img')).to_have_count(0)
+            expect(link).to_have_accessible_name('Advertisement' if failure or missing else f'House {placement}')
+            expect(link).to_have_accessible_description('Advertisement')
+            expect(link).to_have_attribute('rel', 'sponsored noopener noreferrer')
+            click_url = link.get_attribute('href')
             assert slot.bounding_box() == box
         page.wait_for_timeout(250)
         final = page.evaluate(CLS_SCORE)
         assert final == initial, (placement, width, initial, final)
         assert page.evaluate("layoutShifts.length") == initial_entries
-        if has_creative and not missing and not failure:
-            # Tab from the preceding focusable element, using actual keyboard navigation.
-            slot.evaluate("""slot => {
-              const previous = document.createElement('button');
-              previous.textContent = 'Focus start';
-              previous.style.position = 'absolute';
-              slot.before(previous);
-              previous.focus();
-            }""")
-            page.keyboard.press('Tab')
-            expect(link).to_be_focused()
-            slot.evaluate("slot => slot.previousElementSibling.remove()")
+        if has_creative:
+            expect_keyboard_link(page, slot, link)
             if placement == 'event-banner':
                 for cap in (None, '1'):
                     page.evaluate("""cap => cap === null ? sessionStorage.removeItem('ads:click-under')
@@ -139,8 +141,6 @@ def check_without_javascript(browser, origin, *, failure=False):
         def intercept(route):
             if not route.request.url.startswith(origin + '/'):
                 route.abort()
-            elif urlsplit(route.request.url).path == MISSING_IMAGE:
-                route.fulfill(status=404)
             else:
                 route.continue_()
 
@@ -150,27 +150,15 @@ def check_without_javascript(browser, origin, *, failure=False):
         slot = page.locator('[data-ad-format]')
         slot.scroll_into_view_if_needed()
         image = slot.locator('img')
-        if not failure:
-            link = slot.get_by_role('link', name='House home-banner')
-            expect(link).to_have_accessible_description('Advertisement')
-            expect(image).to_have_accessible_name('House home-banner')
-            slot.evaluate("""slot => {
-              for (const [name, place] of [['Before banner', 'before'], ['After banner', 'after']]) {
-                const button = document.createElement('button');
-                button.textContent = name;
-                button.style.position = 'absolute';
-                slot[place](button);
-              }
-            }""")
-            page.get_by_role('button', name='Before banner').focus()
-            page.keyboard.press('Tab')
-            expect(link).to_be_focused()
-            page.keyboard.press('Tab')
-            expect(page.get_by_role('button', name='After banner')).to_be_focused()
-            slot.evaluate("""slot => {
-              slot.previousElementSibling.remove();
-              slot.nextElementSibling.remove();
-            }""")
+        placement = 'event-banner' if failure else 'home-banner'
+        link = slot.get_by_role('link', name=f'House {placement}')
+        expect(link).to_have_accessible_description('Advertisement')
+        expect(image).to_have_accessible_name(f'House {placement}')
+        expect_keyboard_link(page, slot, link)
+        box = slot.bounding_box()
+        assert (box['width'], box['height']) == (320, 100)
+        redirect = context.request.get(origin + link.get_attribute('href'), max_redirects=0)
+        assert redirect.status == 302 and redirect.headers['location'] == f'{origin}/fixtures/away'
         image.evaluate('image => image.decode().catch(() => {})')
         assert image.evaluate('image => image.naturalWidth > 0') is not failure
         # Ignore corner antialiasing differences between one and two painted surfaces.
@@ -178,37 +166,7 @@ def check_without_javascript(browser, origin, *, failure=False):
         with_image = slot.screenshot()
         image.evaluate("image => image.closest('a').remove()")
         assert (with_image == slot.screenshot()) is failure
-    finally:
-        context.close()
-
-
-def check_hosted_image(browser, origin, output, asset_url):
-    context = browser.new_context(java_script_enabled=False)
-    try:
-        requests = []
-
-        def intercept(route):
-            url = route.request.url
-            if url.startswith(origin + '/'):
-                route.continue_()
-            elif url == asset_url:
-                requests.append(url)
-                route.fulfill(path=output / 'public/og-default.jpg', content_type='image/jpeg')
-            else:
-                raise AssertionError(f'Unexpected request: {url}')
-
-        context.route('**/*', intercept)
-        page = context.new_page()
-        response = page.goto(origin, wait_until='domcontentloaded')
-        assert f'src="{asset_url}"' in response.text()
-        slot = page.locator('[data-ad-format]')
-        slot.scroll_into_view_if_needed()
-        image = slot.get_by_role('img', name='House home-banner')
-        image.evaluate('image => image.decode()')
-        assert requests == [asset_url]
-        link = slot.get_by_role('link', name='House home-banner')
-        redirect = context.request.get(origin + link.get_attribute('href'), max_redirects=0)
-        assert redirect.status == 302 and redirect.headers['location'] == f'{origin}/fixtures/away'
+        assert slot.bounding_box() == box
     finally:
         context.close()
 
@@ -221,27 +179,21 @@ def main():
         directory = Path(temp)
         output = args.output.resolve()
 
-        def start(name, enabled, images, asset_origin=''):
+        def start(name, enabled, images):
             def variables(origin):
                 creatives = {
                     placement: {'image': image, 'alt': f'House {placement}', 'destination': f'{origin}/fixtures/away'}
                     for placement, image in images.items()
                 }
-                return {
-                    'NUXT_PUBLIC_BANNER_CREATIVES': json.dumps(creatives),
-                    'NUXT_PUBLIC_BANNER_ASSET_ORIGIN': asset_origin,
-                }
+                return {'NUXT_PUBLIC_BANNER_CREATIVES': json.dumps(creatives)}
 
             return stack.enter_context(worker(directory, name, output, EXTERNAL_DESTINATION, enabled, player='/fixtures',
-                                              variables=variables, prepare_assets=prepare_banner_assets))
+                                              variables=variables, banner_fixture=output / 'public/og-default.jpg'))
 
         on = start('banner-on', True, dict.fromkeys(PAGES, IMAGE))
         off = start('banner-off', False, dict.fromkeys(PAGES, IMAGE))
         replacement = start('banner-replacement', True, {'home-banner': IMAGE})
         partial = start('banner-partial', True, {'home-banner': '/go/source', 'event-banner': MISSING_IMAGE, 'vods-banner': ''})
-        asset_origin = 'https://assets.example.test'
-        asset_url = f'{asset_origin}/campaigns/house.jpg'
-        hosted = start('banner-hosted', True, {'home-banner': asset_url}, asset_origin)
         browser = pw.chromium.launch()
         for width in (390, 1280):
             for placement in PAGES:
@@ -260,9 +212,13 @@ def main():
         assert stale.status == 410 and 'location' not in stale.headers
         check_without_javascript(browser, on)
         check_without_javascript(browser, partial, failure=True)
-        check_hosted_image(browser, hosted, output, asset_url)
-        print('JavaScript disabled: loaded image paints, alt is exposed, and Tab reaches the sponsored link')
-        print('Hosted creative loads only from the configured asset origin and its redirect resolves')
+        asset = api.get(on + IMAGE, max_redirects=0)
+        assert asset.status == 200 and asset.headers['content-type'] == 'image/jpeg'
+        assert 'location' not in asset.headers and asset.body() == (output / 'public/og-default.jpg').read_bytes()
+        missing = api.get(on + MISSING_IMAGE, max_redirects=0)
+        assert missing.status == 404 and 'location' not in missing.headers
+        print('R2 serves same-origin bytes and 404s directly')
+        print('JavaScript disabled: loaded and failed creatives retain a named, tabbable sponsored link')
         browser.close()
 
 

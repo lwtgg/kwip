@@ -19,7 +19,9 @@ test('missing images keep a labelled box; malformed paths suppress the slot', ()
     const banner = getBannerCreative(true, { 'home-banner': { ...creative, image } }, 'home-banner')
     assert.equal(banner?.image, '')
     assert.equal(banner?.alt, creative.alt)
-    assert.equal(banner?.key, '')
+    assert.ok(banner?.key)
+    const redirect = adRedirect('home-banner', true, '', { 'home-banner': { ...creative, image } }, banner.key)
+    assert.equal(redirect.headers.get('location'), creative.destination)
   }
   for (const image of [' ', '/', '/?name=foo', 'relative.webp', 'https://example.com/banner.webp',
     '//example.com/banner.webp', '/\\example.com/banner.webp', '/\t/example.com/banner.webp', '/banners/bad%path.webp',
@@ -77,25 +79,4 @@ test('stale, missing and substituted creative keys cannot redirect to the curren
     assert.equal(response.headers.get('cache-control'), 'no-store')
   }
   assert.equal(adRedirect(placement, true, '', replacement, newKey).headers.get('location'), replacement[placement].destination)
-})
-
-
-test('hosted raster images require a configured HTTPS origin and a normalized static path', () => {
-  const placement = 'home-banner'
-  const origin = 'https://assets.example.com'
-  const image = origin + '/campaigns/house.webp'
-  const creatives = { [placement]: { ...creative, image } }
-  const banner = getBannerCreative(true, creatives, placement, origin)
-  assert.equal(banner?.image, image)
-  assert.equal(adRedirect(placement, true, '', creatives, banner?.key, origin).headers.get('location'), creative.destination)
-  for (const invalidOrigin of ['', 'http://assets.example.com', origin + '/campaigns', 'https://other.example.com']) {
-    assert.equal(getBannerCreative(true, creatives, placement, invalidOrigin), undefined)
-  }
-  for (const invalidImage of [
-    origin + '/go/source', origin + '/house.html', origin + '/house.webp?x=1', origin + '/house.webp#fragment',
-    origin + '/campaigns/../house.webp', origin + '/%2e%2e/house.webp', origin + '/campaigns//house.webp',
-    'https://user@assets.example.com/house.webp', origin + '.other.example.com/house.webp',
-  ]) {
-    assert.equal(getBannerCreative(true, { [placement]: { ...creative, image: invalidImage } }, placement, origin), undefined)
-  }
 })

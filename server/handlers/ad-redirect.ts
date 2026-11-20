@@ -8,6 +8,5 @@ export default defineEventHandler((event) => {
     config.adDestination,
     config.public.bannerCreatives,
     getQuery(event).creative,
-    config.public.bannerAssetOrigin,
   )
 })
