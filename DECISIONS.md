@@ -23,6 +23,7 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 18. **Workers Paid is required.** Free gives 10 ms CPU per request; SSR here costs 65–240 ms and dies with `error code: 1102`. Paid is $5/month and holds 30 M CPU-ms. Cold renders are still worth keeping cheap, and a route that can be served without rendering should be.
 19. **Freshness does not depend on a deploy.** A GitHub Actions workflow publishes a packed, validated generation to private R2 every 15 minutes; the Worker reads ranges of the newest one and falls back to the bundled seed only when the generation is unreadable. The publisher lives in `scripts/` with its own lockfile, so nothing runner-only reaches the Worker bundle.
 20. **A missing path in a valid generation is authoritative.** Never back-fill one hole from the seed; render the normal unavailable state. Retry the seed only for the whole response, and only when the generation itself cannot be read.
+21. **The refresh is triggered from outside GitHub.** GitHub's scheduler has never fired a `schedule` event for this repository, so `kwip-feed-cron` (a scheduled-only Worker on a five-minute trigger) dispatches the workflow when the manifest is missing or older than twelve minutes, skipping while a run is queued. The GitHub `schedule:` trigger stays in place so both converge if it recovers; duplicate dispatches queue behind the workflow's concurrency group rather than publishing twice. The pinger is a trigger, not a monitor — thresholds and alerting stay in the workflow.
 
 ## Deferred (do not build, just note)
 
