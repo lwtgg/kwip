@@ -15,7 +15,7 @@ test('only upcoming and live timed events qualify', () => {
   assert.equal(isClickUnderEligible(null, 150), false)
 })
 
-test('the first qualifying action claims the session before attempting the popup', () => {
+test('a blocked popup leaves the session available for the next qualifying click', () => {
   const storage = new Map<string, string>()
   const session = {
     getItem: (key: string) => storage.get(key) ?? null,
@@ -24,30 +24,48 @@ test('the first qualifying action claims the session before attempting the popup
   assert.equal(canClickUnder(false, session, true), false)
   assert.equal(canClickUnder(true, session, false), false)
   assert.equal(canClickUnder(true, session, true, true), false)
+
+  assert.equal(openClickUnder(session, 'source', () => null), false)
+  assert.equal(openClickUnder(session, 'source', () => { throw new Error('Popup rejected') }), false)
   assert.equal(canClickUnder(true, session, true), true)
 
   const opens: string[][] = []
-  let eligibleDuringOpen: boolean | undefined
+  const navigations: { url: string; opener: unknown }[] = []
+  const popup = {
+    opener: {} as unknown,
+    close() {},
+    location: { replace(url: string) { navigations.push({ url, opener: popup.opener }) } },
+  }
   assert.equal(openClickUnder(session, 'source', (...args) => {
     opens.push(args)
-    eligibleDuringOpen = canClickUnder(true, session, true)
-    throw new Error('Popup rejected')
+    return popup
   }), true)
-  assert.deepEqual(opens, [['/go/source', '_blank', 'noopener,noreferrer']])
-  assert.equal(eligibleDuringOpen, false)
-  assert.equal(openClickUnder(session, 'play', (...args) => opens.push(args)), false)
+  assert.deepEqual(opens, [['about:blank', '_blank']])
+  assert.deepEqual(navigations, [{ url: '/go/source', opener: null }])
+  assert.equal(canClickUnder(true, session, true), false)
+  assert.equal(openClickUnder(session, 'play', (...args) => {
+    opens.push(args)
+    return popup
+  }), false)
   assert.equal(opens.length, 1)
 })
 
-test('no storage or a failed storage write suppresses the popup', () => {
+test('unavailable session storage suppresses ad navigation', () => {
   assert.equal(canClickUnder(true, null, true), false)
   const unavailable = () => { throw new Error('Storage blocked') }
   assert.equal(canClickUnder(true, { getItem: unavailable, setItem: unavailable }, true), false)
-  let opened = false
-  assert.equal(openClickUnder({ getItem: () => null, setItem: unavailable }, 'play', () => {
-    opened = true
-  }), false)
-  assert.equal(opened, false)
+  let closed = false
+  let navigated = false
+  assert.equal(openClickUnder({ getItem: () => null, setItem: unavailable }, 'play', () => ({
+    opener: {},
+    close() {
+      closed = true
+      throw new Error('Popup cleanup rejected')
+    },
+    location: { replace() { navigated = true } },
+  })), false)
+  assert.equal(closed, true)
+  assert.equal(navigated, false)
 })
 
 test('the redirect returns a no-store 302 for known placements and validates runtime configuration', () => {

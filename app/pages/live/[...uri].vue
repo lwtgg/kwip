@@ -209,9 +209,9 @@ function handleAdvertiserClick(event: MouseEvent, placement: 'source' | 'play', 
   if (!event.isTrusted || !clickSession || !openAdvertiser ||
     !canClickUnder(ads === true, clickSession,
       isClickUnderEligible(detail.value, Date.now() / 1000), alreadySelected)) return false
-  const attempted = openClickUnder(clickSession, placement, openAdvertiser)
-  adAvailable.value = false
-  return attempted
+  const opened = openClickUnder(clickSession, placement, openAdvertiser)
+  adAvailable.value = !opened && canClickUnder(true, clickSession, true)
+  return opened
 }
 
 function handlePrimaryPlay(event: MouseEvent) {
@@ -745,7 +745,7 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
               :href="currentSource.url"
               target="_blank"
               rel="noopener noreferrer"
-              :aria-label="announceAd ? `Open at source · ${currentSource.label} in this tab. Opens an advertiser in a new tab` : undefined"
+              :aria-label="announceAd ? `Open at source · ${currentSource.label}. Standard activation may open the source in this tab and an advertiser in a new tab` : undefined"
               class="inline-flex items-center gap-2 rounded-[var(--radius)] bg-accent px-6 py-3 text-sm font-semibold text-accent-fg shadow-sm hover:opacity-90"
               @click="handlePrimaryPlay"
             >
