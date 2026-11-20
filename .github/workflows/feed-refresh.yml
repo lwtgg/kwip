@@ -157,19 +157,24 @@ jobs:
           esac
 
   alert:
-    needs: refresh
+    needs: [configure, refresh]
+    # If configuration failed, the routing outputs do not exist.
     if: >-
-      !cancelled() && (needs.refresh.result == 'success' || needs.refresh.result == 'failure')
+      !cancelled() &&
+      (needs.refresh.result == 'success' || needs.refresh.result == 'failure' ||
+       (needs.configure.result == 'failure' &&
+        (github.event_name != 'workflow_dispatch' ||
+         ((inputs.simulate || 'none') == 'none' && inputs.simulate_recovery != true))))
     permissions:
       contents: read
       issues: write
       actions: write
     uses: ./.github/workflows/feed-refresh-issue.yml
     with:
-      refresh_result: ${{ needs.refresh.result }}
+      refresh_result: ${{ needs.configure.result == 'failure' && 'failure' || needs.refresh.result }}
       freshness: ${{ needs.refresh.outputs.freshness || '{}' }}
       publication: ${{ needs.refresh.outputs.publication || '{}' }}
-      stages: ${{ needs.refresh.outputs.stages || '{}' }}
+      stages: ${{ needs.configure.result == 'failure' && '{"configure":"failure"}' || needs.refresh.outputs.stages || '{}' }}
 
   alert_simulation:
     needs: simulation

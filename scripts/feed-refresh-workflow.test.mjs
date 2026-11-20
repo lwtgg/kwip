@@ -10,7 +10,7 @@ const dependencies = process.env.KWIP_WORKFLOW_TEST_DIR
 assert.ok(dependencies, 'Set KWIP_WORKFLOW_TEST_DIR as shown in the README')
 const { parse, stringify } = createRequire(join(dependencies, 'package.json'))('yaml')
 
-function runWorkflow(t, event, payload) {
+function runWorkflow(t, event, payload, { failConfigure = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'kwip-refresh-test-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const workflows = join(directory, '.github/workflows')
@@ -19,6 +19,9 @@ function runWorkflow(t, event, payload) {
   for (const file of ['feed-refresh.yml', 'feed-refresh-issue.yml']) {
     const source = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), 'utf8')
     const workflow = parse(source)
+    if (file === 'feed-refresh.yml' && failConfigure) {
+      workflow.jobs.configure.steps.find((step) => step.id === 'inputs').run = 'exit 97'
+    }
     // The Actions runner executes the real jobs and shell steps. External setup
     // actions are stubbed because this fixture already provides the tools.
     for (const job of Object.values(workflow.jobs)) {
@@ -59,7 +62,11 @@ function runWorkflow(t, event, payload) {
     gh() {
       case "$1 $2" in
         'api --paginate')
-          echo '[[{"number":91,"body":"**Simulated incident**"},{"number":42,"body":"Incident: failed"}]]' ;;
+          if [[ "$KWIP_TEST_FAIL_CONFIGURE" == true ]]; then
+            echo '[[{"number":91,"body":"**Simulated incident**"}]]'
+          else
+            echo '[[{"number":91,"body":"**Simulated incident**"},{"number":42,"body":"Incident: failed"}]]'
+          fi ;;
         'api --method')
           [[ "$3" == PATCH && "$4" == */issues/91 ]] || return 92
           printf '%s\\n' "$*" >> "$KWIP_TEST_TRACE" ;;
@@ -68,6 +75,11 @@ function runWorkflow(t, event, payload) {
           cat "$5" >> "$KWIP_TEST_TRACE" ;;
         'issue close')
           printf '%s\\n' "$*" >> "$KWIP_TEST_TRACE" ;;
+        'label list') echo 'feed-refresh' ;;
+        'issue create')
+          [[ "$3" == --title && "$5" == --label && "$6" == feed-refresh && "$7" == --body-file ]] || return 95
+          printf '%s\\n' "$4" >> "$KWIP_TEST_TRACE"
+          cat "$8" >> "$KWIP_TEST_TRACE" ;;
         *) return 94 ;;
       esac
     }
@@ -88,6 +100,7 @@ function runWorkflow(t, event, payload) {
     event, '-W', '.github/workflows/feed-refresh.yml', '-e', eventFile,
     '-P', 'ubuntu-latest=-self-hosted', '--secret', 'GITHUB_TOKEN=fixture-token',
     '--env', `BASH_ENV=${stubs}`, '--env', `KWIP_TEST_TRACE=${traces}`, '--env', `KWIP_TEST_FIXTURE=${directory}`,
+    '--env', `KWIP_TEST_FAIL_CONFIGURE=${failConfigure}`,
   ], { cwd: directory, encoding: 'utf8', timeout: 60_000 })
   if (run.error) throw run.error
   return { status: run.status, log: run.stdout + run.stderr, trace: readFileSync(traces, 'utf8') }
@@ -103,6 +116,30 @@ function assertLiveRun(run) {
 
 test('the no-input schedule runs the publisher and closes the live incident', (t) => {
   assertLiveRun(runWorkflow(t, 'schedule', { schedule: '*/15 * * * *' }))
+})
+
+for (const [event, payload] of [
+  ['schedule', { schedule: '*/15 * * * *' }],
+  ['workflow_dispatch', {}],
+]) {
+  test(`a no-input ${event} raises a live incident when configuration fails`, (t) => {
+    const run = runWorkflow(t, event, payload, { failConfigure: true })
+    assert.equal(run.status, 1, run.log)
+    assert.match(run.log, /Failure - Main Resolve refresh inputs/)
+    assert.doesNotMatch(run.log, /Run Main Publish feed|Run Main Simulate a refresh result/)
+    assert.match(run.trace, /^Feed refresh is failing$/m, run.log)
+    assert.match(run.trace, /^Incident: failed$/m)
+    assert.match(run.trace, /^Publisher outcome: not reported$/m)
+    assert.match(run.trace, /^Refresh input configuration failed\./m)
+    assert.doesNotMatch(run.trace, /Simulated incident|published by stub|issue close/)
+  })
+}
+
+test('a configuration failure during a rehearsal leaves live issues untouched', (t) => {
+  const run = runWorkflow(t, 'workflow_dispatch', { inputs: { simulate: 'failed' } }, { failConfigure: true })
+  assert.equal(run.status, 1, run.log)
+  assert.match(run.log, /Failure - Main Resolve refresh inputs/)
+  assert.equal(run.trace, '')
 })
 
 test('a bare dispatch takes the same live path', (t) => {
