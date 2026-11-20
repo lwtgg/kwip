@@ -21,7 +21,7 @@ const cancelled = { name: 'cancelled', minArgs: 0, maxArgs: 0, call: () => new d
 function evaluate(expression, context) {
   if (typeof expression !== 'string') return expression
   const source = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '').trim()
-  const tree = new Parser(new Lexer(source).lex().tokens, ['github', 'inputs', 'needs'], [cancelled]).parse()
+  const tree = new Parser(new Lexer(source).lex().tokens, ['github', 'inputs', 'needs', 'steps'], [cancelled]).parse()
   const values = JSON.parse(JSON.stringify(context), data.reviver)
   const result = new Evaluator(tree, values, new Map([['cancelled', cancelled]])).evaluate()
   return JSON.parse(JSON.stringify(result, data.replacer))
@@ -47,6 +47,8 @@ function checkLiveRouting(context) {
   assert.equal(evaluate(refresh['run-name'], context), 'Feed refresh (live)')
   assert.equal(evaluate(refresh.concurrency.group, context), 'feed-refresh')
   assert.equal(evaluate(refresh.jobs.refresh.if, context), true)
+  const publish = refresh.jobs.refresh.steps.find((step) => step.id === 'publish')
+  assert.equal(evaluate(publish.if, { ...context, steps: { install: { outcome: 'success' } } }), true)
   assert.equal(evaluate(refresh.jobs.simulation.if, context), false)
   assert.equal(evaluate(refresh.jobs.alert_simulation.if, { needs: { simulation: { result: 'skipped' } } }), false)
 }
@@ -54,6 +56,7 @@ function checkLiveRouting(context) {
 test('a cron event without inputs follows the same live route as a bare dispatch', () => {
   checkLiveRouting(schedule)
   checkLiveRouting(bareDispatch)
+  checkLiveRouting({ ...bareDispatch, inputs: { simulate: 'none', simulate_recovery: false } })
   checkLiveRouting({ ...schedule, inputs: null })
 })
 
