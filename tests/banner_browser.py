@@ -99,7 +99,7 @@ def check_page(browser, origin, placement, width, has_creative, *, failure=False
                     slot.locator('img').evaluate('image => image.decode()')
             else:
                 expect(slot.locator('img')).to_have_count(0)
-            expect(link).to_have_accessible_name('Advertisement' if failure or missing else f'House {placement}')
+            expect(link).to_have_accessible_name(f'House {placement}')
             expect(link).to_have_accessible_description('Advertisement')
             expect(link).to_have_attribute('rel', 'sponsored noopener noreferrer')
             click_url = link.get_attribute('href')
@@ -217,7 +217,17 @@ def main():
         assert 'location' not in asset.headers and asset.body() == (output / 'public/og-default.jpg').read_bytes()
         missing = api.get(on + MISSING_IMAGE, max_redirects=0)
         assert missing.status == 404 and 'location' not in missing.headers
-        print('R2 serves same-origin bytes and 404s directly')
+        query = '?v=creative%2F1&v=2'
+        mirror = api.get(
+            f'{on}{IMAGE}{query}', headers={'x-forwarded-host': 'kwip.lol'}, max_redirects=0,
+        )
+        assert mirror.status == 301
+        assert mirror.headers['location'] == f'https://kwip.fyi{IMAGE}{query}'
+        canonical = api.get(
+            f'{on}{IMAGE}{query}', headers={'x-forwarded-host': 'kwip.fyi'}, max_redirects=0,
+        )
+        assert canonical.status == 200 and canonical.body() == asset.body()
+        print('R2 serves image bytes and 404s directly on the canonical host; mirror preserves path and query')
         print('JavaScript disabled: loaded and failed creatives retain a named, tabbable sponsored link')
         browser.close()
 

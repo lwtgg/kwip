@@ -14,7 +14,7 @@ const contentTypes: Record<string, string> = {
 }
 
 export default defineEventHandler(async (event) => {
-  const path = event.path
+  const path = event.path.split('?', 1)[0] ?? ''
   const bucket: BannerBucket | undefined = event.context.cloudflare?.env?.BANNER_ASSETS
   const missing = () => new Response(null, { status: 404, headers: { 'cache-control': 'no-store' } })
   if (!bucket || !isBannerAssetPath(path)) return missing()

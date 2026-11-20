@@ -11,22 +11,14 @@ export default defineEventHandler((event) => {
     .replace(/^https?:\/\//, '')
     .replace(/\/+$/, '')
 
-  if (!canonicalHost) {
-    return lookupEdgePage(event)
-  }
-
   const url = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true })
-  if (isBannerAssetPath(url.pathname)) return
   const requestHost = url.host.toLowerCase()
   const requestHostname = url.hostname.toLowerCase()
+  const localDev = !LOCAL_DEV_HOSTNAMES.has(canonicalHost) && LOCAL_DEV_HOSTNAMES.has(requestHostname)
 
-  if (requestHost === canonicalHost) {
-    return lookupEdgePage(event)
+  if (canonicalHost && requestHost !== canonicalHost && !localDev) {
+    return sendRedirect(event, `https://${canonicalHost}${url.pathname}${url.search}`, 301)
   }
 
-  if (!LOCAL_DEV_HOSTNAMES.has(canonicalHost) && LOCAL_DEV_HOSTNAMES.has(requestHostname)) {
-    return lookupEdgePage(event)
-  }
-
-  return sendRedirect(event, `https://${canonicalHost}${url.pathname}${url.search}`, 301)
+  if (!isBannerAssetPath(url.pathname)) return lookupEdgePage(event)
 })

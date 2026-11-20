@@ -47,7 +47,7 @@ onMounted(settleImage)
     <a
       v-if="clickUrl"
       :href="clickUrl"
-      :aria-labelledby="showImage ? undefined : `label-${placement}`"
+      :aria-label="creative.alt"
       :aria-describedby="`label-${placement}`"
       rel="sponsored noopener noreferrer"
       target="_blank"
