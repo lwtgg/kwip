@@ -11,44 +11,77 @@ const stream = {
 }
 
 test('supplement ranks URL variants by quality and leaves unknown variants unqualified', () => {
-  const variants = ['1440p', '360p', '', '720p', '480p', '1080p', '540p', '2160p', '4K']
+  const variants = ['1440p', '1720p', '360p', '', '720p', '480p', '540p', '2160p', '4K']
   const sources = matchSupplement(event, 'basketball', {
     streams: [{
       ...stream,
       iframe: 'https://strmfree.st/embed/hou-mia1080p?next=720p',
-      additional_sources: variants.filter(variant => variant !== '1080p').map(variant => ({
+      additional_sources: variants.map(variant => ({
         url: `https://strmfree.st/embed/hou-mia${variant}`,
+        quality: 'HD',
       })),
     }],
   })
   assert.deepEqual(sources?.map(source => source.sourceTag), [
-    '4K', '4K', 'FHD', 'HD', 'SD', 'SD', 'SD', undefined, undefined,
+    '4K', '4K', 'FHD', 'HD', 'SD', 'SD', 'SD', undefined, undefined, undefined,
   ])
+  assert.deepEqual(sources?.slice(-3).map(source => source.data), ['1440p', '1720p', ''].map(variant =>
+    `https://strmfree.st/embed/hou-mia${variant}`,
+  ))
 })
 
-test('matched sources use API liveness and remain valid in the cache', async () => {
+test('a stream key ending in a digit can be followed by a recognized resolution', () => {
+  const sources = matchSupplement(event, 'basketball', {
+    streams: [{ ...stream, stream_key: 'skyf1', iframe: 'https://strmfree.st/embed/racing/skyf11080p' }],
+  })
+  assert.equal(sources?.[0]?.sourceTag, 'FHD')
+})
+
+test('only matching live variants are cached as live', async () => {
+  const urls = ['1080p', '720p', '720p-alt', '540p'].map(variant => `https://strmfree.st/embed/hou-mia${variant}`)
   const payload = { streams: [{
     ...stream,
-    iframe: 'https://strmfree.st/embed/hou-mia1080p',
-    additional_sources: [{ url: 'https://strmfree.st/embed/hou-mia720p', quality: 'HD', live: true }],
+    iframe: urls[0] + '#player',
+    additional_sources: urls.slice(1).map(url => ({ url })),
   }] }
-  const now = event.starts_at * 1000
   const cases = [
-    { response: () => Response.json({ sources: [{ live: false }, { live: true }] }), live: true },
-    { response: () => Response.json({ sources: [] }), live: false },
-    { response: () => Response.json({ sources: [{ live: 'true' }] }), live: false },
-    { response: () => Response.json({ sources: [{ live: true }] }, { status: 503 }), live: false },
-    { response: () => { throw new Error('unreachable') }, live: false },
+    { entries: [
+      { url: urls[0], live: false },
+      { url: 'https://strmfree.pk/embed/basketball/hou-mia720p?autoplay=1#player', live: true },
+      { url: urls[3], live: 'true' },
+      { live: true },
+    ], liveUrls: [urls[1]] },
+    { entries: [{ url: urls[0], live: true }], liveUrls: [urls[0] + '#player'] },
+    { entries: [], liveUrls: [] },
+    { entries: [{ url: urls[1], live: true }], status: 503, liveUrls: [] },
+    { entries: null, liveUrls: [] },
   ]
-  for (const { response, live } of cases) {
+  for (const { entries, liveUrls, status } of cases) {
     const keys: string[] = []
     const sources = await loadSupplementSources(event, 'basketball', payload, async key => {
       keys.push(key)
-      return response()
+      if (entries === null) throw new Error('unreachable')
+      return Response.json({ sources: entries }, { status })
     })
     assert.deepEqual(keys, ['hou-mia'])
-    assert.deepEqual(sources?.map(source => source.live), [live, live])
+    const now = Date.now()
     const stored = JSON.parse(JSON.stringify({ status: 'merged', fetchedAt: now, sources }))
     assert.ok(isCachedSupplement(stored, now))
+    assert.deepEqual(stored.sources.filter(source => source.live).map(source => source.data), liveUrls)
   }
+})
+
+test('trailing slashes in chip and API URLs preserve quality and liveness', async () => {
+  const embed = 'https://strmfree.st/embed/hou-mia'
+  const sources = await loadSupplementSources(event, 'basketball', {
+    streams: [{
+      ...stream,
+      iframe: embed + '1080p/?autoplay=1#player',
+      additional_sources: [{ url: embed + '720p' }],
+    }],
+  }, async () => Response.json({ sources: [
+    { url: embed + '1080p', live: true },
+    { url: embed + '720p///#player', live: true },
+  ] }))
+  assert.deepEqual(sources?.map(({ sourceTag, live }) => [sourceTag, live]), [['FHD', true], ['HD', true]])
 })

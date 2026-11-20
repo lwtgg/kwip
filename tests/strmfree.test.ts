@@ -6,9 +6,10 @@ import { isCachedSupplement, matchSupplement } from '../app/utils/strmfree.ts'
 const { streams: [fixture] } = JSON.parse(readFileSync(new URL('../public/fixtures/strmfree.json', import.meta.url), 'utf8'))
 const { data: event } = JSON.parse(readFileSync(new URL('../public/fixtures/stream.json', import.meta.url), 'utf8'))
 
-test('supplement matches the offline fixture in quality order', () => {
+test('supplement matches the offline fixture and ignores declared quality', () => {
   const sources = matchSupplement(event, 'basketball', { streams: [fixture] })
-  assert.deepEqual(sources?.map(source => source.sourceTag), ['4K', 'FHD', 'HD', 'SD', undefined])
+  assert.equal(sources?.length, 5)
+  assert.deepEqual(sources.map(source => source.sourceTag), ['4K', undefined, undefined, undefined, undefined])
 })
 
 test('match separators with attached punctuation keep the two teams distinct', () => {

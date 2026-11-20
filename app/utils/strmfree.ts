@@ -13,7 +13,7 @@ interface StrmfreeStream {
   match_timestamp: number
   stream_key?: string
   iframe?: string
-  additional_sources?: { quality?: string; url: string }[]
+  additional_sources?: { url: string }[]
 }
 
 const categories = new Map([
@@ -93,10 +93,19 @@ function findSupplement(
   return tied.length === 1 ? tied[0] : undefined
 }
 
-function supplementSources(match: StrmfreeStream, live: boolean): SupplementSource[] {
+function embedVariant(url: string, streamKey?: string) {
+  const path = url.split(/[?#]/, 1)[0] ?? ''
+  const id = path.replace(/\/+$/, '').split('/').pop() ?? ''
+  const suffix = streamKey && id.startsWith(streamKey) ? id.slice(streamKey.length) : id
+  const resolution = /(?<!\d)(2160p|4k|1080p|720p|540p|480p|360p)$/i.exec(suffix)?.[1]?.toLowerCase()
+  // The embed uses the full ID for liveness, including any provider suffix.
+  return { id, resolution }
+}
+
+function supplementSources(match: StrmfreeStream): SupplementSource[] {
   const sources = [
     ...(match.additional_sources ?? []),
-    ...(match.iframe ? [{ url: match.iframe, quality: undefined }] : []),
+    ...(match.iframe ? [{ url: match.iframe }] : []),
   ]
   function rank(quality?: string) {
     const index = quality === undefined ? -1 : qualities.indexOf(quality)
@@ -105,10 +114,9 @@ function supplementSources(match: StrmfreeStream, live: boolean): SupplementSour
 
   return sources.filter(source => allowedUrl(source.url))
     .map(source => {
-      const { pathname } = new URL(source.url, 'https://strmfree.pk')
-      const variant = /(2160p|4k|1080p|720p|540p|480p|360p)\/*$/i.exec(pathname)?.[1]
-      const quality = variantQualities.get(variant?.toLowerCase() ?? '')
-      return { ...source, quality: quality ?? source.quality }
+      const { resolution } = embedVariant(source.url, match.stream_key)
+      const quality = variantQualities.get(resolution ?? '')
+      return { ...source, quality }
     })
     .sort((a, b) => rank(a.quality) - rank(b.quality))
     .map(source => ({
@@ -116,7 +124,7 @@ function supplementSources(match: StrmfreeStream, live: boolean): SupplementSour
       substreamName: '',
       sourceTag: source.quality,
       origin: 'supplement',
-      live,
+      live: false,
       default: false,
       type: 'iframe',
       data: source.url,
@@ -129,7 +137,7 @@ export function matchSupplement(
   payload: { streams: StrmfreeStream[] },
 ): SupplementSource[] | null {
   const match = findSupplement(event, categorySlug, payload)
-  return match ? supplementSources(match, false) : null
+  return match ? supplementSources(match) : null
 }
 
 export async function loadSupplementSources(
@@ -141,15 +149,24 @@ export async function loadSupplementSources(
   if (!fetchStatus) return matchSupplement(event, categorySlug, payload)
   const match = findSupplement(event, categorySlug, payload)
   if (!match) return null
-  const sources = supplementSources(match, false)
+  const sources = supplementSources(match)
   if (!match.stream_key || !sources.length) return sources
 
   try {
     const response = await fetchStatus(match.stream_key)
     if (response.ok) {
       const payload = await response.json()
-      if (Array.isArray(payload?.sources) && payload.sources.some((source: { live?: unknown } | null) => source?.live === true)) {
-        return sources.map(source => ({ ...source, live: true }))
+      if (Array.isArray(payload?.sources)) {
+        const liveVariants = new Set<string>()
+        for (const entry of payload.sources) {
+          if (entry?.live !== true || typeof entry.url !== 'string') continue
+          const { id } = embedVariant(entry.url)
+          if (id) liveVariants.add(id)
+        }
+        return sources.map(source => ({
+          ...source,
+          live: liveVariants.has(embedVariant(source.data).id),
+        }))
       }
     }
   } catch {

@@ -101,7 +101,7 @@ async function loadSupplement() {
     || !event || event.always_live === 1
     || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
 
-  const storageKey = `supplement:v2:${uriName.value}`
+  const storageKey = `supplement:v5:${uriName.value}`
   try {
     const cached = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null')
     if (isCachedSupplement(cached, now)) {
