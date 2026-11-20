@@ -28,6 +28,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   const seen = []
   const logs = new EventEmitter()
   let redirectAt
+  let reservation
   const redirect = () => new Response(null, {
     status: 302, headers: { Location: 'https://redirect.invalid/secret' },
   })
@@ -49,11 +50,23 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       seen.push({ method: request.method, host: url.host, path: url.pathname, auth: signed })
       if (url.origin === endpoint) {
         if (url.pathname.endsWith('/current.json')) return Response.json({})
-        if (request.method === 'GET') return new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        if (request.method === 'GET') {
+          return reservation
+            ? Response.json(reservation, { headers: { ETag: '"reserved"' } })
+            : new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        }
+        if (reservation) {
+          assert.equal(request.headers.get('if-match'), '"reserved"')
+          reservation = await request.json()
+        }
         return new Response(null, { headers: { ETag: '"reserved"' } })
       }
       if (url.host === 'api.github.com') {
         if (url.pathname.endsWith('/runs')) {
+          if (reservation) {
+            assert.equal(url.searchParams.get('event'), 'workflow_dispatch')
+            assert.match(url.searchParams.get('created'), /^>=/)
+          }
           return redirectAt === 'list-runs' ? redirect() : Response.json({ total_count: 0, workflow_runs: [] })
         }
         if (url.pathname.endsWith('/dispatches')) {
@@ -90,4 +103,13 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
     assert.equal(result.status, 302)
     assert.equal(seen.length, phase === 'list-runs' ? 3 : 10)
   }
+
+  reservation = { attemptAt: Date.now() - 11 * 60_000 }
+  const failure = await tick('list-runs')
+  assert.equal(failure.stage, 'reconcile-run')
+  assert.equal(failure.status, 302)
+  assert.equal(seen.length, 3)
+  assert.equal((await tick()).decision, 'attempt-dead')
+  assert.ok(Number.isSafeInteger(reservation.clearedAt))
+  assert.equal(seen.length, 4)
 })

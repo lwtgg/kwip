@@ -82,12 +82,12 @@ function bucketClient(env, request) {
       const value = parseJson(await response.text())
       return { value, etag: response.headers.get('etag') }
     },
-    async reserve(until, previous) {
+    async writeReservation(value, previous) {
       const headers = previous ? { 'If-Match': previous.etag } : { 'If-None-Match': '*' }
       const response = await call(cooldownKey, {
         method: 'PUT',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ until }),
+        body: JSON.stringify(value),
       })
       await discardBody(response)
       if (response.status === 412) return null
@@ -115,16 +115,29 @@ export async function runTick(env, now, request = fetch) {
     const verifiedAt = manifest?.value.listsVerifiedAt
     const freshness = decideRefresh(verifiedAt, now)
     ageMs = freshness.ageMs
-    if (freshness.decision === 'fresh') return { ...freshness, dispatch }
 
     stage = 'cooldown-read'
     const cooldown = await bucket.read(cooldownKey)
     if (cooldown && !/^"[^"]+"$/.test(cooldown.etag ?? '')) {
       throw new TickFailure('invalid-cooldown-etag')
     }
-    const until = cooldown?.value?.until
-    const validCooldown = Number.isSafeInteger(until) && until >= 0 && until <= now + cooldownMs + maxClockSkewMs
-    if (validCooldown && until > now) return { ageMs, decision: 'cooldown', dispatch }
+    const record = cooldown?.value
+    // Older deployments stored only the end of the visibility window.
+    const legacyAttemptAt = Number.isSafeInteger(record?.until) ? record.until - cooldownMs : null
+    const attemptAt = record?.attemptAt ?? legacyAttemptAt
+    const unresolved = Number.isSafeInteger(attemptAt) && attemptAt >= 0 && attemptAt <= now + maxClockSkewMs
+    const cleared = Number.isSafeInteger(record?.clearedAt)
+    const release = async (previous, decision) => {
+      stage = 'cooldown-release'
+      if (!/^"[^"]+"$/.test(previous.etag ?? '')) throw new TickFailure('invalid-cooldown-etag')
+      const released = await bucket.writeReservation({ clearedAt: now }, previous)
+      return { ageMs, decision: released ? decision : 'cooldown', dispatch }
+    }
+
+    if (unresolved && Date.parse(verifiedAt) > attemptAt) {
+      return await release(cooldown, 'manifest-advanced')
+    }
+    if (!unresolved && freshness.decision === 'fresh') return { ...freshness, dispatch }
 
     stage = 'list-runs'
     if (!env.GITHUB_REFRESH_TOKEN) throw new TickFailure('missing-github-token')
@@ -140,6 +153,36 @@ export async function runTick(env, now, request = fetch) {
         ...options.headers,
       },
     })
+    if (unresolved) {
+      stage = 'reconcile-run'
+      // GitHub reports creation times to the second. Include the entire second
+      // in which the reservation was made.
+      const since = new Date(Math.floor(attemptAt / 1000) * 1000).toISOString()
+      const query = new URLSearchParams({ branch: 'main', event: 'workflow_dispatch', created: `>=${since}`, per_page: '100' })
+      const runs = await github(`runs?${query}`)
+      if (!runs.ok) {
+        await discardBody(runs)
+        throw new TickFailure('http-error', runs.status)
+      }
+      const { total_count: count, workflow_runs: entries } = parseJson(await runs.text()) ?? {}
+      if (!Array.isArray(entries) || !Number.isSafeInteger(count) || count < entries.length ||
+          entries.some((entry) => !['completed', ...activeStatuses].includes(entry?.status))) {
+        throw new TickFailure('invalid-run-list')
+      }
+      if (entries.some((entry) => activeStatuses.includes(entry.status))) {
+        return { ageMs, decision: 'active-run', dispatch }
+      }
+      if (count !== entries.length || /\brel\s*=\s*"?next\b/i.test(runs.headers.get('link') ?? '')) {
+        return { ageMs, decision: 'inconclusive', dispatch, stage, reason: 'incomplete-run-list' }
+      }
+      if (now - attemptAt < cooldownMs) return { ageMs, decision: 'cooldown', dispatch }
+
+      // A complete lookup after the visibility window found only terminal runs
+      // or no matching run. Release first so the next tick checks for active
+      // runs and reads the manifest again before it can dispatch.
+      return await release(cooldown, 'attempt-dead')
+    }
+
     // Check earlier lifecycle states first so a transition to queued or
     // in_progress can still be seen by a later query.
     for (const status of activeStatuses) {
@@ -159,10 +202,9 @@ export async function runTick(env, now, request = fetch) {
       }
     }
 
-    // The same conditional write either reserves an expired cooldown or repairs
-    // corrupt content, after the idle check in both cases.
+    // Reserve only after the idle check, using the ETag from this tick.
     stage = 'cooldown-write'
-    const claim = await bucket.reserve(now + cooldownMs, cooldown)
+    const claim = await bucket.writeReservation({ attemptAt: now }, cooldown)
     if (!claim) return { ageMs, decision: 'cooldown', dispatch }
 
     stage = 'dispatch'
@@ -177,16 +219,14 @@ export async function runTick(env, now, request = fetch) {
     if (response.ok) {
       return {
         ageMs, decision: 'dispatch', dispatch: 'accepted', status: response.status,
-        ...(cooldown && !validCooldown ? { reason: 'cooldown-repaired' } : {}),
+        ...(cooldown && !cleared ? { reason: 'cooldown-repaired' } : {}),
       }
     }
 
     // An explicit rejection can retry next tick. A timeout or 5xx may have queued
-    // a run, so leave the reservation in place until its bounded expiry.
+    // a run, so leave the reservation for the next tick to reconcile.
     if (response.status < 500) {
-      stage = 'cooldown-release'
-      if (!/^"[^"]+"$/.test(claim.etag ?? '')) throw new TickFailure('invalid-cooldown-etag')
-      await bucket.reserve(now, claim)
+      await release(claim, 'attempt-dead')
     }
     stage = 'dispatch'
     throw new TickFailure('http-error', response.status)

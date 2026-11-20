@@ -44,12 +44,12 @@ function fixture(...responses) {
   }
 }
 
-test('a fresh tick only sends its signed R2 request', async () => {
-  const http = fixture(Response.json({ listsVerifiedAt: timestamp(11) }))
+test('a fresh tick checks for an outstanding reservation', async () => {
+  const http = fixture(Response.json({ listsVerifiedAt: timestamp(11) }), missing())
   assert.deepEqual(await runTick(env, now, http.fetch), {
     ageMs: 11 * minute, decision: 'fresh', dispatch: 'skipped',
   })
-  assert.equal(http.requests.length, 1)
+  assert.equal(http.requests.length, 2)
   const [read] = http.requests
   assert.equal(new URL(read.url).pathname, '/kwip-feed-prod/current.json')
   assert.match(read.headers.get('authorization'), /^AWS4-HMAC-SHA256 /)
@@ -114,7 +114,7 @@ test('a missing manifest dispatches the production workflow on main when idle', 
   assert.equal(http.requests.length, 9)
   const [claim, dispatch] = http.requests.slice(-2)
   assert.equal(claim.headers.get('if-none-match'), '*')
-  assert.deepEqual(await claim.json(), { until: now + 10 * minute })
+  assert.deepEqual(await claim.json(), { attemptAt: now })
   assert.equal(dispatch.url, 'https://api.github.com/repos/lwtgg/kwip/actions/workflows/feed-refresh.yml/dispatches')
   assert.equal(dispatch.method, 'POST')
   assert.equal(dispatch.redirect, 'manual')
@@ -153,8 +153,10 @@ test('an accepted dispatch stays suppressed across ticks while the run list is s
   assert.equal((await runTick(env, now, http)).dispatch, 'accepted')
   assert.equal((await runTick(env, now + 5 * minute, http)).decision, 'cooldown')
   assert.equal(posts, 1)
-  assert.equal(listings, 5)
-  assert.equal((await runTick(env, now + 10 * minute, http)).dispatch, 'accepted')
+  assert.equal(listings, 6)
+  assert.equal((await runTick(env, now + 10 * minute, http)).decision, 'attempt-dead')
+  assert.equal(posts, 1)
+  assert.equal((await runTick(env, now + 15 * minute, http)).dispatch, 'accepted')
   assert.equal(posts, 2)
 })
 
@@ -189,7 +191,7 @@ for (const [label, corrupt] of [
       if (url.pathname.endsWith('/runs')) {
         const status = url.searchParams.get('status')
         if (busy && status === 'queued') return Response.json({ total_count: 1, workflow_runs: [{ status }] })
-        if (!busy) idleChecks++
+        if (!busy && status) idleChecks++
         return emptyRuns()
       }
       assert.ok(url.pathname.endsWith('/dispatches'))
@@ -202,7 +204,7 @@ for (const [label, corrupt] of [
     const repair = await runTick(env, now + 5 * minute, http)
     assert.equal(repair.reason, 'cooldown-repaired')
     assert.equal(repair.dispatch, 'accepted')
-    assert.deepEqual(JSON.parse(body), { until: now + 15 * minute })
+    assert.deepEqual(JSON.parse(body), { attemptAt: now + 5 * minute })
     assert.equal((await runTick(env, now + 10 * minute, http)).decision, 'cooldown')
     assert.deepEqual([writes, posts, idleChecks], [1, 1, 5])
   })
@@ -249,7 +251,7 @@ test('an explicit dispatch rejection releases the reservation for the next tick'
   assert.equal(http.requests.length, 10)
   const release = http.requests.at(-1)
   assert.equal(release.headers.get('if-match'), '"claim"')
-  assert.deepEqual(await release.json(), { until: now })
+  assert.deepEqual(await release.json(), { clearedAt: now })
 })
 
 test('missing release metadata preserves the rejection status without an unconditional write', async () => {
@@ -262,13 +264,58 @@ test('missing release metadata preserves the rejection status without an uncondi
 
 test('ambiguous dispatch failures retain the reservation and redact the exception', async () => {
   const raw = 'r2-test-key r2-test-secret github-test-token'
-  for (const response of [new Error(raw), new Response(raw, { status: 503 })]) {
+  for (const response of [new DOMException(raw, 'TimeoutError'), new Response(raw, { status: 503 })]) {
     const http = fixture(manifest(), missing(), ...idle(), written(), response)
     assert.deepEqual(await runTick(env, now, http.fetch), {
       ageMs: 13 * minute, decision: 'error', dispatch: 'failed', stage: 'dispatch',
-      ...(response instanceof Response ? { reason: 'http-error', status: 503 } : { reason: 'request-failed' }),
+      ...(response instanceof Response ? { reason: 'http-error', status: 503 } : { reason: 'request-timeout' }),
     })
     assert.equal(http.requests.length, 9)
+    const claim = await http.requests.at(-2).json()
+    const retry = fixture(manifest(), reservation(claim), Response.json({
+      total_count: 1, workflow_runs: [{ status: 'in_progress' }],
+    }))
+    assert.equal((await runTick(env, now + 5 * minute, retry.fetch)).decision, 'active-run')
+    assert.equal(retry.requests.length, 3)
+  }
+})
+
+const reservation = (value = { attemptAt: now }) => Response.json(value, {
+  headers: { ETag: '"claim"' },
+})
+
+test('manifest advancement clears the reservation even when the manifest is stale again', async () => {
+  for (const tick of [now + 5 * minute, now + 20 * minute]) {
+    const http = fixture(Response.json({ listsVerifiedAt: timestamp(-1) }), reservation(), written())
+    assert.equal((await runTick(env, tick, http.fetch)).decision, 'manifest-advanced')
+    const release = http.requests.at(-1)
+    assert.equal(release.headers.get('if-match'), '"claim"')
+    assert.deepEqual(await release.json(), { clearedAt: tick })
+    assert.equal(http.requests.length, 3)
+  }
+})
+
+test('a recently completed run with no manifest advancement is reconciled before retry', async () => {
+  const completed = () => Response.json({ total_count: 1, workflow_runs: [{ status: 'completed' }] })
+  const tick = now + 15 * minute
+  const http = fixture(manifest(), reservation({ until: now + 10 * minute }), completed(), written())
+  assert.equal((await runTick(env, tick, http.fetch)).decision, 'attempt-dead')
+  assert.equal(http.requests.length, 4)
+  assert.equal(http.requests.some((request) => request.method === 'POST'), false)
+  const query = new URL(http.requests[2].url).searchParams
+  assert.equal(query.get('created'), `>=${timestamp(0)}`)
+  assert.equal(query.get('event'), 'workflow_dispatch')
+})
+
+test('an active or unverified previous attempt stays reserved after the visibility window', async () => {
+  for (const [response, decision] of [
+    [Response.json({ total_count: 1, workflow_runs: [{ status: 'queued' }] }), 'active-run'],
+    [Response.json({ total_count: 2, workflow_runs: [{ status: 'completed' }] }), 'inconclusive'],
+    [new Response(null, { status: 503 }), 'error'],
+  ]) {
+    const http = fixture(manifest(), reservation(), response)
+    assert.equal((await runTick(env, now + 15 * minute, http.fetch)).decision, decision)
+    assert.equal(http.requests.length, 3)
   }
 })
 
