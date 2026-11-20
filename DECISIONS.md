@@ -24,11 +24,11 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 19. **Freshness does not depend on a deploy.** A GitHub Actions workflow publishes a packed, validated generation to private R2 every 15 minutes; the Worker reads ranges of the newest one and falls back to the bundled seed only when the generation is unreadable. The publisher lives in `scripts/` with its own lockfile, so nothing runner-only reaches the Worker bundle.
 20. **A missing path in a valid generation is authoritative.** Never back-fill one hole from the seed; render the normal unavailable state. Retry the seed only for the whole response, and only when the generation itself cannot be read.
 21. **The refresh is triggered from outside GitHub.** GitHub's scheduler has never fired a `schedule` event for this repository, so `kwip-feed-cron` (a scheduled-only Worker on a five-minute trigger) dispatches the workflow when the manifest is missing or older than twelve minutes, skipping while a run is queued. The GitHub `schedule:` trigger stays in place so both converge if it recovers; duplicate dispatches queue behind the workflow's concurrency group rather than publishing twice. The pinger is a trigger, not a monitor — thresholds and alerting stay in the workflow.
+22. **Money is our own click-under plus reserved banner slots.** The first qualifying source click per session opens an advertiser in a new tab through our own `/go/<placement>` redirect while the stream still loads in ours; 24/7 channels are excluded. Banners sit in fixed-dimension slots so nothing reflows, and never above the player. A homepage redirect is never taken — the event page is the product. Both sit behind `runtimeConfig.public.ads` and everything must still work with an ad blocker on. Ads are the only third-party runtime allowed on the page, which means v1 is no longer anonymous-by-default, and copy must stop claiming ad-free once the flag is on. Supersedes rule 6.
 
 ## Deferred (do not build, just note)
 
 - Accounts, watchlist, notifications
-- Ads and the ad-free tier
 - Own player with multi-source health checks
 - Search
 - Native apps
