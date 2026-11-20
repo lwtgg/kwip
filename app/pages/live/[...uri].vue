@@ -160,8 +160,7 @@ function findRequestedSource(options: SourceOption[], query: unknown) {
   return entry ? options.find(source => source.key === sourceKey(entry.data)) : undefined
 }
 
-const renderNoscriptPlayer = import.meta.server
-const noscriptSource = computed(() =>
+const initialFeedSource = computed(() =>
   findRequestedSource(sources.value, route.query.source)
     ?? sources.value.find(source => source.key === defaultSourceKey.value),
 )
@@ -186,12 +185,12 @@ function eventHealth() {
   return sourceHealth(healthSession, uriName.value)
 }
 
-function forgetFailure(key: string) {
+function forgetFailure(key: string, remount = true) {
   if (!rememberedFailures.value.includes(key)) return
   const health = eventHealth()
   health.forget(key)
   rememberedFailures.value = health.read()
-  retryGeneration.value += 1
+  if (remount) retryGeneration.value += 1
 }
 
 function clearFailures() {
@@ -552,8 +551,11 @@ if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnav
 }
 
 let pendingSourceQuery = true
-watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, query, options, ready], [previousUri, previousQuery]) => {
-  if (!ready) return
+watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, query, options, ready], [previousUri, previousQuery, , wasReady]) => {
+  if (!ready) {
+    selectedSourceKey.value = initialFeedSource.value?.key ?? null
+    return
+  }
   if (uri !== previousUri || query !== previousQuery) {
     const internal = uri === previousUri && pendingTargetKey !== null && pendingTargetKey === query
     if (!internal) {
@@ -577,7 +579,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       if (supplement.value.status === 'loading') return
     }
     if (requested?.origin === 'supplement') pickedSupplementKeys.add(requested.key)
-    if (requested) forgetFailure(requested.key)
+    if (requested) forgetFailure(requested.key, wasReady === true)
     requestedSourceKey.value = requested?.key ?? null
     resetAttempt(null)
     const preferred = defaultSourceKey.value
@@ -672,7 +674,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :sources="sources"
             :click-under="announceAd"
             :failed-keys="rememberedFailures"
-            :noscript-source-key="noscriptSource?.key"
+            :noscript-source-key="initialFeedSource?.key"
             @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
           <button
@@ -777,29 +779,8 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
           </ClientOnly>
           <template v-else>{{ replayFallback }}</template>
         </p>
-        <template v-if="!mounted">
-          <div class="aspect-video w-full rounded-[var(--radius)] border border-border bg-surface [@media(scripting:none)]:hidden" />
-          <noscript v-once data-allow-mismatch="children">
-            <iframe
-              v-if="renderNoscriptPlayer && noscriptSource?.kind === 'iframe'"
-              :src="noscriptSource.url"
-              :title="`${detail.name} — ${noscriptSource.label}`"
-              allow="autoplay; fullscreen; picture-in-picture"
-              allowfullscreen
-              class="aspect-video w-full rounded-[var(--radius)] border border-border bg-surface"
-            />
-            <a
-              v-else-if="renderNoscriptPlayer && noscriptSource"
-              :href="noscriptSource.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex min-h-11 items-center rounded-[var(--radius)] bg-accent px-5 text-sm font-semibold text-accent-fg"
-            >Open at source · {{ noscriptSource.label }}</a>
-          </noscript>
-        </template>
-
         <div
-          v-else-if="currentSource && currentSource.kind === 'link'"
+          v-if="currentSource && currentSource.kind === 'link'"
           class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
           :style="{ backgroundColor: placeholderColor }"
         >
@@ -853,6 +834,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
           <PlayerFrame
             :key="`${retryGeneration}:${currentSource.key}`"
             :src="currentSource.url"
+            :poster="detail.poster"
             :title="`${detail.name} — ${currentSource.label}`"
             :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
             @error="handleFrameError"

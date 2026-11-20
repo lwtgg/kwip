@@ -4,7 +4,6 @@
 """
 import argparse
 from pathlib import Path
-import re
 import tempfile
 from urllib.parse import quote, urlsplit
 
@@ -17,6 +16,7 @@ def check_source_health(browser, origin):
     with browser.new_context() as context:
         hold_first = True
         first_requests = []
+        frame_requests = []
 
         def intercept(route):
             url = route.request.url
@@ -34,10 +34,14 @@ def check_source_health(browser, origin):
         context.route('**/*', intercept)
         page = context.new_page()
         errors = []
+        page.on('request', lambda request: frame_requests.append(request.url) if request.resource_type == 'document' else None)
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.on('console', lambda message: errors.append(message.text) if message.type == 'error' else None)
         response = page.goto(origin + EVENT, wait_until='domcontentloaded')
-        assert response.ok and '<iframe' not in re.sub(r'<noscript.*?</noscript>', '', response.text(), flags=re.S)
+        assert response.ok
+        html = response.text()
+        assert f'<iframe src="{origin}/fixtures/one"' in html
+        assert '/fixtures/poster-1.jpg"' in html
         chips = page.get_by_role('group', name='Playback source')
         first = chips.get_by_role('button', name='First embed', exact=True)
         failed = chips.get_by_role('button', name='First embed, Failed to load', exact=True)
@@ -48,12 +52,16 @@ def check_source_health(browser, origin):
 
         expect(first).to_have_attribute('aria-pressed', 'true')
         expect(frame).to_have_attribute('src', first_url)
+        poster = page.get_by_role('region', name='Event player').locator('img[src$="/fixtures/poster-1.jpg"]')
+        expect(poster).to_be_visible()
+        poster.evaluate('image => image.decode()')
         original_order = chips.get_by_role('button').evaluate_all('buttons => buttons.map(button => button.value)')
         frame.dispatch_event('error')
         expect(failed).to_contain_text(' · Failed')
         expect(second).to_have_attribute('aria-pressed', 'true')
         expect(frame).to_have_attribute('src', second_url)
         expect(page.frame_locator('iframe').get_by_text('Playable fixture')).to_be_visible()
+        expect(poster).to_have_count(0)
         assert len(first_requests) == 1
 
         hold_first = False
@@ -100,10 +108,12 @@ def check_source_health(browser, origin):
         first_key = first.get_attribute('value')
         page.evaluate('''([entry, key]) => sessionStorage.setItem(entry,
             JSON.stringify({ at: Date.now(), keys: [key, 'unknown'] }))''', [storage_key, first_key])
+        frame_requests.clear()
         page.goto(origin + EVENT + '?source=' + quote(first_key), wait_until='networkidle')
         expect(first).to_have_attribute('aria-pressed', 'true')
         expect(failed).to_have_count(0)
         assert page.evaluate('key => JSON.parse(sessionStorage.getItem(key)).keys', storage_key) == ['unknown']
+        assert frame_requests.count(first_url) == 1, frame_requests
         assert not errors, errors
 
     with browser.new_context() as fresh:

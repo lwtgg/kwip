@@ -3,6 +3,7 @@ const props = withDefaults(
   defineProps<{
     src: string
     title: string
+    poster?: string | null
     sandbox?: string
     timeoutMs?: number
   }>(),
@@ -144,9 +145,18 @@ onBeforeUnmount(() => {
     <div
       v-if="!loaded"
       aria-live="polite"
-      class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface-2 text-xs text-muted motion-safe:animate-pulse [@media(scripting:none)]:hidden"
+      class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-surface-2 text-xs text-muted [@media(scripting:none)]:hidden"
     >
-      <span>Loading player embed…</span>
+      <img
+        v-if="poster"
+        :src="poster"
+        alt=""
+        width="1280"
+        height="720"
+        decoding="async"
+        class="absolute inset-0 h-full w-full object-cover"
+      >
+      <span class="relative rounded-full bg-surface-2 px-3 py-1.5">Loading player embed…</span>
     </div>
 
     <div
