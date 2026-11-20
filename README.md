@@ -107,5 +107,44 @@ npm install --prefix "$kwip_workflow_test_dir" --no-save --ignore-scripts yaml@2
   KWIP_WORKFLOW_TEST_DIR="$kwip_workflow_test_dir" node --test scripts/feed-refresh-workflow.test.mjs &&
   pnpm build &&
   pnpm test &&
-  pnpm exec wrangler deploy --dry-run
+  pnpm exec wrangler deploy --dry-run &&
+  pnpm --dir worker-cron --ignore-workspace install --frozen-lockfile &&
+  pnpm --dir worker-cron check
 ```
+
+## External feed refresh trigger
+
+`kwip-feed-cron` is a scheduled-only Cloudflare Worker. It runs every five
+minutes in UTC and reads `current.json` from `kwip-feed-prod`. If
+`listsVerifiedAt` is missing or more than 12 minutes old, it checks the latest
+100 runs of `feed-refresh.yml` on `main` before dispatching. An active run skips
+the dispatch. A failed request is logged and the next tick checks again.
+The GitHub schedule remains enabled. Both triggers use the workflow's existing
+concurrency group, so a dispatch race can queue another run without starting
+a concurrent publisher.
+
+Each tick makes one signed R2 GET. A stale tick adds one GitHub GET and, if
+idle, one dispatch POST. This is 288 ticks per day and at most three subrequests
+per invocation, including the R2 read.
+
+Provision `GITHUB_REFRESH_TOKEN` as a fine-grained GitHub token for
+`lwtgg/kwip` with **Actions: Read and write**. Install it directly with
+Wrangler. `R2_CREDENTIALS` is the production entry from the publisher's
+`.r2-credentials.json` shape. A bucket-scoped R2 Object Read Only credential
+with that shape is sufficient. From the repository root:
+
+```sh
+pnpm --dir worker-cron --ignore-workspace install --frozen-lockfile
+pnpm --dir worker-cron check
+pnpm exec wrangler secret put GITHUB_REFRESH_TOKEN --config worker-cron/wrangler.jsonc
+jq -ce 'if has("bucket") then . else .["kwip-feed-prod"] end | select(.bucket == "kwip-feed-prod")' .r2-credentials.json |
+  pnpm exec wrangler secret put R2_CREDENTIALS --config worker-cron/wrangler.jsonc
+pnpm exec wrangler deploy --config worker-cron/wrangler.jsonc
+pnpm exec wrangler tail --config worker-cron/wrangler.jsonc
+```
+
+In tail, look for a `feed_refresh_tick` record with the manifest age, the
+decision, and the dispatch result. To accept the deployment, observe a real
+cron tick and confirm a dispatched refresh advances `listsVerifiedAt` in R2.
+To pause the pinger, set `triggers.crons` to `[]` in
+`worker-cron/wrangler.jsonc` and deploy that Worker configuration.

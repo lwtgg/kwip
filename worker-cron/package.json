@@ -1,0 +1,12 @@
+{
+  "name": "kwip-feed-cron",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "pnpm test && ../node_modules/.bin/wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "aws4fetch": "1.0.20"
+  }
+}

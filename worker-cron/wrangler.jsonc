@@ -1,0 +1,30 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "kwip-feed-cron",
+  "main": "index.mjs",
+  "compatibility_date": "2026-11-20",
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "vars": {
+    "R2_BUCKET": "kwip-feed-prod"
+  },
+  "secrets": {
+    "required": ["GITHUB_REFRESH_TOKEN", "R2_CREDENTIALS"]
+  },
+  "limits": {
+    "subrequests": 3
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": false
+    },
+    "traces": {
+      "enabled": true
+    }
+  }
+}
