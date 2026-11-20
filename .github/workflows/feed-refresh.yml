@@ -1,5 +1,5 @@
 name: Feed refresh
-run-name: ${{ ((inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery) && 'Feed refresh (live)' || 'Feed refresh (simulation)' }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true) && 'Feed refresh (simulation)' || 'Feed refresh (live)' }}
 
 on:
   schedule:
@@ -17,7 +17,7 @@ on:
         default: false
 
 concurrency:
-  group: ${{ ((inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery) && 'feed-refresh' || 'feed-refresh-simulation' }}
+  group: ${{ github.event_name == 'workflow_dispatch' && ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true) && 'feed-refresh-simulation' || 'feed-refresh' }}
   cancel-in-progress: false
 
 permissions:
@@ -25,7 +25,9 @@ permissions:
 
 jobs:
   refresh:
-    if: (inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      ((inputs.simulate || 'none') == 'none' && inputs.simulate_recovery != true)
     runs-on: ubuntu-latest
     environment: feed-production
     timeout-minutes: 10
@@ -97,14 +99,17 @@ jobs:
           fi
 
   simulation:
-    if: (inputs.simulate != '' && inputs.simulate != 'none') || inputs.simulate_recovery
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       freshness: ${{ steps.simulation.outputs.freshness }}
       publication: ${{ steps.simulation.outputs.publication }}
+      recovery: ${{ steps.simulation.outputs.recovery }}
     env:
-      SIMULATE: ${{ inputs.simulate }}
+      SIMULATE: ${{ inputs.simulate || 'none' }}
       SIMULATE_RECOVERY: ${{ inputs.simulate_recovery }}
     steps:
       - name: Simulate a refresh result
@@ -122,25 +127,41 @@ jobs:
               echo 'freshness={"outcome":"stale","listsVerifiedAtAgeMs":3600000}' >> "$GITHUB_OUTPUT" ;;
             *)
               if [[ "$SIMULATE_RECOVERY" == true ]]; then
-                echo 'freshness={"outcome":"fresh"}' >> "$GITHUB_OUTPUT"
-                echo 'publication={"outcome":"unchanged","commitId":"simulated-recovery"}' >> "$GITHUB_OUTPUT"
+                {
+                  echo 'recovery=true'
+                  echo 'freshness={"outcome":"fresh"}'
+                  echo 'publication={"outcome":"unchanged","commitId":"simulated-recovery"}'
+                } >> "$GITHUB_OUTPUT"
               fi ;;
           esac
 
   alert:
-    needs: [refresh, simulation]
+    needs: refresh
     if: >-
-      !cancelled() && needs.refresh.result != 'cancelled' &&
-      (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
+      !cancelled() && (needs.refresh.result == 'success' || needs.refresh.result == 'failure')
     permissions:
       contents: read
       issues: write
       actions: write
     uses: ./.github/workflows/feed-refresh-issue.yml
     with:
-      refresh_result: ${{ needs.simulation.result != 'skipped' && needs.simulation.result || needs.refresh.result }}
-      simulated: ${{ needs.simulation.result != 'skipped' }}
-      simulation_recovery: ${{ inputs.simulate_recovery && (inputs.simulate == '' || inputs.simulate == 'none') }}
-      freshness: ${{ needs.simulation.outputs.freshness || needs.refresh.outputs.freshness || '{}' }}
-      publication: ${{ needs.simulation.outputs.publication || needs.refresh.outputs.publication || '{}' }}
+      refresh_result: ${{ needs.refresh.result }}
+      freshness: ${{ needs.refresh.outputs.freshness || '{}' }}
+      publication: ${{ needs.refresh.outputs.publication || '{}' }}
       stages: ${{ needs.refresh.outputs.stages || '{}' }}
+
+  alert_simulation:
+    needs: simulation
+    if: >-
+      !cancelled() && (needs.simulation.result == 'success' || needs.simulation.result == 'failure')
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    uses: ./.github/workflows/feed-refresh-issue.yml
+    with:
+      refresh_result: ${{ needs.simulation.result }}
+      simulated: true
+      simulation_recovery: ${{ needs.simulation.outputs.recovery == 'true' }}
+      freshness: ${{ needs.simulation.outputs.freshness || '{}' }}
+      publication: ${{ needs.simulation.outputs.publication || '{}' }}
