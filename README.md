@@ -115,23 +115,35 @@ npm install --prefix "$kwip_workflow_test_dir" --no-save --ignore-scripts yaml@2
 ## External feed refresh trigger
 
 `kwip-feed-cron` is a scheduled-only Cloudflare Worker. It runs every five
-minutes in UTC and reads `current.json` from `kwip-feed-prod`. If
-`listsVerifiedAt` is missing or more than 12 minutes old, it checks the latest
-100 runs of `feed-refresh.yml` on `main` before dispatching. An active run skips
-the dispatch. A failed request is logged and the next tick checks again.
-The GitHub schedule remains enabled. Both triggers use the workflow's existing
-concurrency group, so a dispatch race can queue another run without starting
-a concurrent publisher.
+minutes in UTC and reads `current.json` from `kwip-feed-prod`. A missing
+`listsVerifiedAt` or one more than 12 minutes old makes a dispatch eligible.
+The Worker accepts up to one minute of future clock skew. Malformed or
+further-future timestamps are logged as manifest errors.
 
-Each tick makes one signed R2 GET. A stale tick adds one GitHub GET and, if
-idle, one dispatch POST. This is 288 ticks per day and at most three subrequests
-per invocation, including the R2 read.
+The Worker checks the queued, in-progress, pending, requested, and waiting
+statuses on `main` with one result per filter. An active run or inconclusive
+lookup skips dispatch. Before POSTing, the Worker conditionally reserves a
+ten-minute cooldown in `cron-dispatch-cooldown.json` in R2. This covers delayed
+GitHub run visibility and competing cron ticks. Only one tick can successfully
+dispatch per ten-minute cooldown. An explicit rejection releases the
+reservation so a later tick can retry. An ambiguous timeout or server error
+leaves it in place until expiry. If the cooldown record is corrupt, the
+Worker first confirms GitHub is idle, then repairs it with a conditional
+write. The GitHub schedule stays enabled and both triggers still use the
+workflow's existing concurrency group.
+
+The pinger runs 288 ticks per day on Workers Paid, with a deployment budget
+of 1,000 subrequests per invocation. The original three-subrequest figure
+was an estimate. The Worker now enforces a ceiling of ten per tick. A fresh
+tick uses one R2 read. A stale tick can use two R2 reads and five small
+GitHub lookups. An idle tick adds a conditional R2 write and the dispatch
+POST, and an explicit rejection can add one release write.
 
 Provision `GITHUB_REFRESH_TOKEN` as a fine-grained GitHub token for
 `lwtgg/kwip` with **Actions: Read and write**. Install it directly with
 Wrangler. `R2_CREDENTIALS` is the production entry from the publisher's
-`.r2-credentials.json` shape. A bucket-scoped R2 Object Read Only credential
-with that shape is sufficient. From the repository root:
+`.r2-credentials.json` shape. Use a `kwip-feed-prod`-scoped R2 Object Read &
+Write credential for the cooldown object. From the repository root:
 
 ```sh
 pnpm --dir worker-cron --ignore-workspace install --frozen-lockfile
@@ -144,7 +156,9 @@ pnpm exec wrangler tail --config worker-cron/wrangler.jsonc
 ```
 
 In tail, look for a `feed_refresh_tick` record with the manifest age, the
-decision, and the dispatch result. To accept the deployment, observe a real
+decision, and the dispatch result. Errors include the stage, a fixed reason
+code such as `invalid-manifest-json` or `request-timeout`, and the HTTP status
+when available. To accept the deployment, observe a real
 cron tick and confirm a dispatched refresh advances `listsVerifiedAt` in R2.
 To pause the pinger, set `triggers.crons` to `[]` in
 `worker-cron/wrangler.jsonc` and deploy that Worker configuration.
