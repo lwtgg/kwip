@@ -50,6 +50,11 @@ export default defineNuxtConfig({
     adDestination: '',
     public: {
       ads: false,
+      bannerCreatives: {
+        'home-banner': { image: '', alt: '', destination: '' },
+        'event-banner': { image: '', alt: '', destination: '' },
+        'vods-banner': { image: '', alt: '', destination: '' },
+      },
       siteName: process.env.NUXT_PUBLIC_SITE_NAME || 'kwip',
       canonicalHost: process.env.NUXT_PUBLIC_CANONICAL_HOST || 'kwip.fyi',
       feedBase: process.env.NUXT_PUBLIC_FEED_BASE || '/fixtures',

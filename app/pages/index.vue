@@ -379,8 +379,7 @@ useSeoMeta({
           </ul>
         </section>
 
-        <!-- Reserved AdSlot before the rails -->
-        <AdSlot format="leaderboard" />
+        <AdSlot format="leaderboard" placement="home-banner" />
 
         <!-- Live now rail -->
         <Rail

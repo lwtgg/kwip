@@ -39,16 +39,16 @@ CLS_SCORE = """() => {
 }"""
 
 
-def fixture_assets(output, directory):
+def fixture_assets(output, directory, player=PLAYER):
     shutil.copytree(output / 'public', directory)
     fixtures = directory / 'fixtures'
     now = int(time.time())
     path = fixtures / 'stream.json'
     detail = json.loads(path.read_text())
     detail['data'].update(starts_at=now - 60, ends_at=now + 7200, sources=[
-        dict(name='First embed', type='iframe', default=True, data=f'{PLAYER}/one'),
-        dict(name='Second embed', type='iframe', default=False, data=f'{PLAYER}/two'),
-        dict(name='External fixture', type='link', default=False, data=f'{PLAYER}/external'),
+        dict(name='First embed', type='iframe', default=True, data=f'{player}/one'),
+        dict(name='Second embed', type='iframe', default=False, data=f'{player}/two'),
+        dict(name='External fixture', type='link', default=False, data=f'{player}/external'),
     ])
     path.write_text(json.dumps(detail))
     path = fixtures / 'streams.json'
@@ -61,12 +61,14 @@ def fixture_assets(output, directory):
 
 
 @contextmanager
-def worker(directory, name, output, destination, enabled):
+def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     assets = directory / f'{name}-assets'
-    fixture_assets(output, assets)
+    origin = f'http://127.0.0.1:{port}'
+    fixture_assets(output, assets, origin + player if player.startswith('/') else player)
+    overrides = variables(origin) if variables else {}
     config = directory / f'{name}.toml'
     config.write_text(f'''name = "kwip-click-under-{name}"
 main = {json.dumps(str(output / 'server/index.mjs'))}
@@ -80,8 +82,7 @@ not_found_handling = "none"
 NUXT_PUBLIC_FEED_BASE = "/fixtures"
 NUXT_PUBLIC_ADS = "{str(enabled).lower()}"
 NUXT_AD_DESTINATION = "{destination}"
-''')
-    origin = f'http://127.0.0.1:{port}'
+''' + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in overrides.items()))
     with tempfile.TemporaryFile() as logs, subprocess.Popen(
         ['pnpm', 'exec', 'wrangler', 'dev', '--config', str(config),
          '--ip', '127.0.0.1', '--port', str(port), '--inspector-port', '0'],

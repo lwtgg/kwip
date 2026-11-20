@@ -1,15 +1,16 @@
-export function adRedirect(placement: string | undefined, enabled: boolean, destination: string): Response {
-  let location = 'https://kwip.fyi/'
-  if (enabled && (placement === 'source' || placement === 'play')) {
-    try {
-      const url = new URL(destination)
-      if ((url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password) {
-        location = url.href
-      }
-    } catch {
-      // Missing or invalid destination uses the canonical homepage.
-    }
-  }
+import { bannerPlacements, getAdDestination, type BannerPlacement } from '../../shared/utils/banner.ts'
+
+export function adRedirect(
+  placement: string | undefined,
+  enabled: boolean,
+  destination: string,
+  bannerCreatives: Partial<Record<BannerPlacement, { destination: string }>> = {},
+): Response {
+  const banner = bannerPlacements.find(candidate => candidate === placement)
+  const target = banner ? bannerCreatives[banner]?.destination : destination
+  const location = enabled && (banner || placement === 'source' || placement === 'play')
+    ? getAdDestination(target) ?? 'https://kwip.fyi/'
+    : 'https://kwip.fyi/'
   return new Response(null, {
     status: 302,
     headers: { 'cache-control': 'no-store', location, 'referrer-policy': 'no-referrer' },

@@ -22,6 +22,12 @@
   --card-gap: 0.5rem;
   --grid-gap: 1rem;
   --rail-gap: 1rem;
+  --banner-leaderboard-width: 970px;
+  --banner-leaderboard-height: 90px;
+  --banner-mobile-width: 320px;
+  --banner-mobile-height: 100px;
+  --banner-rail-width: 300px;
+  --banner-rail-height: 250px;
 }
 
 [data-density='compact'] {

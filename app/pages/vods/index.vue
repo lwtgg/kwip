@@ -165,7 +165,7 @@ useSeoMeta({
           :countdown-map="rail.dateLabels"
         />
 
-        <AdSlot format="leaderboard" />
+        <AdSlot format="leaderboard" placement="vods-banner" />
       </template>
     </template>
   </div>

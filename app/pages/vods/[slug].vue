@@ -382,8 +382,6 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
         </div>
       </section>
 
-      <!-- Reserved AdSlot immediately below player -->
-      <AdSlot format="leaderboard" />
 
       <!-- Recommended VODs rail when non-empty -->
       <Rail
