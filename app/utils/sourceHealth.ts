@@ -7,7 +7,8 @@ export function sourceHealth(storage: Storage | null, uriName: string, now = Dat
   function read(): string[] {
     try {
       const entry = JSON.parse(storage?.getItem(storageKey) ?? 'null')
-      if (!entry || !Number.isFinite(entry.at) || entry.at > now() || now() - entry.at >= MAX_AGE
+      const age = now() - entry?.at
+      if (!entry || !Number.isFinite(entry.at) || age < 0 || age >= MAX_AGE
         || !Array.isArray(entry.keys) || !entry.keys.every((key: unknown) => typeof key === 'string' && key.length > 0)) return []
       return [...new Set<string>(entry.keys)].slice(0, MAX_KEYS)
     } catch {

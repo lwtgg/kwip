@@ -3,6 +3,7 @@ import { NuxtLink } from '#components'
 import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
+import { sourceHealth } from '~/utils/sourceHealth'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
@@ -98,7 +99,7 @@ const sources = computed(() => usePlayerSources({
 async function loadSupplement() {
   const event = detail.value
   const now = Date.now()
-  if (supplement.value.status !== 'idle' || isSupplementQuery(route.query.source)
+  if (supplement.value.status !== 'idle'
     || !event || event.always_live === 1
     || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
 
@@ -152,6 +153,19 @@ const defaultSourceKey = computed(() => {
   return first ? sourceKey(first.data) : null
 })
 
+function findRequestedSource(options: SourceOption[], query: unknown) {
+  const direct = options.find(source => source.key === query)
+  if (direct || typeof query !== 'string' || !/^\d+$/.test(query)) return direct
+  const entry = feedSources.value[Number(query)]
+  return entry ? options.find(source => source.key === sourceKey(entry.data)) : undefined
+}
+
+const renderNoscriptPlayer = import.meta.server
+const noscriptSource = computed(() =>
+  findRequestedSource(sources.value, route.query.source)
+    ?? sources.value.find(source => source.key === defaultSourceKey.value),
+)
+
 function isSupplementQuery(query: unknown) {
   return typeof query === 'string'
     && !feedSources.value.some(source => sourceKey(source.data) === query)
@@ -163,13 +177,32 @@ const selectedSourceKey = ref<string | null>(null)
 let chainExhausted = false
 const requestedSourceKey = ref<string | null>(null)
 const anchorKey = ref<string | null>(null)
-const failedKeys = new Set<string>()
+const attemptFailures = reactive(new Set<string>())
+const rememberedFailures = shallowRef<string[]>([])
+const failedKeys = computed(() => new Set([...attemptFailures, ...rememberedFailures.value]))
+let healthSession: Storage | null = null
+
+function eventHealth() {
+  return sourceHealth(healthSession, uriName.value)
+}
+
+function forgetFailure(key: string) {
+  if (!rememberedFailures.value.includes(key)) return
+  const health = eventHealth()
+  health.forget(key)
+  rememberedFailures.value = health.read()
+  retryGeneration.value += 1
+}
+
+function clearFailures() {
+  eventHealth().clear()
+  rememberedFailures.value = []
+}
 const seenKeys = new Set<string>()
 const beforeKeys = new Set<string>()
 let sourceWriteId = 0
 let pendingTargetKey: string | null = null
 const mounted = ref(false)
-let missingSourceKey: string | null = null
 const retryGeneration = ref(0)
 const playerWrapper = ref<HTMLElement | null>(null)
 const playerHelpOpen = ref(false)
@@ -179,6 +212,7 @@ const posterError = ref(false)
 watch(uriName, () => {
   supplement.value = { status: 'idle' }
   pickedSupplementKeys.clear()
+  rememberedFailures.value = eventHealth().read()
   resetAttempt(null)
   retryGeneration.value = 0
   playerHelpOpen.value = false
@@ -223,15 +257,26 @@ function handlePrimaryPlay(event: MouseEvent) {
   setTimeout(() => { link.target = '_blank' }, 0)
 }
 
+function isAutomaticSource(uri: string, key: unknown) {
+  return typeof key === 'string'
+    && router.options.history.state.automaticSource === JSON.stringify([uri, key])
+}
+
 async function writeSourceQuery(key: string, replace = false) {
   const target = sources.value.find(source => source.key === key)
   if (target?.origin === 'supplement' && !pickedSupplementKeys.has(key)) return
 
+  const clearAutomaticSelection = !replace && route.query.source === key && isAutomaticSource(uriName.value, key)
   const writeId = ++sourceWriteId
   pendingTargetKey = key
 
   try {
-    await router.push({ query: { ...route.query, source: key }, replace })
+    await router.push({
+      query: { ...route.query, source: key },
+      replace: replace || clearAutomaticSelection,
+      force: clearAutomaticSelection,
+      state: { automaticSource: replace ? JSON.stringify([uriName.value, key]) : null },
+    })
     await nextTick()
   } finally {
     if (writeId === sourceWriteId) pendingTargetKey = null
@@ -239,9 +284,15 @@ async function writeSourceQuery(key: string, replace = false) {
 }
 
 onMounted(() => {
-  if (ads === true) {
+  try {
+    healthSession = window.sessionStorage
+  } catch {
+    // Session storage may be unavailable.
+  }
+  rememberedFailures.value = eventHealth().read()
+  if (ads === true && healthSession) {
     try {
-      clickSession = window.sessionStorage
+      clickSession = healthSession
       openAdvertiser = window.open.bind(window)
       adAvailable.value = canClickUnder(true, clickSession, true)
     } catch {
@@ -250,7 +301,6 @@ onMounted(() => {
   }
   void loadSupplement()
   mounted.value = true
-  if (missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
 })
 
 const activeSourceKey = computed({
@@ -260,6 +310,7 @@ const activeSourceKey = computed({
     if (sources.value.some(source => source.key === key && source.origin === 'supplement')) {
       pickedSupplementKeys.add(key)
     }
+    forgetFailure(key)
     resetAttempt(key)
     requestedSourceKey.value = key
     selectedSourceKey.value = key
@@ -323,7 +374,7 @@ function setAttemptAnchor(key: string | null) {
 function resetAttempt(key: string | null) {
   chainExhausted = false
   setAttemptAnchor(key)
-  failedKeys.clear()
+  attemptFailures.clear()
   seenKeys.clear()
   for (const source of sources.value) seenKeys.add(source.key)
 }
@@ -331,7 +382,7 @@ function resetAttempt(key: string | null) {
 function nextPlayableKey(options: SourceOption[], activeKey: string | null): string | null {
   const activeAt = options.findIndex((source) => source.key === activeKey)
   return options.find((source, index) =>
-    index > activeAt && !failedKeys.has(source.key)
+    index > activeAt && !failedKeys.value.has(source.key)
     && (!seenKeys.has(source.key) || !beforeKeys.has(source.key)),
   )?.key ?? null
 }
@@ -340,7 +391,10 @@ function handleFrameError() {
   const key = currentSource.value?.key
   if (key === undefined) return
 
-  failedKeys.add(key)
+  const health = eventHealth()
+  health.record(key)
+  rememberedFailures.value = health.read()
+  attemptFailures.add(key)
   selectedSourceKey.value = nextPlayableKey(sources.value, key)
   chainExhausted = selectedSourceKey.value === null
   if (selectedSourceKey.value !== null) void writeSourceQuery(selectedSourceKey.value, true)
@@ -359,6 +413,7 @@ function handleReloadPlayer() {
 }
 
 function handleRetryChain() {
+  clearFailures()
   if (sources.value.length === 0) {
     refreshStream()
   }
@@ -371,6 +426,7 @@ function handleRetryChain() {
 }
 
 function handleRetryFeed() {
+  clearFailures()
   return retry(
     () => Promise.all([refreshStream(), refreshList()]),
     () => [streamResp.value, listResp.value],
@@ -496,7 +552,8 @@ if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnav
 }
 
 let pendingSourceQuery = true
-watch([uriName, () => route.query.source, sources, mounted], ([uri, query, options], [previousUri, previousQuery]) => {
+watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, query, options, ready], [previousUri, previousQuery]) => {
+  if (!ready) return
   if (uri !== previousUri || query !== previousQuery) {
     const internal = uri === previousUri && pendingTargetKey !== null && pendingTargetKey === query
     if (!internal) {
@@ -513,29 +570,28 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
       return
     }
 
-    let requested = options.find((source) => source.key === query)
-    if (!requested && typeof query === 'string' && /^\d+$/.test(query)) {
-      const entry = feedSources.value[Number(query)]
-      if (entry?.data) {
-        const key = sourceKey(entry.data)
-        requested = options.find((source) => source.key === key)
-      }
-    }
-    if (!requested && !mounted.value && isSupplementQuery(query)) {
-      selectedSourceKey.value = defaultSourceKey.value
-      resetAttempt(selectedSourceKey.value)
-      return
+    const automaticSource = isAutomaticSource(uri, query)
+    const requested = automaticSource ? undefined : findRequestedSource(options, query)
+    if (!requested && !automaticSource && isSupplementQuery(query)) {
+      if (supplement.value.status === 'idle') void loadSupplement()
+      if (supplement.value.status === 'loading') return
     }
     if (requested?.origin === 'supplement') pickedSupplementKeys.add(requested.key)
+    if (requested) forgetFailure(requested.key)
     requestedSourceKey.value = requested?.key ?? null
-    selectedSourceKey.value = requestedSourceKey.value ?? defaultSourceKey.value
-    resetAttempt(selectedSourceKey.value)
+    resetAttempt(null)
+    const preferred = defaultSourceKey.value
+    selectedSourceKey.value = requestedSourceKey.value
+      ?? (preferred !== null && !failedKeys.value.has(preferred) ? preferred : nextPlayableKey(options, null))
+    setAttemptAnchor(selectedSourceKey.value)
+    chainExhausted = selectedSourceKey.value === null
     pendingSourceQuery = false
-    missingSourceKey = query !== undefined && !requested ? selectedSourceKey.value : null
-    if (mounted.value && missingSourceKey !== null) void writeSourceQuery(missingSourceKey, true)
+    if (!automaticSource && query !== undefined && !requested && selectedSourceKey.value !== null) {
+      void writeSourceQuery(selectedSourceKey.value, true)
+    }
   } else if (chainExhausted && supplement.value.status === 'merged') {
     const nextKey = options.find(source =>
-      source.origin === 'supplement' && !seenKeys.has(source.key),
+      source.origin === 'supplement' && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),
     )?.key
     if (nextKey) {
       selectedSourceKey.value = nextKey
@@ -615,6 +671,8 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
             v-model="activeSourceKey"
             :sources="sources"
             :click-under="announceAd"
+            :failed-keys="rememberedFailures"
+            :noscript-source-key="noscriptSource?.key"
             @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
           <button
@@ -719,8 +777,29 @@ watch([uriName, () => route.query.source, sources, mounted], ([uri, query, optio
           </ClientOnly>
           <template v-else>{{ replayFallback }}</template>
         </p>
+        <template v-if="!mounted">
+          <div class="aspect-video w-full rounded-[var(--radius)] border border-border bg-surface [@media(scripting:none)]:hidden" />
+          <noscript v-once data-allow-mismatch="children">
+            <iframe
+              v-if="renderNoscriptPlayer && noscriptSource?.kind === 'iframe'"
+              :src="noscriptSource.url"
+              :title="`${detail.name} — ${noscriptSource.label}`"
+              allow="autoplay; fullscreen; picture-in-picture"
+              allowfullscreen
+              class="aspect-video w-full rounded-[var(--radius)] border border-border bg-surface"
+            />
+            <a
+              v-else-if="renderNoscriptPlayer && noscriptSource"
+              :href="noscriptSource.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex min-h-11 items-center rounded-[var(--radius)] bg-accent px-5 text-sm font-semibold text-accent-fg"
+            >Open at source · {{ noscriptSource.label }}</a>
+          </noscript>
+        </template>
+
         <div
-          v-if="currentSource && currentSource.kind === 'link'"
+          v-else-if="currentSource && currentSource.kind === 'link'"
           class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
           :style="{ backgroundColor: placeholderColor }"
         >
