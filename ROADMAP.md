@@ -22,8 +22,9 @@ Today's provider is the best found so far, but it is one provider with one failu
 Competitors make far more than their quality justifies. Research is done (`docs/money-research.md`) and rule 22 sets the shape: our own click-under plus reserved banner slots, both behind `runtimeConfig.public.ads`, nothing above the player, never a homepage redirect.
 
 - Click-under: shipped in `70d75cc`, flag still off in production. Flip `NUXT_PUBLIC_ADS` and set `NUXT_AD_DESTINATION` when an advertiser exists; `/go/<placement>` 302s with no referrer.
-- Banner slots: not started (task 31). Fixed dimensions, no reflow.
-- Copy: v1 stops being ad-free the moment the flag is on, and the copy must say ad-supported first.
+- Banner slots: shipped in `f42c8a1`, flag still off. Fixed dimensions, no reflow. Creatives come from `/banners/<file>` over the `BANNER_ASSETS` R2 binding, so a sold banner is an upload plus config, not a deploy.
+- Copy: v1 stops being ad-free the moment the flag is on, and the copy must say ad-supported first. The in-app copy never uses the phrase today, so this is the meta description and the framing docs at flip time.
+- An advertiser is the only thing gating the flip. Until then, the house creative proves the path with `NUXT_PUBLIC_ADS=true` on preview.
 
 ## 4. Live data
 
