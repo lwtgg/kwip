@@ -191,7 +191,8 @@ jobs:
           provider_status=$(jq -r '.providerStatus // empty' <<< "$PUBLICATION")
           failures=$(jq -r '
             to_entries[] | select(.value == "failure") | .key |
-            if . == "checkout" then "Checkout failed. Check repository access."
+            if . == "configure" then "Refresh input configuration failed. Check the Resolve refresh inputs step."
+            elif . == "checkout" then "Checkout failed. Check repository access."
             elif . == "node" then "Node setup failed. Check the runner and Node download."
             elif . == "pnpm" then "pnpm setup failed. Check the runner and pnpm download."
             elif . == "install" then "Dependency installation failed. Check the lockfile and registry access."

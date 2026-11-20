@@ -1,5 +1,5 @@
 name: Feed refresh
-run-name: ${{ ((inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery) && 'Feed refresh (live)' || 'Feed refresh (simulation)' }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true) && 'Feed refresh (simulation)' || 'Feed refresh (live)' }}
 
 on:
   schedule:
@@ -17,15 +17,39 @@ on:
         default: false
 
 concurrency:
-  group: ${{ ((inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery) && 'feed-refresh' || 'feed-refresh-simulation' }}
+  group: ${{ github.event_name == 'workflow_dispatch' && ((inputs.simulate || 'none') != 'none' || inputs.simulate_recovery == true) && 'feed-refresh-simulation' || 'feed-refresh' }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      mode: ${{ steps.inputs.outputs.mode }}
+      recovery: ${{ steps.inputs.outputs.recovery }}
+      simulation: ${{ steps.inputs.outputs.simulation }}
+    steps:
+      - name: Resolve refresh inputs
+        id: inputs
+        shell: bash
+        env:
+          MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.simulate || 'none' }}
+          RECOVERY: ${{ github.event_name == 'workflow_dispatch' && inputs.simulate_recovery == true }}
+        run: |
+          simulation=false
+          if [[ "$MODE" != none || "$RECOVERY" == true ]]; then simulation=true; fi
+          {
+            printf 'mode=%s\n' "$MODE"
+            printf 'recovery=%s\n' "$RECOVERY"
+            printf 'simulation=%s\n' "$simulation"
+          } >> "$GITHUB_OUTPUT"
+
   refresh:
-    if: (inputs.simulate == '' || inputs.simulate == 'none') && !inputs.simulate_recovery
+    needs: configure
+    if: needs.configure.outputs.simulation == 'false'
     runs-on: ubuntu-latest
     environment: feed-production
     timeout-minutes: 10
@@ -97,15 +121,17 @@ jobs:
           fi
 
   simulation:
-    if: (inputs.simulate != '' && inputs.simulate != 'none') || inputs.simulate_recovery
+    needs: configure
+    if: needs.configure.outputs.simulation == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       freshness: ${{ steps.simulation.outputs.freshness }}
       publication: ${{ steps.simulation.outputs.publication }}
+      recovery: ${{ steps.simulation.outputs.recovery }}
     env:
-      SIMULATE: ${{ inputs.simulate }}
-      SIMULATE_RECOVERY: ${{ inputs.simulate_recovery }}
+      SIMULATE: ${{ needs.configure.outputs.mode }}
+      SIMULATE_RECOVERY: ${{ needs.configure.outputs.recovery }}
     steps:
       - name: Simulate a refresh result
         id: simulation
@@ -122,25 +148,46 @@ jobs:
               echo 'freshness={"outcome":"stale","listsVerifiedAtAgeMs":3600000}' >> "$GITHUB_OUTPUT" ;;
             *)
               if [[ "$SIMULATE_RECOVERY" == true ]]; then
-                echo 'freshness={"outcome":"fresh"}' >> "$GITHUB_OUTPUT"
-                echo 'publication={"outcome":"unchanged","commitId":"simulated-recovery"}' >> "$GITHUB_OUTPUT"
+                {
+                  echo 'recovery=true'
+                  echo 'freshness={"outcome":"fresh"}'
+                  echo 'publication={"outcome":"unchanged","commitId":"simulated-recovery"}'
+                } >> "$GITHUB_OUTPUT"
               fi ;;
           esac
 
   alert:
-    needs: [refresh, simulation]
+    needs: [configure, refresh]
+    # If configuration failed, the routing outputs do not exist.
     if: >-
-      !cancelled() && needs.refresh.result != 'cancelled' &&
-      (needs.refresh.result != 'skipped' || needs.simulation.result != 'skipped')
+      !cancelled() &&
+      (needs.refresh.result == 'success' || needs.refresh.result == 'failure' ||
+       (needs.configure.result == 'failure' &&
+        (github.event_name != 'workflow_dispatch' ||
+         ((inputs.simulate || 'none') == 'none' && inputs.simulate_recovery != true))))
     permissions:
       contents: read
       issues: write
       actions: write
     uses: ./.github/workflows/feed-refresh-issue.yml
     with:
-      refresh_result: ${{ needs.simulation.result != 'skipped' && needs.simulation.result || needs.refresh.result }}
-      simulated: ${{ needs.simulation.result != 'skipped' }}
-      simulation_recovery: ${{ inputs.simulate_recovery && (inputs.simulate == '' || inputs.simulate == 'none') }}
-      freshness: ${{ needs.simulation.outputs.freshness || needs.refresh.outputs.freshness || '{}' }}
-      publication: ${{ needs.simulation.outputs.publication || needs.refresh.outputs.publication || '{}' }}
-      stages: ${{ needs.refresh.outputs.stages || '{}' }}
+      refresh_result: ${{ needs.configure.result == 'failure' && 'failure' || needs.refresh.result }}
+      freshness: ${{ needs.refresh.outputs.freshness || '{}' }}
+      publication: ${{ needs.refresh.outputs.publication || '{}' }}
+      stages: ${{ needs.configure.result == 'failure' && '{"configure":"failure"}' || needs.refresh.outputs.stages || '{}' }}
+
+  alert_simulation:
+    needs: simulation
+    if: >-
+      !cancelled() && (needs.simulation.result == 'success' || needs.simulation.result == 'failure')
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    uses: ./.github/workflows/feed-refresh-issue.yml
+    with:
+      refresh_result: ${{ needs.simulation.result }}
+      simulated: true
+      simulation_recovery: ${{ needs.simulation.outputs.recovery == 'true' }}
+      freshness: ${{ needs.simulation.outputs.freshness || '{}' }}
+      publication: ${{ needs.simulation.outputs.publication || '{}' }}

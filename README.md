@@ -91,8 +91,8 @@ or raise an alert about its own absence. The GitHub issue is the only alert chan
 
 ### Verify the refresh workflows
 
-Run the following from the repository root with Git, Go, and ShellCheck
-installed. The pinned actionlint revision validates GitHub's
+Run the following from the repository root with Git, Go, Node.js, jq, ShellCheck,
+and act v0.2.98 installed. The pinned actionlint revision validates GitHub's
 `concurrency.queue` setting, which keeps pending issue updates in order.
 
 ```sh
@@ -101,7 +101,10 @@ git init -q "$kwip_lint_dir"
 git -C "$kwip_lint_dir" fetch --depth=1 https://github.com/rhysd/actionlint.git 644076a59742c2d1540ebd4686eab3c308f0e562
 git -C "$kwip_lint_dir" checkout --detach FETCH_HEAD
 (cd "$kwip_lint_dir" && go build -o actionlint ./cmd/actionlint)
+kwip_workflow_test_dir=$(mktemp -d)
+npm install --prefix "$kwip_workflow_test_dir" --no-save --ignore-scripts yaml@2.9.1
 "$kwip_lint_dir/actionlint" &&
+  KWIP_WORKFLOW_TEST_DIR="$kwip_workflow_test_dir" node --test scripts/feed-refresh-workflow.test.mjs &&
   pnpm build &&
   pnpm test &&
   pnpm exec wrangler deploy --dry-run
