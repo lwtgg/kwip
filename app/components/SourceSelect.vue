@@ -82,7 +82,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           type="button"
           :value="source.key"
           :aria-describedby="source.host ? `${id}-host-${index}` : undefined"
-          :aria-label="source.origin === 'supplement' ? `${source.label}${source.live === false ? ', not live yet' : ''}, second provider` : undefined"
+          :aria-label="source.origin === 'supplement' ? `${source.label}${source.live === false ? ', Not live' : ''}, second provider` : undefined"
           :aria-pressed="source.key === modelValue"
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
           class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
@@ -96,6 +96,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
         >
           <span class="min-w-0 wrap-anywhere">
             {{ source.label }}
+            <span v-if="source.live === false"> · Not live</span>
             <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs" :class="source.key === modelValue && source.live !== false ? 'text-accent-strong-fg' : 'text-muted'">
               {{ source.host }}
             </span>

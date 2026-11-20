@@ -11,8 +11,9 @@ interface StrmfreeStream {
   name: string
   category: string
   match_timestamp: number
+  stream_key?: string
   iframe?: string
-  additional_sources?: { quality: string; url: string; live: boolean }[]
+  additional_sources?: { quality?: string; url: string }[]
 }
 
 const categories = new Map([
@@ -27,6 +28,10 @@ const categories = new Map([
 ])
 const hosts = ['strmfree.st', 'streamfree.top', 'strmfree.pk']
 const qualities = ['4K', 'FHD', 'HD', 'SD']
+const variantQualities = new Map([
+  ['2160p', '4K'], ['4k', '4K'], ['1080p', 'FHD'], ['720p', 'HD'],
+  ['540p', 'SD'], ['480p', 'SD'], ['360p', 'SD'],
+])
 
 function teams(name: string): string[] {
   return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
@@ -69,13 +74,13 @@ export function isCachedSupplement(value: unknown, now: number): value is {
     )
 }
 
-export function matchSupplement(
+function findSupplement(
   event: Pick<FeedStreamDetail, 'name' | 'starts_at'>,
   categorySlug: string,
   payload: { streams: StrmfreeStream[] },
-): SupplementSource[] | null {
+): StrmfreeStream | undefined {
   const pair = teams(event.name)
-  if (pair.length !== 2 || !pair[0] || !pair[1]) return null
+  if (pair.length !== 2 || !pair[0] || !pair[1]) return
 
   const candidates = payload.streams.filter((stream) => {
     if (!(Math.abs(stream.match_timestamp - event.starts_at) <= 3 * 3600)) return false
@@ -85,12 +90,13 @@ export function matchSupplement(
   const tied = candidates.length > 1
     ? candidates.filter(stream => categories.get(stream.category) === categorySlug)
     : candidates
-  const match = tied.length === 1 ? tied[0] : undefined
-  if (!match) return null
+  return tied.length === 1 ? tied[0] : undefined
+}
 
+function supplementSources(match: StrmfreeStream, live: boolean): SupplementSource[] {
   const sources = [
     ...(match.additional_sources ?? []),
-    ...(match.iframe ? [{ url: match.iframe, live: true, quality: undefined }] : []),
+    ...(match.iframe ? [{ url: match.iframe, quality: undefined }] : []),
   ]
   function rank(quality?: string) {
     const index = quality === undefined ? -1 : qualities.indexOf(quality)
@@ -98,15 +104,56 @@ export function matchSupplement(
   }
 
   return sources.filter(source => allowedUrl(source.url))
-    .sort((a, b) => rank(a.quality) - rank(b.quality) || Number(b.live) - Number(a.live))
+    .map(source => {
+      const { pathname } = new URL(source.url, 'https://strmfree.pk')
+      const variant = /(2160p|4k|1080p|720p|540p|480p|360p)\/*$/i.exec(pathname)?.[1]
+      const quality = variantQualities.get(variant?.toLowerCase() ?? '')
+      return { ...source, quality: quality ?? source.quality }
+    })
+    .sort((a, b) => rank(a.quality) - rank(b.quality))
     .map(source => ({
       name: '',
       substreamName: '',
       sourceTag: source.quality,
       origin: 'supplement',
-      live: source.live,
+      live,
       default: false,
       type: 'iframe',
       data: source.url,
     }))
+}
+
+export function matchSupplement(
+  event: Pick<FeedStreamDetail, 'name' | 'starts_at'>,
+  categorySlug: string,
+  payload: { streams: StrmfreeStream[] },
+): SupplementSource[] | null {
+  const match = findSupplement(event, categorySlug, payload)
+  return match ? supplementSources(match, false) : null
+}
+
+export async function loadSupplementSources(
+  event: Pick<FeedStreamDetail, 'name' | 'starts_at'>,
+  categorySlug: string,
+  payload: { streams: StrmfreeStream[] },
+  fetchStatus?: (key: string) => Promise<Response>,
+): Promise<SupplementSource[] | null> {
+  if (!fetchStatus) return matchSupplement(event, categorySlug, payload)
+  const match = findSupplement(event, categorySlug, payload)
+  if (!match) return null
+  const sources = supplementSources(match, false)
+  if (!match.stream_key || !sources.length) return sources
+
+  try {
+    const response = await fetchStatus(match.stream_key)
+    if (response.ok) {
+      const payload = await response.json()
+      if (Array.isArray(payload?.sources) && payload.sources.some((source: { live?: unknown } | null) => source?.live === true)) {
+        return sources.map(source => ({ ...source, live: true }))
+      }
+    }
+  } catch {
+    // Keep the matched sources selectable if the status request fails.
+  }
+  return sources
 }

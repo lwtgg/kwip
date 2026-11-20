@@ -5,7 +5,7 @@ import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
-import { isCachedSupplement, isSupplementHost, matchSupplement, type SupplementSource } from '~/utils/strmfree'
+import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
 import { formatViewersExact } from '~/utils/viewers'
 
 const route = useRoute()
@@ -101,7 +101,7 @@ async function loadSupplement() {
     || !event || event.always_live === 1
     || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
 
-  const storageKey = `supplement:${uriName.value}`
+  const storageKey = `supplement:v2:${uriName.value}`
   try {
     const cached = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null')
     if (isCachedSupplement(cached, now)) {
@@ -116,12 +116,15 @@ async function loadSupplement() {
   const slug = categorySlug.value
   supplement.value = loading
   try {
-    const endpoint = /(?:^|\/)fixtures\/?$/.test(feedBase)
-      ? '/fixtures/strmfree.json'
-      : 'https://strmfree.pk/api/v1/streams'
+    const fixtures = /(?:^|\/)fixtures\/?$/.test(feedBase)
+    const api = 'https://strmfree.pk/api/v1'
+    const endpoint = fixtures ? '/fixtures/strmfree.json' : `${api}/streams`
     const response = await fetch(endpoint)
     if (!response.ok) throw new Error('Second provider request failed')
-    const matched = matchSupplement(event, slug, await response.json())
+    const payload = await response.json()
+    if (supplement.value !== loading) return
+    const matched = await loadSupplementSources(event, slug, payload, fixtures ? undefined
+      : key => fetch(`${api}/sources/${encodeURIComponent(key)}`))
     if (supplement.value !== loading) return
     if (matched === null) {
       supplement.value = { status: 'none' }
