@@ -32,3 +32,6 @@ logs
 
 # Build-time feed snapshot
 public/feed-cache/
+
+# Python bytecode
+__pycache__/

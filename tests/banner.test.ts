@@ -4,7 +4,7 @@ import { canClickUnder } from '../app/utils/clickUnder.ts'
 import { adRedirect } from '../server/utils/ad-redirect.ts'
 import { getAdDestination, getBannerCreative, type BannerPlacement } from '../shared/utils/banner.ts'
 
-const creative = { image: '/house.webp', alt: 'House campaign', destination: 'https://example.com/house' }
+const creative = { image: '/banners/house.webp', alt: 'House campaign', destination: 'https://example.com/house' }
 
 test('the flag and placement gate creatives independently', () => {
   const creatives = { 'event-banner': creative, 'vods-banner': { ...creative, alt: '' } }
@@ -22,7 +22,10 @@ test('missing images keep a labelled box; malformed paths suppress the slot', ()
     assert.equal(banner?.key, '')
   }
   for (const image of [' ', '/', '/?name=foo', 'relative.webp', 'https://example.com/banner.webp',
-    '//example.com/banner.webp', '/\\example.com/banner.webp', '/\t/example.com/banner.webp', '/bad%path.webp']) {
+    '//example.com/banner.webp', '/\\example.com/banner.webp', '/\t/example.com/banner.webp', '/banners/bad%path.webp',
+    '/go/source', '/banners/../go/source', '/banners/%2e%2e/go/source', '/banners//house.webp',
+    '/banners/house.webp?url=external', '/banners/house.webp#fragment', '/banners/house.webp\n',
+    '/banners/house.html', '/banners/house']) {
     assert.equal(getBannerCreative(true, { 'home-banner': { ...creative, image } }, 'home-banner'), undefined)
   }
 })

@@ -61,13 +61,15 @@ def fixture_assets(output, directory, player=PLAYER):
 
 
 @contextmanager
-def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER):
+def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER, prepare_assets=None):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     assets = directory / f'{name}-assets'
     origin = f'http://127.0.0.1:{port}'
     fixture_assets(output, assets, origin + player if player.startswith('/') else player)
+    if prepare_assets:
+        prepare_assets(assets)
     overrides = variables(origin) if variables else {}
     config = directory / f'{name}.toml'
     config.write_text(f'''name = "kwip-click-under-{name}"
