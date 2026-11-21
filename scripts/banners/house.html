@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>kwip house banner</title>
+<!--
+From the repository root, using Playwright's cached Chromium 1255 on macOS:
+
+CHROMIUM="$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1255/chrome-headless-shell-mac-arm64/chrome-headless-shell"
+"$CHROMIUM" --no-sandbox --force-device-scale-factor=1 --force-color-profile=srgb \
+  --window-size=1940,180 --screenshot=/tmp/kwip-house-source.png "file://$PWD/scripts/banners/house.html"
+cwebp -q 82 -metadata none /tmp/kwip-house-source.png -o /tmp/house.webp
+
+Use the equivalent Chromium executable if your cache version or platform differs.
+-->
+<style>
+  /* Dark palette from app/assets/css/theme.css, fixed for both site themes. */
+  :root {
+    --color-bg: #0b0d12;
+    --color-fg: #e8ebf2;
+    --color-accent: #4f8cff;
+  }
+  body { margin: 0; background: var(--color-bg); }
+  svg { display: block; }
+  text {
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    text-anchor: middle;
+  }
+</style>
+<svg xmlns="http://www.w3.org/2000/svg" width="1940" height="180" viewBox="0 0 1940 180"
+     role="img" aria-label="kwip is ad-supported: how our ads work">
+  <defs>
+    <g id="pitch-end" fill="none" stroke="var(--color-accent)" stroke-width="3">
+      <rect x="-54" y="19" width="642" height="142" rx="24" opacity=".27"/>
+      <path d="M 0 42 H 260 V 138 H 0 M 0 64 H 128 V 116 H 0 M 260 49 A 53 53 0 0 1 260 131"
+            opacity=".32"/>
+      <circle cx="218" cy="90" r="5" fill="var(--color-accent)" stroke="none"/>
+    </g>
+  </defs>
+  <rect width="1940" height="180" fill="var(--color-bg)"/>
+  <use href="#pitch-end"/>
+  <use href="#pitch-end" transform="translate(1940 0) scale(-1 1)"/>
+  <!-- The centered mobile crop spans source x=682 through x=1258. -->
+  <text x="970" y="91" fill="var(--color-fg)" font-size="58" font-weight="700">Ads support kwip</text>
+  <text x="970" y="141" fill="var(--color-accent)" font-size="36" font-weight="600">How they work →</text>
+</svg>
+</html>
