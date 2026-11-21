@@ -22,7 +22,7 @@ ROUTES = (
     ('Populated replay', VOD, 'Replay player', 0.10),
 )
 CATEGORY = ('Basketball category', '/c/basketball', None, 0.05)
-SHORT_REPLAY = ('Short replay', VOD, 'Replay player', 0.05)
+SHORT_REPLAY = ('Short replay', VOD, 'Replay player', 0.10)
 
 
 def snapshot(page, player):
