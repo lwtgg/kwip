@@ -16,7 +16,6 @@ export const probeHosts = new Map([
   }],
   ['strmfree.st', strmfree],
   ['streamfree.top', strmfree],
-  ['embed.st', { path: /^\/embed\/admin\/ppv-[\w-]+\/[135]\/?$/, unverified: true }],
 ])
 
 function registered(url) {

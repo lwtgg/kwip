@@ -17,7 +17,7 @@ Today's provider is the best found so far, but it is one provider with one failu
 - record per-source reliability over time and demote the ones that rot
 - never host media
 
-**Shipped so far.** Source health (step 2, most of step 5): registered hosts are probed at publish time, the result rides the generation, and a failing source sinks within its own quality and locale band and carries a `degraded` chip without being removed. Second provider (step 3): `strmfree.pk` sources are matched and merged in the publisher, probed like any primary, and the browser fetch survives only as the fallback for generations that carry no supplement. Still owed: the `thedaddy.li` keyed API, `embed.st`, and health history beyond the current generation.
+**Shipped so far.** Source health (step 2, most of step 5): registered hosts are probed at publish time, the result rides the generation, and a failing source sinks within its own quality and locale band and carries a `degraded` chip without being removed. Second provider (step 3): `strmfree.pk` sources are matched and merged in the publisher, probed like any primary, and the browser fetch survives only as the fallback for generations that carry no supplement. Still owed: the `thedaddy.li` keyed API and health history beyond the current generation. `embed.st` was [settled as dead on 2026-11-21](docs/sourcing-research.md#host-checks-on-2026-11-21).
 
 ## 3. Money
 
