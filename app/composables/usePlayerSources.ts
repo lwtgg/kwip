@@ -56,7 +56,8 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     return { ...option, label }
   })
 
-  if (!labelled.some(option => option.degraded)) return labelled
+  const needsRanking = (option: SourceOption) => option.degraded || option.live === false
+  if (!labelled.some(needsRanking)) return labelled
 
   // Sort only within contiguous runs of known quality and matching locale.
   const ranked = labelled.map((option, index) => {
@@ -66,7 +67,7 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     const locale = source.locale ?? ('origin' in source ? undefined : stream.locale)
     return {
       option,
-      tier: quality && !('origin' in source) ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
+      tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
       viewers: Number(source.viewers) || 0,
     }
   })
@@ -75,8 +76,12 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     let end = start + 1
     while (end < ranked.length && ranked[end]!.tier === ranked[start]!.tier) end++
     const group = ranked.slice(start, end)
-    if (group.some(({ option }) => option.degraded)) {
-      group.sort((a, b) => Number(!!a.option.degraded) - Number(!!b.option.degraded) || b.viewers - a.viewers)
+    if (group.some(({ option }) => needsRanking(option))) {
+      group.sort((a, b) =>
+        Number(!!a.option.degraded) - Number(!!b.option.degraded)
+        || Number(a.option.live === false) - Number(b.option.live === false)
+        || b.viewers - a.viewers,
+      )
     }
     ordered.push(...group.map(({ option }) => option))
     start = end

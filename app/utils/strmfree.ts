@@ -4,7 +4,7 @@ export interface SupplementSource extends FeedStreamSource {
   origin: 'supplement'
   substreamName: ''
   sourceTag?: string
-  live: boolean
+  live: boolean | undefined
 }
 
 interface StrmfreeStream {
@@ -75,7 +75,8 @@ export function isCachedSupplement(value: unknown, now: number): value is {
       source !== null && typeof source === 'object' && !Array.isArray(source)
       && typeof source.data === 'string' && allowedUrl(source.data)
       && source.origin === 'supplement' && source.type === 'iframe' && source.default === false
-      && source.name === '' && source.substreamName === '' && typeof source.live === 'boolean'
+      && source.name === '' && source.substreamName === ''
+      && (source.live === undefined || typeof source.live === 'boolean')
       && (source.sourceTag === undefined || typeof source.sourceTag === 'string'),
     )
 }
@@ -130,7 +131,7 @@ function supplementSources(match: StrmfreeStream): SupplementSource[] {
       substreamName: '',
       sourceTag: source.quality,
       origin: 'supplement',
-      live: false,
+      live: undefined,
       default: false,
       type: 'iframe',
       data: source.url,
