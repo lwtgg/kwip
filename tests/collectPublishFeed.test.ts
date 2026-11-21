@@ -23,10 +23,18 @@ const mock = String.raw`
   const mode = process.env.PUBLISH_TEST_MODE
   const startsAt = Math.floor(Date.now() / 1000)
   const primary = { name: 'Primary', type: 'iframe', default: true, data: 'https://strmfree.st/embed/soccer/away-home?primary' }
-  const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(450) : '') + '720p'
+  const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(4000) : '') + '720p'
   const disagreement = ['detail-baseline', 'detail-match', 'list-only-match'].includes(mode)
   const shortcut = disagreement || ['shortcut-baseline', 'unmatched', 'out-of-window', 'plausible'].includes(mode)
-  const start = shortcut ? 2_000_000_000 : startsAt + (['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
+  const split = ['split', 'deadline'].includes(mode)
+  const start = shortcut ? 2_000_000_000 : startsAt + (split || ['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
+  const splitAlternates = Array.from({ length: 26 }, (_, index) =>
+    'https://strmfree.st/embed/soccer/supplement-' + index + '-720p')
+  const deadline = new AbortController()
+  if (mode === 'deadline') {
+    const originalTimeout = AbortSignal.timeout
+    AbortSignal.timeout = ms => ms > 25_000 && ms <= 30_000 ? deadline.signal : originalTimeout(ms)
+  }
   const acceptedAlternate = 'https://streamfree.top/embed/soccer/east-west-720p'
   if (shortcut) Object.assign(fixture.streams.streams[0].streams[0], {
     name: disagreement ? 'Other FC vs. Away FC' : 'Home FC vs. Away FC',
@@ -38,10 +46,13 @@ const mock = String.raw`
     })
   }
   const primarySources = [primary]
+  if (split || mode === 'capacity') {
+    const count = split ? 42 : 39
+    for (let i = 1; i < count; i++) primarySources.push({ ...primary, data: primary.data.replace('?primary', '-' + i) })
+    fixture['streams/foo'].data.sources = primarySources
+  }
   const wire = payload => mode === 'capacity' ? JSON.stringify(payload) : JSON.stringify(payload, null, 2) + '\n'
   if (mode === 'capacity') {
-    for (let i = 1; i < 39; i++) primarySources.push({ ...primary, data: primary.data.replace('?primary', '-' + i) })
-    fixture['streams/foo'].data.sources = primarySources
     Object.assign(fixture['streams/foo.json/bar'].data, { name: 'East vs. West', starts_at: start })
     const primaryHealth = Object.fromEntries(primarySources.map(({ data }) => [data.split('?')[0].slice(8), {
       embedOk: false, manifestOk: false, sequence: 'unknown', checkedAt: new Date().toISOString(), error: 'embed-503',
@@ -49,7 +60,7 @@ const mock = String.raw`
     const rows = fixture.vods.vods[0].vods
     let size = Object.values(fixture).reduce((sum, payload) => sum + Buffer.byteLength(wire(payload)), 0)
     const fileLimit = 2 * 1024 ** 2
-    const target = 40 * 1024 ** 2 - Buffer.byteLength(wire(primaryHealth)) - 480
+    const target = 40 * 1024 ** 2 - Buffer.byteLength(wire(primaryHealth)) - 3600
     for (let id = 4; size < target; id++) {
       const row = { id, slug: 'pad-' + id }
       const payload = { success: true, data: { id, pad: '' } }
@@ -67,17 +78,20 @@ const mock = String.raw`
   let listingRequests = 0
   let packed
   const probeRequests = []
+  const expectedProbes = mode === 'capacity' ? [...primarySources.map(source => source.data), acceptedAlternate]
+    : split ? [...primarySources.slice(0, 40).map(source => source.data), ...splitAlternates.slice(0, 24)] : []
+  let active = 0
   process.on('exit', () => {
     assert.equal(listingRequests, mode === 'fixture' ? 0 : 1)
-    assert.deepEqual(probeRequests, mode === 'capacity'
-      ? [...primarySources.map(source => source.data), acceptedAlternate] : [])
+    if (mode === 'deadline') assert.deepEqual(probeRequests, [primary.data, splitAlternates[0]])
+    else assert.deepEqual(probeRequests.sort(), expectedProbes.sort())
   })
-  globalThis.fetch = async (request) => {
+  globalThis.fetch = async (request, options) => {
     if (typeof request === 'string') {
       const url = new URL(request)
       if (url.href === 'https://strmfree.pk/api/v1/streams') {
         listingRequests++
-        if (!['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible', 'detail-match', 'list-only-match'].includes(mode)) {
+        if (!split && !['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible', 'detail-match', 'list-only-match'].includes(mode)) {
           return new Response(null, { status: 503 })
         }
         const streams = [{
@@ -89,6 +103,7 @@ const mock = String.raw`
             { url: alternate, quality: 'HD' },
           ],
         }]
+        if (split) streams[0].additional_sources = splitAlternates.map(url => ({ url, quality: 'HD' }))
         if (mode === 'capacity') streams.push({
           name: 'West at East', category: 'soccer', match_timestamp: start,
           additional_sources: [{ url: acceptedAlternate, quality: 'HD' }],
@@ -102,6 +117,18 @@ const mock = String.raw`
     }
     if (request instanceof URL) {
       probeRequests.push(request.href)
+      if (split) {
+        active++
+        assert.ok(active <= 2)
+        if (mode === 'deadline') {
+          return new Promise((_, reject) => {
+            options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true })
+            if (active === 2) deadline.abort()
+          })
+        }
+        await new Promise(resolve => setImmediate(resolve))
+        active--
+      }
       return new Response(null, { status: 503 })
     }
     const path = new URL(request.url).pathname
@@ -124,7 +151,7 @@ const mock = String.raw`
       if (packed) assert.equal(manifest.payloadId, manifest.commitId)
       else assert.equal(manifest.payloadId, current.payloadKey.slice(10, -4))
       const paths = ['streams', 'vods', ...Object.keys(fixture).filter(path => path.includes('/')).sort()]
-      if (mode === 'capacity') paths.push('health.json')
+      if (split || mode === 'capacity') paths.push('health.json')
       assert.deepEqual(manifest.endpoints.map(({ path }) => path), paths)
       if (packed) {
         let end = 0
@@ -134,9 +161,13 @@ const mock = String.raw`
           const bytes = packed.subarray(offset, end)
           if (path === 'health.json') {
             const health = JSON.parse(bytes)
-            assert.deepEqual(Object.keys(health).sort(), [...primarySources.map(source => source.data), acceptedAlternate]
-              .map(url => url.split('?')[0].slice(8)).sort())
-            assert.equal(health['strmfree.st/embed/soccer/away-home'].error, 'embed-503')
+            assert.deepEqual(Object.keys(health).sort(), mode === 'deadline' ? []
+              : expectedProbes.map(url => url.split('?')[0].slice(8)).sort())
+            if (mode !== 'deadline') assert.equal(health['strmfree.st/embed/soccer/away-home'].error, 'embed-503')
+          } else if (split && path === 'streams/foo') {
+            const { sources } = JSON.parse(bytes).data
+            assert.deepEqual(sources.slice(0, primarySources.length), primarySources)
+            assert.deepEqual(sources.slice(primarySources.length).map(source => source.data), splitAlternates.slice(0, 24))
           } else if (mode === 'capacity' && path === 'streams/foo.json/bar') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.map(source => source.data), [acceptedAlternate])
@@ -253,4 +284,22 @@ test('unchanged lists use the same detail name and kickoff as a fresh supplement
   assert.deepEqual(refreshed.bytes, fresh.bytes)
   assert.equal(listedOnly.outcome, 'unchanged')
   assert.equal(listedOnly.providerRequests, 2)
+})
+
+test('publisher packs 40 primary records and 24 supplement records under separate caps', async () => {
+  const result = await publish([], null, 'split')
+  assert.equal(result.outcome, 'published')
+  assert.deepEqual(result.probes, {
+    primary: { queued: 40, deadlineDropped: 0 },
+    supplement: { queued: 24, deadlineDropped: 0 },
+  })
+})
+
+test('publisher reports probe deadline drops by side and still publishes', async () => {
+  const result = await publish([], null, 'deadline')
+  assert.equal(result.outcome, 'published')
+  assert.deepEqual(result.probes, {
+    primary: { queued: 40, deadlineDropped: 40 },
+    supplement: { queued: 24, deadlineDropped: 24 },
+  })
 })

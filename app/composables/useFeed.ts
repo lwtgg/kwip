@@ -1,4 +1,5 @@
-import { toValue, type MaybeRefOrGetter } from 'vue'
+import { shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { sourceKey } from '../utils/sourceIdentity.ts'
 import {
   fetchBrowserFeed,
   fetchFeed,
@@ -272,6 +273,18 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
   )
+  const publishedDetail = shallowRef<{ uri: string; sources: FeedStreamSource[]; healthGeneration?: string }>()
+  watch([() => toValue(uriName), feed.data], ([uri, payload]) => {
+    if (publishedDetail.value?.uri !== uri) publishedDetail.value = undefined
+    const item = payload?.data
+    if (!payload?.detailGeneration || (item?.uri_name ?? item?.uri) !== uri) return
+    publishedDetail.value = {
+      uri,
+      sources: item?.sources?.filter(source => source.origin === 'supplement') ?? [],
+      healthGeneration: payload.healthGeneration,
+    }
+  }, { immediate: true, flush: 'sync' })
+
   const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
   const matchingListItem = computed(() => {
     for (const category of list.data.value?.streams ?? []) {
@@ -308,6 +321,13 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     })
 
     const sources = raw.sources ?? []
+    const publishedSources = publishedDetail.value?.sources ?? []
+    const publishedByKey = new Map(publishedSources.map(source => [sourceKey(source.data), source]))
+    const ordered = [
+      ...sources.filter(source => source.origin !== 'supplement'),
+      ...alternatives,
+      ...sources.filter(source => source.origin === 'supplement'),
+    ]
     return {
       ...raw,
       ...fixtureItem,
@@ -321,14 +341,13 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       colors: fixtureItem?.colors?.length ? fixtureItem.colors : raw.colors ?? [],
       blurhash: fixtureItem?.blurhash || raw.blurhash || '',
       sources: [
-        ...sources.filter(source => source.origin !== 'supplement'),
-        ...alternatives,
-        ...sources.filter(source => source.origin === 'supplement'),
+        ...ordered.filter(source => !publishedByKey.has(sourceKey(source.data))),
+        ...publishedByKey.values(),
       ],
       substreams: undefined,
     }
   })
-  return { feed, list, detail, matchingListItem }
+  return { feed, list, detail, matchingListItem, publishedDetail }
 }
 
 export function useVods() {

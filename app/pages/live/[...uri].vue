@@ -21,7 +21,7 @@ const uriName = computed(() => {
   return (Array.isArray(raw) ? raw.join('/') : String(raw || '')).replace(/^\/+|\/+$/g, '')
 })
 
-const { feed, list, detail, matchingListItem } = useStream(uriName)
+const { feed, list, detail, matchingListItem, publishedDetail } = useStream(uriName)
 
 const {
   data: streamResp,
@@ -92,8 +92,7 @@ const supplement = shallowRef<SupplementState>({ status: 'idle' })
 onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
 
 const snapshotHealth = shallowRef<SnapshotHealth>()
-const hasPublishedSupplement = computed(() => streamResp.value?.fromSnapshot
-  && detail.value?.sources.some(source => source.origin === 'supplement'))
+const hasPublishedSupplement = computed(() => !!publishedDetail.value?.sources.length)
 const playerInput = computed(() => ({
   hasPublishedSupplement: hasPublishedSupplement.value,
   locale: detail.value?.locale,
@@ -111,7 +110,7 @@ const sources = computed(() => snapshotHealth.value
 onMounted(() => {
   watch([
     () => detail.value?.uri_name,
-    () => streamResp.value?.fromSnapshot ? streamResp.value.healthGeneration : undefined,
+    () => publishedDetail.value?.healthGeneration,
   ], ([uri, generation], _, onCleanup) => {
     snapshotHealth.value = undefined
     if (!uri || !generation) return

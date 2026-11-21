@@ -5,11 +5,12 @@ import { join } from 'node:path'
 import { loadEnvFile } from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
-import { candidates, collectSourceHealth, nearbyEvent } from './probe-source-health.mjs'
+import { candidates, collectSourceHealth, nearbyEvent, supplementProbeCap } from './probe-source-health.mjs'
 import {
   fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources, supplementEvent,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
+import { sourceKey } from '../app/utils/sourceIdentity.ts'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
 // Collection starts after the publisher pins the manifest ETag.
@@ -20,6 +21,8 @@ const previewBucket = 'kwip-feed-preview'
 const buckets = [previewBucket, 'kwip-feed-prod']
 const runLimitMs = 230_000
 const stateReserveMs = 20_000
+const probeBudgetMs = 30_000
+const packReserveMs = 10_000
 const providerGapMs = 250
 const providerRequestLimit = 400
 const fileLimit = 2 * 1024 ** 2
@@ -179,6 +182,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     throw new Error(`Complete snapshot needs more than ${providerRequestLimit} provider requests`)
   }
 
+  const supplementDeadline = deadline - probeBudgetMs - packReserveMs
   const detailHashes = []
   for (const path of [...details.keys()].sort()) {
     const { payload, bytes } = await read(path)
@@ -192,7 +196,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       supplementEvents.push(event)
       const probeItem = { ...event, iframe: item.iframe, sources: item.sources, substreams: item.substreams }
       if (!fixture) probeItems.push(probeItem)
-      const match = matchPublishedSupplement(event, listing)
+      const match = performance.now() < supplementDeadline && matchPublishedSupplement(event, listing)
       if (match) {
         const sources = publishedSupplementSources(item, match)
         if (sources.length) matches.push({ match, sources, timing: probeItem, payload, entry: entries.at(-1), hash })
@@ -200,41 +204,70 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     }
   }
   const withStatus = matches.length ? await fetchSupplementStatuses(matches, now,
-    Math.min(performance.now() + 5_000, deadline - 40_000)) : undefined
-  // Primary probes share the existing deadline with supplements and establish the exact health reserve.
-  const probeDeadline = Math.min(performance.now() + 30_000, deadline - 10_000)
+    Math.min(performance.now() + 5_000, supplementDeadline)) : undefined
   const primaryProbes = candidates(probeItems, now)
-  const health = await collectSourceHealth(primaryProbes, probeDeadline - performance.now())
-  let healthBytes = primaryProbes.size ? json(health) : undefined
-  const accepted = []
-  for (const match of matches) {
+  const supplementProbes = new Map()
+  // Reserve the largest serialized record for each queued key before admitting sources.
+  const maxHealthRecordBytes = json({
+    embedOk: false, manifestOk: false, sequence: 'advancing',
+    checkedAt: '+999999-12-31T23:59:59.999Z', segmentMs: Number.MAX_SAFE_INTEGER, error: 'x'.repeat(32),
+  }).length
+  const recordReserve = key => json(key).length + maxHealthRecordBytes + 2
+  let healthReserve = [...primaryProbes.keys()].reduce((size, key) => size + recordReserve(key), 1)
+  let hasSupplements = false
+  for (const [index, match] of matches.entries()) {
+    if (performance.now() >= supplementDeadline) {
+      result.supplementAdmissionSkippedEvents = matches.length - index
+      break
+    }
     const { payload, entry, timing, hash } = match
     const supplements = withStatus(match)
-    const sources = [...(payload.data.sources ?? []), ...supplements]
+    const eligible = candidates([{
+      starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements,
+    }],
+      now, { limit: Infinity, exclude: primaryProbes })
+    const available = supplementProbeCap - supplementProbes.size
+    const pending = new Map()
+    for (const [key, source] of eligible) {
+      if (pending.size === available) break
+      if (!supplementProbes.has(key)) pending.set(key, source)
+    }
+    const admitted = supplements.filter(source => {
+      const key = sourceKey(source.data)
+      return !eligible.has(key) || supplementProbes.has(key) || pending.has(key)
+    })
+    if (!admitted.length) continue
+    const nextReserve = [...pending.keys()].reduce((size, key) => size + recordReserve(key), healthReserve)
+    const sources = [...(payload.data.sources ?? []), ...admitted]
     const bytes = json({ ...payload, data: { ...payload.data, sources } })
     const delta = bytes.length - entry.endpoint.length
-    if (bytes.length > fileLimit || size + delta + (healthBytes?.length ?? 0) >= snapshotLimit) continue
+    if (performance.now() >= supplementDeadline) {
+      result.supplementAdmissionSkippedEvents = matches.length - index
+      break
+    }
+    const hasProbes = primaryProbes.size || supplementProbes.size || pending.size
+    if (bytes.length > fileLimit || size + delta + (hasProbes ? nextReserve : 0) >= snapshotLimit) continue
     entry.stored = bytes
     entry.endpoint.length = bytes.length
     size += delta
     hash[1] = sha256(bytes)
-    accepted.push({ starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements })
+    for (const [key, source] of pending) supplementProbes.set(key, source)
+    healthReserve = nextReserve
+    hasSupplements = true
   }
   hashes.details = sha256(json(detailHashes))
 
-  // Apply the shared cap once to primaries followed by accepted supplements.
-  if (accepted.length) {
-    const supplementProbes = candidates([...probeItems, ...accepted], now)
-    for (const key of primaryProbes.keys()) supplementProbes.delete(key)
-    const supplementHealth = await collectSourceHealth(supplementProbes, probeDeadline - performance.now())
-    for (const [key, record] of Object.entries(supplementHealth)) {
-      const nextHealth = json({ ...health, [key]: record })
-      if (size + nextHealth.length >= snapshotLimit) continue
-      health[key] = record
-      healthBytes = nextHealth
+  if (primaryProbes.size || supplementProbes.size) {
+    const health = await collectSourceHealth(primaryProbes,
+      Math.min(probeBudgetMs, deadline - performance.now() - packReserveMs), supplementProbes)
+    const completed = key => Object.hasOwn(health, key)
+    result.probes = {
+      primary: { queued: primaryProbes.size, deadlineDropped: primaryProbes.size - [...primaryProbes.keys()].filter(completed).length },
+      supplement: { queued: supplementProbes.size, deadlineDropped: supplementProbes.size - [...supplementProbes.keys()].filter(completed).length },
     }
+    const healthBytes = json(health)
+    if (size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)
   }
-  if (healthBytes && size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)
   const bytes = Buffer.alloc(size)
   let offset = 0
   for (const { endpoint, stored } of entries) {
@@ -247,7 +280,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   timeLeft(deadline, 'Collection deadline exceeded')
   return { snapshot: {
     bytes, size, endpoints: entries.map(({ endpoint }) => endpoint), hashes,
-    hasSupplements: accepted.length > 0, supplementEvents,
+    hasSupplements, supplementEvents,
   } }
 }
 

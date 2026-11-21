@@ -39,6 +39,7 @@ interface FeedConfig {
 export interface FeedProvenance {
   fromCache?: true
   fromSnapshot?: true
+  detailGeneration?: string
   healthGeneration?: string
   hasSnapshotReplay?: true
 }
@@ -446,7 +447,10 @@ export async function readFeedGeneration(
       signal.throwIfAborted()
       for (const [path, entry] of snapshot.payloads) {
         const payload = normalizeSnapshotPayload(path, entry, host)
-        if (hasHealth && path === streamPath) payload.healthGeneration = identity
+        if (path === streamPath) {
+          payload.detailGeneration = identity
+          if (hasHealth) payload.healthGeneration = identity
+        }
         payloads.set(path, payload)
       }
       window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined

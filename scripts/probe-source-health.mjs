@@ -42,15 +42,18 @@ export function* sourceUrls(item) {
 }
 
 export const sourceProbeCap = 40
+export const supplementProbeCap = 24
 
-export function candidates(items, now = Date.now()) {
+export function candidates(items, now = Date.now(), { limit = sourceProbeCap, exclude } = {}) {
   const unique = new Map()
   for (const item of items) {
     if (!nearbyEvent(item, now)) continue
     for (const raw of sourceUrls(item)) {
       const entry = registered(raw)
-      if (entry && !unique.has(sourceKey(raw))) unique.set(sourceKey(raw), entry)
-      if (unique.size === sourceProbeCap) return unique
+      if (!entry) continue
+      const key = sourceKey(raw)
+      if (!unique.has(key) && !exclude?.has(key)) unique.set(key, entry)
+      if (unique.size === limit) return unique
     }
   }
   return unique
@@ -182,17 +185,25 @@ export async function probeSource(url, { signal = new AbortController().signal, 
   return result
 }
 
-export async function collectSourceHealth(entries, timeoutMs) {
-  if (!entries.size || timeoutMs < 3000) return {}
+export async function collectSourceHealth(entries, timeoutMs, supplements = new Map()) {
+  if ((!entries.size && !supplements.size) || timeoutMs < 3000) return {}
   const signal = AbortSignal.timeout(Math.floor(timeoutMs))
   const queues = new Map()
-  for (const [key, entry] of entries) {
-    const hostname = entry.url.hostname
-    if (!queues.has(hostname)) queues.set(hostname, { host: entry.host, entries: [] })
-    queues.get(hostname).entries.push([key, entry.url.href])
+  for (const [sources, side] of [[entries, 'primary'], [supplements, 'supplement']]) {
+    for (const [key, entry] of sources) {
+      const hostname = entry.url.hostname
+      if (!queues.has(hostname)) queues.set(hostname, { host: entry.host, primary: [], supplement: [] })
+      queues.get(hostname)[side].push([key, entry.url.href])
+    }
   }
   const health = {}
-  await Promise.all([...queues.values()].flatMap(({ host, entries }) => {
+  await Promise.all([...queues.values()].flatMap(({ host, primary, supplement }) => {
+    // Alternate within each host so neither side has to wait for the other queue to drain.
+    const entries = []
+    for (let index = 0; index < Math.max(primary.length, supplement.length); index++) {
+      if (primary[index]) entries.push(primary[index])
+      if (supplement[index]) entries.push(supplement[index])
+    }
     const queue = entries.values()
     return Array.from({ length: host.concurrency }, async () => {
       for (const [key, url] of queue) {

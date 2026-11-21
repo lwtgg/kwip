@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 import tempfile
 from threading import Event, Thread
-from time import monotonic
+from time import monotonic, time
 from urllib.parse import quote, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
@@ -371,6 +371,82 @@ export default {
                             assert '"fromCache"' in response.text(), path
                         print('Stalled R2 and upstreams with missing and seeded details: HTTP 200')
                     assert '"stage":"snapshot"' in log.read_text()
+            uri = EVENT.removeprefix('/live/')
+            supplement_url = 'https://strmfree.st/embed/basketball/test-1080p'
+            supplement_key = supplement_url.removeprefix('https://')
+            first_url = 'https://player.example/primary'
+            starts_at = int(time()) - 60
+            detail = json.loads((output / 'public/fixtures/stream.json').read_text())['data']
+            detail.update(uri_name=uri, starts_at=starts_at, ends_at=starts_at + 7200,
+                          always_live=0, substreams=[], sources=[
+                              dict(name='Primary', data=first_url, type='iframe', default=True),
+                          ])
+            upstream = {'success': True, 'streams': [
+                {'category': 'Basketball', 'id': 1, 'streams': [dict(
+                    id=detail['id'], name=detail['name'], uri_name=uri, starts_at=starts_at,
+                    ends_at=detail['ends_at'], always_live=0,
+                )]},
+            ]}
+            published = dict(detail, sources=[*detail['sources'], dict(
+                name='Strmfree', data=supplement_url, default=False, type='iframe',
+                sourceTag='FHD', origin='supplement', live=False,
+            )])
+            packed = b''
+            endpoints = []
+            for path, item in [('streams', upstream), (f'streams/{uri}', {'success': True, 'data': published})]:
+                payload = json.dumps(item).encode()
+                endpoints.append(dict(path=path, offset=len(packed), length=len(payload)))
+                packed += payload
+            manifest.update(size=len(packed), endpoints=endpoints)
+
+            with worker(directory, 'generation-refresh', wrapped, 'https://advertiser.example',
+                        False, variables=lambda _: {
+                            'TEST_PROVIDER': base,
+                            'TEST_READABLE': '1',
+                            'NUXT_PUBLIC_FEED_BASE': f'{base}/healthy',
+                            'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
+                        }) as origin:
+                for duplicate in (False, True):
+                    updated = dict(detail, name='Refreshed upstream event')
+                    if duplicate:
+                        updated['sources'] = [*detail['sources'], dict(
+                            name='Upstream duplicate', data=supplement_url + '?duplicate=1',
+                            default=False, type='iframe',
+                        )]
+                    browser_requests = []
+
+                    def intercept(route):
+                        url = route.request.url
+                        if url == f'{base}/healthy/streams/{uri}':
+                            browser_requests.append('detail')
+                            route.fulfill(json={'success': True, 'data': updated},
+                                          headers={'Access-Control-Allow-Origin': '*'})
+                        elif url == f'{base}/healthy/streams':
+                            route.fulfill(json=upstream, headers={'Access-Control-Allow-Origin': '*'})
+                        elif url in (first_url, supplement_url):
+                            route.fulfill(body='<h1>Playback fixture</h1>', content_type='text/html')
+                        elif url.startswith(origin + '/'):
+                            route.continue_()
+                        else:
+                            if url.startswith('https://strmfree.pk/api/'):
+                                browser_requests.append('provider')
+                            route.abort()
+
+                    with browser.new_context(viewport={'width': 1280, 'height': 900}) as context:
+                        context.route('**/*', intercept)
+                        page = context.new_page()
+                        response = page.goto(origin + EVENT + '?source=' + quote(supplement_key))
+                        assert response.ok
+                        expect(page.get_by_role('heading', name=updated['name'], exact=True)).to_be_visible()
+                        picker = page.get_by_role('group', name='Playback source')
+                        chip = picker.locator(f'button[value="{supplement_key}"]')
+                        expect(chip).to_have_count(1)
+                        expect(chip).to_contain_text('Strmfree · FHD')
+                        expect(chip).to_contain_text('Not live')
+                        expect(chip).to_have_attribute('aria-pressed', 'true')
+                        expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
+                        assert browser_requests == ['detail'], browser_requests
+                    print(f'Supplement selection survives cross-origin detail refresh (duplicate={duplicate})')
         finally:
             release.set()
             provider.shutdown()
