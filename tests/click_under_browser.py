@@ -61,14 +61,20 @@ def fixture_assets(output, directory, player=PLAYER):
 
 
 @contextmanager
-def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER, banner_fixture=None):
+def worker(directory, name, output, destination, enabled, *, variables=None, player=PLAYER, banner_fixture=None, log_path=None):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     assets = directory / f'{name}-assets'
     origin = f'http://127.0.0.1:{port}'
     fixture_assets(output, assets, origin + player if player.startswith('/') else player)
-    overrides = variables(origin) if variables else {}
+    runtime_vars = {
+        'NUXT_PUBLIC_FEED_BASE': '/fixtures',
+        'NUXT_PUBLIC_ADS': str(enabled).lower(),
+        'NUXT_AD_DESTINATION': destination,
+    }
+    if variables:
+        runtime_vars.update(variables(origin))
     config = directory / f'{name}.toml'
     config_text = f'''name = "kwip-click-under-{name}"
 main = {json.dumps(str(output / 'server/index.mjs'))}
@@ -79,10 +85,7 @@ binding = "ASSETS"
 directory = {json.dumps(str(assets))}
 not_found_handling = "none"
 [vars]
-NUXT_PUBLIC_FEED_BASE = "/fixtures"
-NUXT_PUBLIC_ADS = "{str(enabled).lower()}"
-NUXT_AD_DESTINATION = "{destination}"
-''' + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in overrides.items())
+''' + ''.join(f'{key} = {json.dumps(value)}\n' for key, value in runtime_vars.items())
     persist = []
     if banner_fixture:
         config_text += '\n[[r2_buckets]]\nbinding = "BANNER_ASSETS"\nbucket_name = "kwip-test-banners"\n'
@@ -94,7 +97,8 @@ NUXT_AD_DESTINATION = "{destination}"
              '--local', '--config', str(config), '--file', str(banner_fixture), *persist],
             check=True, capture_output=True,
         )
-    with tempfile.TemporaryFile() as logs, subprocess.Popen(
+    log_file = log_path.open("w+b") if log_path else tempfile.TemporaryFile()
+    with log_file as logs, subprocess.Popen(
         ['pnpm', 'exec', 'wrangler', 'dev', '--config', str(config),
          '--ip', '127.0.0.1', '--port', str(port), '--inspector-port', '0', *persist],
         stdout=logs, stderr=subprocess.STDOUT,

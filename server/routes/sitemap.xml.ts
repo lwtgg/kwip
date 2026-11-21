@@ -1,5 +1,5 @@
 import type { FeedStreamsResponse, FeedVodsResponse } from '../../app/composables/useFeed'
-import { fetchFeed, getFeedAssets, getFeedGeneration } from '../utils/feed.ts'
+import { fetchFeed, getFeedAssets, getFeedFallback, getFeedGeneration } from '../utils/feed.ts'
 
 import { feedDetailPath } from '../utils/feed-path.ts'
 
@@ -30,20 +30,19 @@ export default defineEventHandler(async (event) => {
   const { public: config, feedSnapshotBinding, seedDetailPaths } = useRuntimeConfig(event)
   const requestUrl = getRequestURL(event)
   const assets = getFeedAssets(event)
-  const generation = await getFeedGeneration(event, feedSnapshotBinding, $fetch, config, requestUrl, [
+  const generation = await getFeedGeneration(event, feedSnapshotBinding, config, requestUrl, [
     { kind: 'streams' }, { kind: 'vods' },
-  ], seedDetailPaths)
-  const [streams, vods] = generation ? [
-    generation.get<FeedStreamsResponse>({ kind: 'streams' }),
-    generation.get<FeedVodsResponse>({ kind: 'vods' }),
+  ])
+  const resolved = generation?.readable ? generation :
+    await getFeedFallback(event, feedSnapshotBinding, $fetch, config, requestUrl, seedDetailPaths)
+  const [streams, vods] = resolved ? [
+    resolved.get<FeedStreamsResponse>({ kind: 'streams' }),
+    resolved.get<FeedVodsResponse>({ kind: 'vods' }),
   ] : await Promise.all([
     fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }, assets).catch(() => null),
     fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }, assets).catch(() => null),
   ])
-
-  const seedCoverage = new Set(seedDetailPaths)
-  const covered = (path: string, fromCache?: true) =>
-    generation ? generation.hasDetail(path) : !fromCache || seedCoverage.has(path)
+  const covered = (path: string) => resolved?.hasDetail(path) ?? true
 
   const seen = new Set(entries.map((e) => e.path))
   const push = (path: string, lastmod?: string) => {
@@ -55,7 +54,7 @@ export default defineEventHandler(async (event) => {
   for (const cat of streams?.streams ?? []) {
     for (const s of cat.streams ?? []) {
       const path = feedDetailPath('streams', s.uri_name)
-      if (path && covered(path, streams?.fromCache)) {
+      if (path && covered(path)) {
         push(`/live/${encodePath(path.slice('streams/'.length))}`, toLastmod(s.starts_at))
       }
     }
@@ -63,7 +62,7 @@ export default defineEventHandler(async (event) => {
   for (const cat of vods?.vods ?? []) {
     for (const v of cat.vods ?? []) {
       const path = feedDetailPath('vods', v.slug ?? v.uri_name)
-      if (path && covered(path, vods?.fromCache)) {
+      if (path && covered(path)) {
         push(`/vods/${encodePath(path.slice('vods/'.length))}`, toLastmod(v.added))
       }
     }
