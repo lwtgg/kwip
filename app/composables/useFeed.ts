@@ -182,7 +182,10 @@ function useFeedEndpoint<T extends { success: boolean }>(
           throw createError({
             statusCode: 503,
             statusMessage: 'Feed endpoint unavailable',
-            data: { snapshotUnavailable: true, snapshotOmitted: 'readable' in resolved && resolved.readable },
+            data: generation ? {
+              snapshotUnavailable: true,
+              snapshotOmitted: 'readable' in resolved && resolved.readable,
+            } : undefined,
           })
         }
 

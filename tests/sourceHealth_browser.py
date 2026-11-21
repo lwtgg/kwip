@@ -180,12 +180,16 @@ def check_source_health(browser, origin):
 
 
 def check_stalled_feed(browser, directory, output):
+    missing_uri = 'task34-missing-event'
     release = Event()
     requests = []
 
     class StalledFeed(BaseHTTPRequestHandler):
         def do_GET(self):
             requests.append(self.path)
+            if self.path == f'/primary/streams/{missing_uri}':
+                self.send_error(404)
+                return
             release.wait()
 
     log_path = directory / 'stalled-feed.log'
@@ -218,6 +222,11 @@ def check_stalled_feed(browser, directory, output):
                             has_text='Directory data is older than 5 minutes.',
                         )).to_be_visible()
                     print(f'Stalled upstream {path} -> HTTP 200 in {elapsed:.2f}s')
+                missing = page.goto(origin + f'/live/{missing_uri}', wait_until='domcontentloaded', timeout=9000)
+                assert f'/primary/streams/{missing_uri}' in requests
+                assert missing.status == 404, missing.status
+                assert 'snapshotUnavailable' not in missing.text()
+                print('Missing event with no R2 binding -> HTTP 404')
                 assert {'/primary/streams', '/mirror/streams'} <= set(requests), requests
                 timeouts = [
                     json.loads(match) for match in re.findall(
