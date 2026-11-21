@@ -242,7 +242,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
     />
 
     <!-- Header rendered in all states so loading, error, and empty still expose the page h1 -->
-    <div class="space-y-[calc(var(--stack-gap)*0.75)]">
+    <div class="space-y-(--replay-header-gap)">
       <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
         <span>/</span>

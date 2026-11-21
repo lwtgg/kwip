@@ -39,7 +39,7 @@ const categories = computed(() => {
 </script>
 
 <template>
-  <div class="flex min-h-dvh flex-col bg-bg text-fg">
+  <div class="flex min-h-(--shell-min-height) flex-col bg-bg text-fg">
     <header class="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur-sm">
       <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <NuxtLink
@@ -176,7 +176,7 @@ const categories = computed(() => {
       <slot />
     </div>
 
-    <footer class="mt-[calc(var(--section-gap)*1.5)] border-t border-border bg-surface">
+    <footer class="mt-(--footer-gap) border-t border-border bg-surface">
       <div class="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
         <p>{{ siteName }} · Live sports event directory</p>
         <nav aria-label="Footer navigation" class="flex flex-wrap items-center gap-4">

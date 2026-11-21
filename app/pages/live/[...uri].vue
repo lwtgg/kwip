@@ -917,7 +917,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       <AdSlot format="leaderboard" placement="event-banner" />
 
       <!-- Related streams in same category -->
-      <section class="space-y-[calc(var(--stack-gap)*0.75)]">
+      <section class="space-y-(--related-heading-gap)">
         <div class="flex items-baseline justify-between gap-3">
           <h2 class="text-lg font-semibold tracking-tight text-fg">
             Related in {{ detail.category_name }}
