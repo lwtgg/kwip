@@ -23,3 +23,29 @@ test('health reorders only contiguous, known quality and locale peers', () => {
   assert.deepEqual(order([source('a', '4K'), source('b', '2160p'), source('c', 'UHD')]), ['b', 'c', 'a'])
   assert.deepEqual(order([source('a', 'HD | ESPN'), source('b', '720p'), source('c', 'SD')]), ['b', 'a', 'c'])
 })
+
+test('absent health preserves picker order, labels, and options', () => {
+  const sources = [source('sd', 'SD'), source('hd', 'HD'), source('unknown')]
+  const baseline = sources.map(({ name, sourceTag, data }) => ({
+    label: sourceTag ? `${name} · ${sourceTag}` : name,
+    url: data, kind: 'iframe', host: 'example.com', key: sourceKey(data),
+  }))
+  assert.deepEqual(usePlayerSources({ sources }), baseline)
+  assert.deepEqual(usePlayerSources({ sources }, {}), baseline)
+})
+
+test('independently fetched supplements cannot inherit snapshot health', () => {
+  const supplement = {
+    ...source('alternate', 'HD'),
+    origin: 'supplement' as const, live: true, substreamName: '' as const,
+  }
+  const health = {
+    [sourceKey(supplement.data)]: {
+      embedOk: false, manifestOk: false, sequence: 'unknown' as const, checkedAt: new Date().toISOString(),
+    },
+  }
+  const stream = { sources: [supplement, source('other', 'HD')] }
+  assert.deepEqual(usePlayerSources(stream, health), usePlayerSources(stream))
+  const detail = [source('first', 'HD', ''), { ...supplement, locale: '' }, source('last', 'HD', '')]
+  assert.deepEqual(order(detail), ['first', 'alternate', 'last'])
+})

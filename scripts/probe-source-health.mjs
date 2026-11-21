@@ -102,10 +102,37 @@ async function strmfreeManifest(embed, url, options) {
   return manifest
 }
 
-function sequenceNumber(text) {
-  const match = /^#EXT-X-MEDIA-SEQUENCE:(\d+)\s*$/m.exec(text)
-  const number = match ? Number(match[1]) : NaN
-  return Number.isSafeInteger(number) && text.startsWith('#EXTM3U') ? number : undefined
+function parseMediaPlaylist(text, manifest) {
+  const [header, ...lines] = text.split(/\r?\n/)
+  if (header !== '#EXTM3U') failure('manifest-invalid')
+
+  let hasTarget = false
+  let needsSegment = false
+  let segment
+  let sequence
+  for (const line of lines) {
+    if (!line) continue
+    if (line.startsWith('#EXT-X-TARGETDURATION:')) {
+      if (hasTarget || !/^#EXT-X-TARGETDURATION:[1-9]\d*$/.test(line)) failure('manifest-invalid')
+      hasTarget = true
+    } else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+      const value = line.slice('#EXT-X-MEDIA-SEQUENCE:'.length)
+      if (sequence !== undefined || segment || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+        failure('manifest-invalid')
+      }
+      sequence = Number(value)
+    } else if (line.startsWith('#EXTINF:')) {
+      if (needsSegment || !/^#EXTINF:\d+(?:\.\d*)?,/.test(line)) failure('manifest-invalid')
+      needsSegment = true
+    } else if (!line.startsWith('#')) {
+      const uri = !/[\s<>"\u0000-\u001f]/.test(line) && URL.parse(line, manifest)
+      if (!needsSegment || !uri || !['https:', 'http:'].includes(uri.protocol)) failure('manifest-invalid')
+      segment ??= uri
+      needsSegment = false
+    }
+  }
+  if (!hasTarget || !segment || needsSegment) failure('manifest-invalid')
+  return { segment, sequence }
 }
 
 export async function probeSource(url, { signal = new AbortController().signal, observe = () => {} } = {}) {
@@ -124,22 +151,23 @@ export async function probeSource(url, { signal = new AbortController().signal, 
     const options = { signal, headers }
     const manifest = await entry.host.manifest(embed.text, entry.url, options)
     observe('token', `parsed signed map entry for ${manifest.pathname}`)
-    const sample = () => get(manifest, 'manifest', { ...options, type: 'application/vnd.apple.mpegurl' })
-    const initial = await sample()
+    const sample = async () => {
+      const { text } = await get(manifest, 'manifest', { ...options, type: 'application/vnd.apple.mpegurl' })
+      return parseMediaPlaylist(text, manifest)
+    }
+    const { sequence: first } = await sample()
     result.manifestOk = true
-    const first = sequenceNumber(initial.text)
     if (first === undefined) failure('sequence-missing')
     observe('manifest', `HTTP 200 application/vnd.apple.mpegurl, #EXT-X-MEDIA-SEQUENCE:${first}`)
     await delay(6000, undefined, { signal })
-    const second = await sample()
-    const next = sequenceNumber(second.text)
+    result.manifestOk = false
+    const { sequence: next, segment } = await sample()
+    result.manifestOk = true
     if (next === undefined) failure('sequence-missing')
     observe('manifest', `HTTP 200 application/vnd.apple.mpegurl, #EXT-X-MEDIA-SEQUENCE:${next}`)
     if (next < first) failure('sequence-reset')
     result.sequence = next > first ? 'advancing' : 'frozen'
-    const segmentPath = /^#EXTINF:[^\r\n]+\r?\n([^#\r\n][^\r\n]*)/m.exec(second.text)?.[1]
-    const segment = segmentPath && URL.parse(segmentPath, manifest)
-    if (segment && segment.protocol === 'https:' && !segment.port && !segment.username && !segment.password &&
+    if (segment.protocol === 'https:' && !segment.port && !segment.username && !segment.password &&
         (segment.origin === manifest.origin || segment.hostname.endsWith('.ttcdn-us.com'))) {
       const start = performance.now()
       await get(segment, 'segment', { signal, headers: { range: 'bytes=0-0' }, body: false })

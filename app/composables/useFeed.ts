@@ -167,21 +167,6 @@ function useFeedEndpoint<T extends { success: boolean }>(
       const serverError = import.meta.client ? nuxtApp.payload._errors[key] : undefined
       if (nuxtApp.isHydrating && isSnapshotOmitted(serverError)) throw serverError
       try {
-        if (import.meta.client && endpoint.kind === 'stream' && URL.canParse(config.public.feedBase)) {
-          const snapshot = await fetcher<Partial<T & FeedProvenance> & { snapshotOmitted?: true }>('/api/stream-snapshot', {
-            query: { uri: endpoint.uriName },
-            signal,
-          }).catch(() => undefined)
-          signal.throwIfAborted()
-          if (snapshot?.snapshotOmitted) {
-            throw createError({
-              statusCode: 503,
-              statusMessage: 'Feed endpoint unavailable',
-              data: { snapshotUnavailable: true, snapshotOmitted: true },
-            })
-          }
-          if (snapshot?.success === true) return snapshot as T & FeedProvenance
-        }
         if (browserRefresh) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
         }
@@ -207,7 +192,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
         const assets = import.meta.server ? getFeedAssets(event) : undefined
         return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
       } catch (error) {
-        if (signal.aborted || key !== cacheKey.value || isSnapshotOmitted(error)) throw error
+        if (signal.aborted || key !== cacheKey.value) throw error
         if (previous) return { ...previous, fromCache: true }
         if (browserRefresh && endpoint.kind !== 'ping') {
           return fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, requestUrl.host).catch(() => {

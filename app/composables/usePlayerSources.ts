@@ -36,7 +36,7 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     kind: source.type,
     host: sourceHost(source.data),
     key,
-    ...(health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
+    ...(!('origin' in source) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
     ...('origin' in source ? { origin: source.origin, live: source.live } : {}),
   }))
 
@@ -66,7 +66,7 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     const locale = source.locale ?? ('origin' in source ? undefined : stream.locale)
     return {
       option,
-      tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
+      tier: quality && !('origin' in source) ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
       viewers: Number(source.viewers) || 0,
     }
   })
