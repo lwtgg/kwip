@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 import tempfile
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -94,18 +95,19 @@ def check_status(browser, origin, stream, width, case, live_flags):
             frame.dispatch_event('error')
             failed = picker.get_by_role('button', name='First embed, Failed to load', exact=True)
             expect(failed).to_have_attribute('aria-pressed', 'false')
-            # The current failover follows provider order even with a live peer.
-            # Record that known failure explicitly for the offline-first case.
-            expect(chips[0]).to_have_attribute('aria-pressed', 'true')
-            expect(chips[1]).to_have_attribute('aria-pressed', 'false')
-            expect(frame).to_have_attribute('src', urls[0])
-            expect(page.frame_locator('iframe').get_by_role('heading', name=urls[0], exact=True)).to_be_visible()
-            assert frame_requests == [first_url, urls[0]], frame_requests
+            live_index = expected_live.index(True)
+            live_url = urls[live_index]
+            expect(chips[live_index]).to_have_attribute('aria-pressed', 'true')
+            expect(chips[1 - live_index]).to_have_attribute('aria-pressed', 'false')
+            expect(frame).to_have_attribute('src', live_url)
+            expect(page.frame_locator('iframe').get_by_role('heading', name=live_url, exact=True)).to_be_visible()
+            assert frame_requests == [first_url, live_url], frame_requests
             [primary_route] = pending_primary
             primary_route.fulfill(status=204)
 
-        # Select the second variant first so both clicks change the active source.
-        for index in (1, 0):
+        # In mixed cases, switch from the live variant to the not-live one first.
+        first_pick = expected_live.index(False) if failover else 1
+        for index in (first_pick, 1 - first_pick):
             chip, url = chips[index], urls[index]
             chip.click()
             expect(chip).to_have_attribute('aria-pressed', 'true')
@@ -113,14 +115,14 @@ def check_status(browser, origin, stream, width, case, live_flags):
             expect(frame).to_have_attribute('src', url)
             if not expected_live[index]:
                 expect(chip.get_by_text('· Not live', exact=True)).to_be_visible()
+                key = chip.get_attribute('value')
+                page.wait_for_url(lambda location: parse_qs(urlsplit(location).query).get('source') == [key])
             expect(page.frame_locator('iframe').get_by_role('heading', name=url, exact=True)).to_be_visible()
         page.wait_for_load_state('networkidle')
         expect(page.get_by_role('alert')).to_have_count(0)
         assert not errors, errors
         context.unroute_all(behavior='wait')
 
-    if case == 'mixed offline first':
-        print(f'{width}px: known failover failure — Not live selected ahead of equally ranked live variant')
     print(f'{width}px: {case} status, picker, and playback passed')
 
 

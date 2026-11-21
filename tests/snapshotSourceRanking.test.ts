@@ -47,5 +47,40 @@ test('independently fetched supplements cannot inherit snapshot health', () => {
   const stream = { sources: [supplement, source('other', 'HD')] }
   assert.deepEqual(usePlayerSources(stream, health), usePlayerSources(stream))
   const detail = [source('first', 'HD', ''), { ...supplement, locale: '' }, source('last', 'HD', '')]
-  assert.deepEqual(order(detail), ['first', 'alternate', 'last'])
+  assert.deepEqual(order(detail), ['alternate', 'last', 'first'])
+})
+
+
+test('in-band ranking uses degraded status, then liveness, then viewers', () => {
+  const offline = {
+    ...source('offline', '720p'),
+    origin: 'supplement' as const, live: false, substreamName: '' as const, viewers: 100,
+  }
+  const live = { ...offline, data: 'https://example.com/live', live: true, viewers: 10 }
+  const unknown = { ...source('unknown', 'HD'), viewers: 20 }
+  const degraded = { ...source('degraded', 'HD'), viewers: 1000 }
+  const sources = [degraded, offline, live, unknown]
+  assert.deepEqual(order(sources), ['unknown', 'live', 'offline', 'degraded'])
+  assert.deepEqual(
+    usePlayerSources({ sources: [offline, live, unknown] }).map(({ key, live }) => [key, live]),
+    [['example.com/unknown', undefined], ['example.com/live', true], ['example.com/offline', false]],
+  )
+  assert.deepEqual(
+    usePlayerSources({ sources: [offline, unknown, { ...live, viewers: 30 }] }).map(({ url }) => url),
+    [live.data, unknown.data, offline.data],
+  )
+})
+
+test('liveness cannot cross an intervening quality, locale, or unknown-quality source', () => {
+  const offline = {
+    ...source('offline', 'HD'),
+    origin: 'supplement' as const, live: false, substreamName: '' as const,
+  }
+  const live = { ...offline, data: 'https://example.com/live', live: true }
+  for (const boundary of [source('sd', 'SD'), source('fr', 'HD', 'fr'), source('untagged')]) {
+    const sources = [offline, boundary, live]
+    assert.deepEqual(usePlayerSources({ sources }).map(({ url }) => url), sources.map(({ data }) => data))
+  }
+  const untagged = [{ ...offline, sourceTag: undefined }, { ...live, sourceTag: undefined }]
+  assert.deepEqual(usePlayerSources({ sources: untagged }).map(({ url }) => url), untagged.map(({ data }) => data))
 })
