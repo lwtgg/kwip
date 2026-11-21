@@ -165,7 +165,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
         ? nuxtApp.payload.data[key] as (T & FeedProvenance) | undefined
         : undefined
       const serverError = import.meta.client ? nuxtApp.payload._errors[key] : undefined
-      if (nuxtApp.isHydrating && isSnapshotOmitted(serverError)) throw serverError
+      if (isSnapshotOmitted(serverError)) throw serverError
       try {
         if (browserRefresh) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
