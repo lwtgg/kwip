@@ -24,7 +24,7 @@ def check_status(browser, origin, stream, width, case, live_flags):
     status_url = f"{API}/sources/{stream['stream_key']}"
     first_url = origin + '/fixtures/one'
     failover = live_flags in ((True, False), (False, True))
-    expected_live = live_flags if live_flags is not None else (False, False)
+    expected_live = live_flags if live_flags is not None else (None, None)
     status_requests = []
     frame_requests = []
     pending_primary = []
@@ -40,8 +40,8 @@ def check_status(browser, origin, stream, width, case, live_flags):
                 route.fulfill(status=404, json={})
             else:
                 route.fulfill(json={'sources': [
-                    {'url': variant, 'live': live}
-                    for variant, live in zip(urls, live_flags, strict=True)
+                    {'url': variant, 'live': True}
+                    for variant, live in zip(urls, live_flags, strict=True) if live
                 ]})
         elif url in [first_url, *urls]:
             frame_requests.append(url)
@@ -82,12 +82,12 @@ def check_status(browser, origin, stream, width, case, live_flags):
         expect(picker.get_by_role('button')).to_have_count(3)
         chips = []
         for (label, _), live in zip(VARIANTS, expected_live, strict=True):
-            status = '' if live else ', Not live'
+            status = ', Not live' if live is False else ''
             chip = picker.get_by_role('button', name=f'{label}{status}, second provider', exact=True)
             expect(chip).to_be_visible()
             expect(chip).to_be_enabled()
             expect(chip).to_have_attribute('aria-pressed', 'false')
-            expect(chip.get_by_text('· Not live', exact=True)).to_have_count(0 if live else 1)
+            expect(chip.get_by_text('· Not live', exact=True)).to_have_count(1 if live is False else 0)
             chips.append(chip)
 
         assert status_requests == [status_url], status_requests
@@ -113,10 +113,9 @@ def check_status(browser, origin, stream, width, case, live_flags):
             expect(chip).to_have_attribute('aria-pressed', 'true')
             expect(chips[1 - index]).to_have_attribute('aria-pressed', 'false')
             expect(frame).to_have_attribute('src', url)
-            if not expected_live[index]:
-                expect(chip.get_by_text('· Not live', exact=True)).to_be_visible()
-                key = chip.get_attribute('value')
-                page.wait_for_url(lambda location: parse_qs(urlsplit(location).query).get('source') == [key])
+            expect(chip.get_by_text('· Not live', exact=True)).to_have_count(1 if expected_live[index] is False else 0)
+            key = chip.get_attribute('value')
+            page.wait_for_url(lambda location: parse_qs(urlsplit(location).query).get('source') == [key])
             expect(page.frame_locator('iframe').get_by_role('heading', name=url, exact=True)).to_be_visible()
         page.wait_for_load_state('networkidle')
         expect(page.get_by_role('alert')).to_have_count(0)

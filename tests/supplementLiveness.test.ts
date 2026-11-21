@@ -37,7 +37,7 @@ test('a stream key ending in a digit can be followed by a recognized resolution'
   assert.equal(sources?.[0]?.sourceTag, 'FHD')
 })
 
-test('only matching live variants are cached as live', async () => {
+test('successful status confirms liveness and unavailable status stays unknown', async () => {
   const urls = ['1080p', '720p', '720p-alt', '540p'].map(variant => `https://strmfree.st/embed/hou-mia${variant}`)
   const payload = { streams: [{
     ...stream,
@@ -54,20 +54,27 @@ test('only matching live variants are cached as live', async () => {
     { entries: [{ url: urls[0], live: true }], liveUrls: [urls[0] + '#player'] },
     { entries: [], liveUrls: [] },
     { entries: [{ url: urls[1], live: true }], status: 503, liveUrls: [] },
+    { entries: {}, liveUrls: [] },
+    { invalidJson: true, liveUrls: [] },
     { entries: null, liveUrls: [] },
   ]
-  for (const { entries, liveUrls, status } of cases) {
+  for (const { entries, liveUrls, status, invalidJson } of cases) {
     const keys: string[] = []
     const sources = await loadSupplementSources(event, 'basketball', payload, async key => {
       keys.push(key)
       if (entries === null) throw new Error('unreachable')
+      if (invalidJson) return new Response('invalid JSON')
       return Response.json({ sources: entries }, { status })
     })
     assert.deepEqual(keys, ['hou-mia'])
     const now = Date.now()
     const stored = JSON.parse(JSON.stringify({ status: 'merged', fetchedAt: now, sources }))
     assert.ok(isCachedSupplement(stored, now))
-    assert.deepEqual(stored.sources.filter(source => source.live).map(source => source.data), liveUrls)
+    assert.equal(stored.sources.length, urls.length)
+    const verified = Array.isArray(entries) && status === undefined
+    for (const source of stored.sources) {
+      assert.equal(source.live, verified ? liveUrls.includes(source.data) : undefined)
+    }
   }
 })
 

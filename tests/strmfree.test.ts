@@ -9,6 +9,7 @@ const { data: event } = JSON.parse(readFileSync(new URL('../public/fixtures/stre
 test('supplement matches the offline fixture and ignores declared quality', () => {
   const sources = matchSupplement(event, 'basketball', { streams: [fixture] })
   assert.equal(sources?.length, 5)
+  assert.ok(sources.every(source => source.live === undefined))
   assert.deepEqual(sources.map(source => source.sourceTag), ['4K', undefined, undefined, undefined, undefined])
 })
 
@@ -37,7 +38,7 @@ test('a cached supplement must contain fresh, well-formed sources on approved ho
   for (const fetchedAt of [String(now), NaN, Infinity, now + 1, now - 600_000, -1]) {
     assert.equal(isCachedSupplement({ ...cached, fetchedAt }, now), false)
   }
-  for (const source of [null, [], {}, { ...sources[0], data: 5 }, {
+  for (const source of [null, [], {}, { ...sources[0], data: 5 }, { ...sources[0], live: null }, {
     ...sources[0], data: 'https://evilstrmfree.st/embed',
   }, { ...sources[0], data: 'https://strmfree.st.example.org/embed' }]) {
     assert.equal(isCachedSupplement({ ...cached, sources: [...sources, source] }, now), false)
