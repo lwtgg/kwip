@@ -17,6 +17,8 @@ Today's provider is the best found so far, but it is one provider with one failu
 - record per-source reliability over time and demote the ones that rot
 - never host media
 
+**Shipped so far.** Source health: registered hosts are probed at publish time, the result rides the generation, and a failing source sinks within its own quality and locale band and carries a `degraded` chip without being removed. That is the investigation's step 2 and most of step 5. Still owed: a second provider (`strmfree.pk` already supplies supplemental sources client-side, but not yet as a published provider), the `thedaddy.li` keyed API, and health history beyond the current generation.
+
 ## 3. Money
 
 Competitors make far more than their quality justifies. Research is done (`docs/money-research.md`) and rule 22 sets the shape: our own click-under plus reserved banner slots, both behind `runtimeConfig.public.ads`, nothing above the player, never a homepage redirect.
