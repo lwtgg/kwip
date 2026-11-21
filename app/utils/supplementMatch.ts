@@ -27,19 +27,30 @@ function teams(name: string): string[] {
     .sort()
 }
 
-export function findSupplement(
-  event: { name: string; starts_at: number },
-  categorySlug: string,
-  payload: { streams: StrmfreeStream[] },
-): StrmfreeStream | undefined {
+type SupplementEvent = { name: string; starts_at: number }
+type SupplementListing = { streams: StrmfreeStream[] }
+
+function* matchingStreams(event: SupplementEvent, payload: SupplementListing) {
   const pair = teams(event.name)
   if (pair.length !== 2 || !pair[0] || !pair[1]) return
 
-  const candidates = payload.streams.filter((stream) => {
-    if (!(Math.abs(stream.match_timestamp - event.starts_at) <= 3 * 3600)) return false
+  for (const stream of payload.streams) {
+    if (!(Math.abs(stream.match_timestamp - event.starts_at) <= 3 * 3600)) continue
     const other = teams(stream.name)
-    return other.length === 2 && other[0] === pair[0] && other[1] === pair[1]
-  })
+    if (other.length === 2 && other[0] === pair[0] && other[1] === pair[1]) yield stream
+  }
+}
+
+export function hasSupplementCandidate(event: SupplementEvent, payload: SupplementListing): boolean {
+  return matchingStreams(event, payload).next().done === false
+}
+
+export function findSupplement(
+  event: SupplementEvent,
+  categorySlug: string,
+  payload: SupplementListing,
+): StrmfreeStream | undefined {
+  const candidates = [...matchingStreams(event, payload)]
   const tied = candidates.length > 1
     ? candidates.filter(stream => categories.get(stream.category) === categorySlug)
     : candidates

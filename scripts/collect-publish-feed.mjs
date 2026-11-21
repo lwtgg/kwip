@@ -10,7 +10,7 @@ import {
   fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
-import { sourceKey } from '../app/utils/sourceIdentity.ts'
+import { hasSupplementCandidate } from '../app/utils/supplementMatch.ts'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
 // Collection starts after the publisher pins the manifest ETag.
@@ -155,7 +155,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
         details.set(path, id)
         if (collection === 'streams') {
           eventTimes.set(path, {
-            category: item.category_name || category.category,
+            name: item.name, category: item.category_name || category.category,
             starts_at: item.starts_at ?? item.start_timestamp, always_live: item.always_live ?? category.always_live,
           })
         }
@@ -165,7 +165,11 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   }
 
   const listing = await supplementListing
-  if (current && !current.hasSupplements && !listing?.streams.length && ![...eventTimes.values()].some(item => nearbyEvent(item, now)) && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
+  const needsDetails = [...eventTimes.values()].some(item => nearbyEvent(item, now) || (
+    listing && Number(item.always_live) !== 1 && typeof item.name === 'string'
+    && hasSupplementCandidate({ name: item.name, starts_at: Number(item.starts_at) }, listing)
+  ))
+  if (current && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
     return { unchanged: true }
@@ -201,51 +205,40 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   }
   const withStatus = matches.length ? await fetchSupplementStatuses(matches, now,
     Math.min(performance.now() + 5_000, deadline - 40_000)) : undefined
-  const proposed = matches.map(match => {
-    const { payload, entry } = match
+  // Primary probes share the existing deadline with supplements and establish the exact health reserve.
+  const probeDeadline = Math.min(performance.now() + 30_000, deadline - 10_000)
+  const primaryProbes = candidates(probeItems, now)
+  const health = await collectSourceHealth(primaryProbes, probeDeadline - performance.now())
+  let healthBytes = primaryProbes.size ? json(health) : undefined
+  const accepted = []
+  for (const match of matches) {
+    const { payload, entry, timing, hash } = match
     const supplements = withStatus(match)
     const sources = [...(payload.data.sources ?? []), ...supplements]
     const bytes = json({ ...payload, data: { ...payload.data, sources } })
-    return { ...match, supplements, bytes, delta: bytes.length - entry.endpoint.length }
-  }).filter(({ bytes, delta }) => bytes.length <= fileLimit && size + delta < snapshotLimit)
-
-  // Keep primary probes in the same order even when their queue fills the cap.
-  const primaryProbes = candidates(probeItems, now)
-  const probes = proposed.length ? candidates([
-    ...probeItems,
-    ...proposed.map(({ timing, supplements }) => ({
-      starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements,
-    })),
-  ], now) : primaryProbes
-  // Keep the existing publication deadline and leave room to write the payload.
-  const health = probes.size
-    ? await collectSourceHealth(probes, Math.min(30_000, deadline - performance.now() - 10_000))
-    : {}
-  const healthEntries = Object.entries(health)
-  let healthKeys = new Set(primaryProbes.keys())
-  const healthBytes = keys => json(Object.fromEntries(healthEntries.filter(([key]) => keys.has(key))))
-  let reservedHealth = healthBytes(healthKeys)
-  let hasSupplements = false
-  for (const { supplements, bytes, delta, entry, hash } of proposed) {
-    const keys = new Set(healthKeys)
-    for (const source of supplements) {
-      const key = sourceKey(source.data)
-      if (probes.has(key)) keys.add(key)
-    }
-    const nextHealth = healthBytes(keys)
-    if (size + delta + (keys.size ? nextHealth.length : 0) >= snapshotLimit) continue
+    const delta = bytes.length - entry.endpoint.length
+    if (bytes.length > fileLimit || size + delta + (healthBytes?.length ?? 0) >= snapshotLimit) continue
     entry.stored = bytes
     entry.endpoint.length = bytes.length
     size += delta
     hash[1] = sha256(bytes)
-    healthKeys = keys
-    reservedHealth = nextHealth
-    hasSupplements = true
+    accepted.push({ starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements })
   }
   hashes.details = sha256(json(detailHashes))
-  if (healthKeys.size && size + reservedHealth.length < snapshotLimit) {
-    await append('health.json', reservedHealth)
+
+  // Apply the shared cap once to primaries followed by accepted supplements.
+  if (accepted.length) {
+    const supplementProbes = candidates([...probeItems, ...accepted], now)
+    for (const key of primaryProbes.keys()) supplementProbes.delete(key)
+    const supplementHealth = await collectSourceHealth(supplementProbes, probeDeadline - performance.now())
+    for (const [key, record] of Object.entries(supplementHealth)) {
+      const nextHealth = json({ ...health, [key]: record })
+      if (size + nextHealth.length >= snapshotLimit) continue
+      health[key] = record
+      healthBytes = nextHealth
+    }
   }
+  if (healthBytes && size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)
   const bytes = Buffer.alloc(size)
   let offset = 0
   for (const { endpoint, stored } of entries) {
@@ -258,7 +251,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   timeLeft(deadline, 'Collection deadline exceeded')
   return { snapshot: {
     bytes, size, endpoints: entries.map(({ endpoint }) => endpoint), hashes,
-    hasSupplements,
+    hasSupplements: accepted.length > 0,
   } }
 }
 

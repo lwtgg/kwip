@@ -23,19 +23,29 @@ const mock = String.raw`
   const mode = process.env.PUBLISH_TEST_MODE
   const startsAt = Math.floor(Date.now() / 1000)
   const primary = { name: 'Primary', type: 'iframe', default: true, data: 'https://strmfree.st/embed/soccer/away-home?primary' }
-  const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(250) : '') + '720p'
-  const start = startsAt + (['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
+  const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(450) : '') + '720p'
+  const shortcut = ['shortcut-baseline', 'unmatched', 'out-of-window', 'plausible'].includes(mode)
+  const start = shortcut ? 2_000_000_000 : startsAt + (['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
+  const acceptedAlternate = 'https://streamfree.top/embed/soccer/east-west-720p'
+  if (shortcut) Object.assign(fixture.streams.streams[0].streams[0], { name: 'Home FC vs. Away FC', starts_at: start })
   if (mode !== 'baseline') {
     Object.assign(fixture['streams/foo'].data, {
       name: 'Home FC vs. Away FC', starts_at: start, sources: [primary],
     })
   }
+  const primarySources = [primary]
   const wire = payload => mode === 'capacity' ? JSON.stringify(payload) : JSON.stringify(payload, null, 2) + '\n'
   if (mode === 'capacity') {
+    for (let i = 1; i < 39; i++) primarySources.push({ ...primary, data: primary.data.replace('?primary', '-' + i) })
+    fixture['streams/foo'].data.sources = primarySources
+    Object.assign(fixture['streams/foo.json/bar'].data, { name: 'East vs. West', starts_at: start })
+    const primaryHealth = Object.fromEntries(primarySources.map(({ data }) => [data.split('?')[0].slice(8), {
+      embedOk: false, manifestOk: false, sequence: 'unknown', checkedAt: new Date().toISOString(), error: 'embed-503',
+    }]))
     const rows = fixture.vods.vods[0].vods
     let size = Object.values(fixture).reduce((sum, payload) => sum + Buffer.byteLength(wire(payload)), 0)
     const fileLimit = 2 * 1024 ** 2
-    const target = 40 * 1024 ** 2 - 480
+    const target = 40 * 1024 ** 2 - Buffer.byteLength(wire(primaryHealth)) - 480
     for (let id = 4; size < target; id++) {
       const row = { id, slug: 'pad-' + id }
       const payload = { success: true, data: { id, pad: '' } }
@@ -52,24 +62,33 @@ const mock = String.raw`
   }
   let listingRequests = 0
   let packed
-  let probeRequests = 0
+  const probeRequests = []
   process.on('exit', () => {
     assert.equal(listingRequests, mode === 'fixture' ? 0 : 1)
-    assert.equal(probeRequests, mode === 'capacity' ? 2 : 0)
+    assert.deepEqual(probeRequests, mode === 'capacity'
+      ? [...primarySources.map(source => source.data), acceptedAlternate] : [])
   })
   globalThis.fetch = async (request) => {
     if (typeof request === 'string') {
       const url = new URL(request)
       if (url.href === 'https://strmfree.pk/api/v1/streams') {
         listingRequests++
-        if (!['duplicates', 'capacity'].includes(mode)) return new Response(null, { status: 503 })
-        return Response.json({ streams: [{
-          name: 'Away at Home', category: 'soccer', match_timestamp: start,
+        if (!['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible'].includes(mode)) {
+          return new Response(null, { status: 503 })
+        }
+        const streams = [{
+          name: mode === 'unmatched' ? 'Away at Other' : 'Away at Home', category: 'soccer',
+          match_timestamp: mode === 'out-of-window' ? start + 3 * 3600 + 1 : start,
           additional_sources: [
             { url: 'https://strmfree.st/embed/soccer/AWAY-HOME/?supplement', quality: 'FHD' },
             { url: alternate, quality: 'HD' },
           ],
-        }] })
+        }]
+        if (mode === 'capacity') streams.push({
+          name: 'West at East', category: 'soccer', match_timestamp: start,
+          additional_sources: [{ url: acceptedAlternate, quality: 'HD' }],
+        })
+        return Response.json({ streams })
       }
       assert.equal(url.hostname, 'provider.example')
       const endpoint = decodeURIComponent(url.pathname.replace(/^\/(?:fixtures\/)?/, ''))
@@ -77,8 +96,7 @@ const mock = String.raw`
       return new Response(wire(fixture[endpoint]))
     }
     if (request instanceof URL) {
-      probeRequests++
-      assert.ok(request.href === primary.data || request.href === alternate)
+      probeRequests.push(request.href)
       return new Response(null, { status: 503 })
     }
     const path = new URL(request.url).pathname
@@ -111,9 +129,13 @@ const mock = String.raw`
           const bytes = packed.subarray(offset, end)
           if (path === 'health.json') {
             const health = JSON.parse(bytes)
-            assert.deepEqual(Object.keys(health), ['strmfree.st/embed/soccer/away-home'])
+            assert.deepEqual(Object.keys(health).sort(), [...primarySources.map(source => source.data), acceptedAlternate]
+              .map(url => url.split('?')[0].slice(8)).sort())
             assert.equal(health['strmfree.st/embed/soccer/away-home'].error, 'embed-503')
-          } else if (mode === 'duplicates' && path === 'streams/foo') {
+          } else if (mode === 'capacity' && path === 'streams/foo.json/bar') {
+            const { sources } = JSON.parse(bytes).data
+            assert.deepEqual(sources.map(source => source.data), [acceptedAlternate])
+          } else if (['duplicates', 'plausible'].includes(mode) && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
             assert.equal(sources.length, 2)
             assert.deepEqual(sources[0], primary)
@@ -199,6 +221,16 @@ test('fixture dry runs stay offline even with R2 credentials configured', async 
   assert.equal(result.requests, 0)
 })
 
-test('publisher reserves room for primary health when supplements would overfill the snapshot', async () => {
+test('publisher keeps primary health and probes accepted supplements at the cap', async () => {
   assert.equal((await publish([], null, 'capacity')).outcome, 'published')
+})
+
+test('unchanged listings crawl only for a plausible supplement match', async () => {
+  const { manifest } = await publish(['--dry-run'], null, 'shortcut-baseline')
+  const cases = await Promise.all(['unmatched', 'out-of-window', 'plausible'].map(mode => publish([], manifest, mode)))
+  assert.deepEqual(cases.map(({ outcome, providerRequests }) => [outcome, providerRequests]), [
+    ['unchanged', 2],
+    ['unchanged', 2],
+    ['published', 5],
+  ])
 })
