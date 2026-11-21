@@ -3,7 +3,7 @@ import { NuxtLink } from '#components'
 import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
-import { sourceHealth } from '~/utils/sourceHealth'
+import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
@@ -177,7 +177,8 @@ let chainExhausted = false
 const requestedSourceKey = ref<string | null>(null)
 const anchorKey = ref<string | null>(null)
 const attemptFailures = reactive(new Set<string>())
-const rememberedFailures = shallowRef<string[]>([])
+const rememberedHealth = shallowRef<SourceHealthEntry | null>(null)
+const rememberedFailures = computed(() => rememberedHealth.value?.keys ?? [])
 const failedKeys = computed(() => new Set([...attemptFailures, ...rememberedFailures.value]))
 let healthSession: Storage | null = null
 
@@ -185,17 +186,28 @@ function eventHealth() {
   return sourceHealth(healthSession, uriName.value)
 }
 
+function expireRememberedHealth() {
+  if (rememberedHealth.value && rememberedHealth.value.expiresAt <= Date.now()) {
+    rememberedHealth.value = null
+  }
+}
+
+watch(rememberedHealth, (entry, _, onCleanup) => {
+  if (!entry) return
+  const timeout = setTimeout(expireRememberedHealth, Math.max(0, entry.expiresAt - Date.now()))
+  onCleanup(() => clearTimeout(timeout))
+})
+
 function forgetFailure(key: string, remount = true) {
+  expireRememberedHealth()
   if (!rememberedFailures.value.includes(key)) return
-  const health = eventHealth()
-  health.forget(key)
-  rememberedFailures.value = health.read()
+  rememberedHealth.value = eventHealth().forget(key, rememberedHealth.value)
   if (remount) retryGeneration.value += 1
 }
 
 function clearFailures() {
   eventHealth().clear()
-  rememberedFailures.value = []
+  rememberedHealth.value = null
 }
 const seenKeys = new Set<string>()
 const beforeKeys = new Set<string>()
@@ -211,7 +223,7 @@ const posterError = ref(false)
 watch(uriName, () => {
   supplement.value = { status: 'idle' }
   pickedSupplementKeys.clear()
-  rememberedFailures.value = eventHealth().read()
+  rememberedHealth.value = eventHealth().readEntry()
   resetAttempt(null)
   retryGeneration.value = 0
   playerHelpOpen.value = false
@@ -288,7 +300,7 @@ onMounted(() => {
   } catch {
     // Session storage may be unavailable.
   }
-  rememberedFailures.value = eventHealth().read()
+  rememberedHealth.value = eventHealth().readEntry()
   if (ads === true && healthSession) {
     try {
       clickSession = healthSession
@@ -379,6 +391,7 @@ function resetAttempt(key: string | null) {
 }
 
 function nextPlayableKey(options: SourceOption[], activeKey: string | null): string | null {
+  expireRememberedHealth()
   const activeAt = options.findIndex((source) => source.key === activeKey)
   return options.find((source, index) =>
     index > activeAt && !failedKeys.value.has(source.key)
@@ -388,11 +401,10 @@ function nextPlayableKey(options: SourceOption[], activeKey: string | null): str
 
 function handleFrameError() {
   const key = currentSource.value?.key
-  if (key === undefined) return
+  if (!mounted.value || key === undefined) return
 
-  const health = eventHealth()
-  health.record(key)
-  rememberedFailures.value = health.read()
+  expireRememberedHealth()
+  rememberedHealth.value = eventHealth().record(key, rememberedHealth.value)
   attemptFailures.add(key)
   selectedSourceKey.value = nextPlayableKey(sources.value, key)
   chainExhausted = selectedSourceKey.value === null
@@ -582,6 +594,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     if (requested) forgetFailure(requested.key, wasReady === true)
     requestedSourceKey.value = requested?.key ?? null
     resetAttempt(null)
+    expireRememberedHealth()
     const preferred = defaultSourceKey.value
     selectedSourceKey.value = requestedSourceKey.value
       ?? (preferred !== null && !failedKeys.value.has(preferred) ? preferred : nextPlayableKey(options, null))
@@ -592,6 +605,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       void writeSourceQuery(selectedSourceKey.value, true)
     }
   } else if (chainExhausted && supplement.value.status === 'merged') {
+    expireRememberedHealth()
     const nextKey = options.find(source =>
       source.origin === 'supplement' && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),
     )?.key
@@ -835,6 +849,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :key="`${retryGeneration}:${currentSource.key}`"
             :src="currentSource.url"
             :poster="detail.poster"
+            :active="mounted && !rememberedFailures.includes(currentSource.key)"
             :title="`${detail.name} — ${currentSource.label}`"
             :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
             @error="handleFrameError"

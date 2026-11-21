@@ -72,3 +72,19 @@ test('unavailable or throwing storage does not interrupt playback', () => {
     health.clear()
   }
 })
+
+test('failed deletion drops the key from the active snapshot without extending its expiry', () => {
+  const { entries, health, storage, advance } = setup()
+  health.record('first')
+  health.record('second')
+  const entry = health.readEntry()!
+  assert.deepEqual(entry, { expiresAt: 1000 + 30 * 60 * 1000, keys: ['second', 'first'] })
+  advance(100)
+  storage.setItem = () => { throw new Error('blocked') }
+  const remaining = health.forget('first', entry)
+  assert.deepEqual(remaining, { expiresAt: entry.expiresAt, keys: ['second'] })
+  assert.deepEqual(health.read(), ['second', 'first'])
+  storage.removeItem = () => { throw new Error('blocked') }
+  assert.equal(health.forget('second', remaining), null)
+  assert.equal(entries.has(storageKey), true)
+})

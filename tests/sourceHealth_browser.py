@@ -122,6 +122,37 @@ def check_source_health(browser, origin):
         page.goto(origin + EVENT, wait_until='networkidle')
         expect(page.get_by_role('button', name='First embed', exact=True)).to_have_attribute('aria-pressed', 'true')
         expect(page.get_by_text(' · Failed')).to_have_count(0)
+    with browser.new_context() as remembered:
+        remembered.route('**/*', intercept)
+        remembered.add_init_script(f"""(() => {{
+            if (location.pathname !== {EVENT!r}) return;
+            const key = {storage_key!r};
+            sessionStorage.setItem(key, JSON.stringify({{
+                at: Date.now() - 29 * 60 * 1000,
+                keys: [{first_key!r}]
+            }}));
+            const removeItem = Storage.prototype.removeItem;
+            Storage.prototype.removeItem = function (name) {{
+                if (name === key) throw new Error('Blocked deletion');
+                return removeItem.call(this, name);
+            }};
+        }})()""")
+        page = remembered.new_page()
+        page.clock.install()
+        page.goto(origin + EVENT, wait_until='networkidle')
+        failed = page.get_by_role('button', name='First embed, Failed to load', exact=True)
+        expect(failed).to_have_attribute('aria-pressed', 'false')
+        expect(page.locator('iframe')).to_have_attribute('src', second_url)
+        failed.click()
+        expect(failed).to_have_count(0)
+        expect(page.locator('iframe')).to_have_attribute('src', first_url)
+        assert page.evaluate('key => JSON.parse(sessionStorage.getItem(key)).keys', storage_key) == [first_key]
+
+        page.goto(origin + EVENT, wait_until='networkidle')
+        expect(failed).to_be_visible()
+        page.clock.fast_forward(60_000)
+        expect(failed).to_have_count(0)
+        expect(page.get_by_role('button', name='Second embed', exact=True)).to_have_attribute('aria-pressed', 'true')
     with browser.new_context(java_script_enabled=False) as no_js:
         no_js.route('**/*', intercept)
         page = no_js.new_page()

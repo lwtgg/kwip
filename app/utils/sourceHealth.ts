@@ -1,42 +1,55 @@
 const MAX_AGE = 30 * 60 * 1000
 const MAX_KEYS = 8
 
+export interface SourceHealthEntry {
+  expiresAt: number
+  keys: string[]
+}
+
 export function sourceHealth(storage: Storage | null, uriName: string, now = Date.now) {
   const storageKey = `source-health:v1:${uriName}`
 
-  function read(): string[] {
+  function readEntry(): SourceHealthEntry | null {
     try {
       const entry = JSON.parse(storage?.getItem(storageKey) ?? 'null')
       const age = now() - entry?.at
       if (!entry || !Number.isFinite(entry.at) || age < 0 || age >= MAX_AGE
-        || !Array.isArray(entry.keys) || !entry.keys.every((key: unknown) => typeof key === 'string' && key.length > 0)) return []
-      return [...new Set<string>(entry.keys)].slice(0, MAX_KEYS)
+        || !Array.isArray(entry.keys) || !entry.keys.every((key: unknown) => typeof key === 'string' && key.length > 0)) return null
+      return { expiresAt: entry.at + MAX_AGE, keys: [...new Set<string>(entry.keys)].slice(0, MAX_KEYS) }
     } catch {
-      return []
+      return null
     }
   }
 
-  function write(keys: string[]) {
+  function write(keys: string[], fallback: SourceHealthEntry | null): SourceHealthEntry | null {
+    const at = now()
     try {
-      if (keys.length) storage?.setItem(storageKey, JSON.stringify({ at: now(), keys }))
-      else storage?.removeItem(storageKey)
+      if (!storage) return fallback
+      if (!keys.length) {
+        storage.removeItem(storageKey)
+        return null
+      }
+      storage.setItem(storageKey, JSON.stringify({ at, keys }))
+      return { expiresAt: at + MAX_AGE, keys }
     } catch {
-      // Playback works without session storage.
+      return fallback
     }
   }
 
   return {
-    read,
-    record(key: string) {
-      const keys = [key, ...read().filter(previous => previous !== key)].slice(0, MAX_KEYS)
-      write(keys)
+    read: () => readEntry()?.keys ?? [],
+    readEntry,
+    record(key: string, entry = readEntry()) {
+      const keys = [key, ...(entry?.keys ?? []).filter(previous => previous !== key)].slice(0, MAX_KEYS)
+      return write(keys, entry)
     },
-    forget(key: string) {
-      const keys = read()
-      if (keys.includes(key)) write(keys.filter(previous => previous !== key))
+    forget(key: string, entry = readEntry()) {
+      if (!entry?.keys.includes(key)) return entry
+      const keys = entry.keys.filter(previous => previous !== key)
+      return write(keys, keys.length ? { ...entry, keys } : null)
     },
     clear() {
-      write([])
+      write([], null)
     },
   }
 }

@@ -4,11 +4,13 @@ const props = withDefaults(
     src: string
     title: string
     poster?: string | null
+    active?: boolean
     sandbox?: string
     timeoutMs?: number
   }>(),
   {
     timeoutMs: 12_000,
+    active: true,
   },
 )
 
@@ -51,7 +53,7 @@ function startTimer() {
   clearTimer()
   settled = false
   loaded.value = false
-  if (!import.meta.client) return
+  if (!import.meta.client || !props.active) return
   if (!props.src) {
     failOnce()
     return
@@ -87,16 +89,17 @@ function frameHasDocument(allowLoading = false): boolean {
 }
 
 function handleLoad() {
-  if (frameHasDocument()) succeedOnce()
+  if (props.active && frameHasDocument()) succeedOnce()
 }
 
 function handleError() {
+  if (!props.active) return
   if (frameHasDocument(true)) succeedOnce()
   else failOnce()
 }
 
 function handleWindowMessage(event: MessageEvent) {
-  if (settled || !frameRef.value?.contentWindow) return
+  if (!props.active || settled || !frameRef.value?.contentWindow) return
   if (event.source === frameRef.value.contentWindow) {
     succeedOnce()
   }
@@ -113,7 +116,7 @@ function syncFrameFocus() {
 }
 
 watch(
-  [() => props.src, () => props.sandbox],
+  [() => props.src, () => props.sandbox, () => props.active],
   () => {
     startTimer()
     syncFrameFocus()
