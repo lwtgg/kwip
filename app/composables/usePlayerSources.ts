@@ -16,7 +16,7 @@ export interface SourceOption {
   kind: FeedSourceKind
   host: string
   key: string
-  origin?: SupplementSource['origin']
+  origin?: FeedStreamSource['origin']
   live?: boolean
   degraded?: true
 }
@@ -37,7 +37,8 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     host: sourceHost(source.data),
     key,
     ...((source.origin !== 'supplement' || stream.hasPublishedSupplement) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
-    ...(source.origin === 'supplement' ? { origin: source.origin, live: source.live } : {}),
+    ...(source.origin === 'supplement' || source.origin === 'pitsport'
+      ? { origin: source.origin, live: source.live } : {}),
   }))
 
   const labels = options.map(({ label }) => label.toLowerCase())

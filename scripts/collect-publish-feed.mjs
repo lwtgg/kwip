@@ -7,8 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { candidates, collectSourceHealth, nearbyEvent, supplementProbeCap } from './probe-source-health.mjs'
 import {
-  fetchPitSportListing, fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement,
-  publishedPitSportSources, publishedSupplementSources, supplementEvent,
+  dedupePublishedSources, fetchPitSportListing, fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement,
+  publishedSupplementSources, supplementEvent,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
@@ -201,7 +201,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       if (performance.now() >= supplementDeadline) continue
       const match = matchPublishedSupplement(event, listing)
       const sources = match ? publishedSupplementSources(item, match) : []
-      const pitSportSources = publishedPitSportSources(item, matchPublishedSupplement(event, pitSport))
+      const pitSportSources = matchPublishedSupplement(event, pitSport)?.sources ?? []
       if (sources.length || pitSportSources.length) {
         matches.push({ match, sources, pitSportSources, timing: probeItem, payload, entry: entries.at(-1), hash })
       }
@@ -227,11 +227,13 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     ...matches.filter(({ pitSportSources }) => pitSportSources.length)
       .map(match => ({ ...match, supplements: match.pitSportSources })),
   ]
-  for (const [index, { payload, entry, timing, hash, supplements }] of admissions.entries()) {
+  for (const [index, { payload, entry, timing, hash, supplements: incoming }] of admissions.entries()) {
     if (performance.now() >= supplementDeadline) {
       result.supplementAdmissionSkippedEvents = admissions.length - index
       break
     }
+    const supplements = dedupePublishedSources(payload.data, incoming)
+    if (!supplements.length) continue
     const eligible = candidates([{
       starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements,
     }],

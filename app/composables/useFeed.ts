@@ -77,6 +77,10 @@ export interface FeedStreamSource {
   data: string
 }
 
+export function isSupplementSource(source: Pick<FeedStreamSource, 'origin'>) {
+  return source.origin === 'supplement' || source.origin === 'pitsport'
+}
+
 export interface FeedStreamDetail extends FeedStreamItem {
   m3u8: string
   source_type: string
@@ -311,7 +315,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       adopted = { uri, id, generation }
       publishedDetail.value = {
         generation,
-        sources: currentItem.sources?.filter(source => source.origin === 'supplement') ?? [],
+        sources: currentItem.sources?.filter(isSupplementSource) ?? [],
         healthGeneration: payload.healthGeneration,
       }
       return
@@ -371,9 +375,9 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     const publishedSources = publishedDetail.value?.sources ?? []
     const publishedByKey = new Map(publishedSources.map(source => [sourceKey(source.data), source]))
     const ordered = [
-      ...sources.filter(source => source.origin !== 'supplement' && source.origin !== 'pitsport'),
+      ...sources.filter(source => !isSupplementSource(source)),
       ...alternatives,
-      ...(feed.data.value?.detailGeneration ? [] : sources.filter(source => source.origin === 'supplement')),
+      ...(feed.data.value?.detailGeneration ? [] : sources.filter(isSupplementSource)),
     ]
     return {
       ...raw,
@@ -390,7 +394,6 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       sources: [
         ...ordered.filter(source => !publishedByKey.has(sourceKey(source.data))),
         ...publishedByKey.values(),
-        ...sources.filter(source => source.origin === 'pitsport'),
       ],
       substreams: undefined,
     }

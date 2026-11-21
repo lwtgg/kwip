@@ -2,7 +2,7 @@
 import { isFreshSnapshotHealth, SNAPSHOT_HEALTH_MAX_AGE_MS, type SnapshotHealth } from '~/utils/snapshotHealth'
 import { NuxtLink } from '#components'
 import { validFeedPath } from '~~/server/utils/feed-path'
-import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
+import { isSnapshotUnavailable, isSupplementSource, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
 import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
@@ -92,14 +92,14 @@ const supplement = shallowRef<SupplementState>({ status: 'idle' })
 onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
 
 const snapshotHealth = shallowRef<SnapshotHealth>()
-const hasPublishedSupplement = computed(() => !!publishedDetail.value?.sources.length)
+const hasPublishedStrmfree = computed(() => publishedDetail.value?.sources.some(source => source.origin === 'supplement') ?? false)
 const playerInput = computed(() => ({
-  hasPublishedSupplement: hasPublishedSupplement.value,
+  hasPublishedSupplement: hasPublishedStrmfree.value,
   locale: detail.value?.locale,
   source_tag: detail.value?.source_tag,
   sources: [
     ...(detail.value?.sources ?? []),
-    ...(!hasPublishedSupplement.value && supplement.value.status === 'merged' ? supplement.value.sources : []),
+    ...(!hasPublishedStrmfree.value && supplement.value.status === 'merged' ? supplement.value.sources : []),
   ],
 }))
 const attemptSources = computed(() => usePlayerSources(playerInput.value))
@@ -143,7 +143,7 @@ onMounted(() => {
 async function loadSupplement(skipCache = false) {
   const event = detail.value
   const now = Date.now()
-  if (hasPublishedSupplement.value || supplement.value.status !== 'idle'
+  if (hasPublishedStrmfree.value || supplement.value.status !== 'idle'
     || !event || event.always_live === 1
     || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
 
@@ -164,7 +164,7 @@ async function loadSupplement(skipCache = false) {
   supplement.value = loading
   function stillNeeded() {
     if (supplement.value !== loading) return false
-    if (!hasPublishedSupplement.value) return true
+    if (!hasPublishedStrmfree.value) return true
     supplement.value = { status: 'idle' }
     return false
   }
@@ -197,7 +197,7 @@ async function loadSupplement(skipCache = false) {
 }
 
 const feedSources = computed(() => (detail.value?.sources ?? [])
-  .filter(source => source.data && source.origin !== 'supplement'))
+  .filter(source => source.data && !isSupplementSource(source)))
 
 const defaultSourceKey = computed(() => {
   const preferred = feedSources.value.find((source) => source.default)
@@ -328,7 +328,7 @@ function isAutomaticSource(uri: string, key: unknown) {
 
 async function writeSourceQuery(key: string, replace = false) {
   const target = sources.value.find(source => source.key === key)
-  if (target?.origin === 'supplement' && !pickedSupplementKeys.has(key)) return
+  if (target?.origin && !pickedSupplementKeys.has(key)) return
 
   const clearAutomaticSelection = !replace && route.query.source === key && isAutomaticSource(uriName.value, key)
   const writeId = ++sourceWriteId
@@ -371,7 +371,7 @@ const activeSourceKey = computed({
   get: () => currentSource.value?.key ?? null,
   set: (key: string | null) => {
     if (key === null) return
-    if (sources.value.some(source => source.key === key && source.origin === 'supplement')) {
+    if (sources.value.some(source => source.key === key && source.origin)) {
       pickedSupplementKeys.add(key)
     }
     forgetFailure(key)
@@ -466,7 +466,8 @@ function handleFrameError() {
 }
 
 function handleReloadPlayer() {
-  if (hasPublishedSupplement.value && currentSource.value?.origin === 'supplement') {
+  if (currentSource.value?.origin === 'pitsport' ||
+    (hasPublishedStrmfree.value && currentSource.value?.origin === 'supplement')) {
     retryGeneration.value += 1
     return
   }
@@ -616,7 +617,7 @@ if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnav
 
 let pendingSourceQuery = true
 let observedEvent: { uri: string; id: string } | undefined
-watch([uriName, () => detail.value?.id, hasPublishedSupplement], ([uri, id, published], previous) => {
+watch([uriName, () => detail.value?.id, hasPublishedStrmfree], ([uri, id, published], previous) => {
   if (observedEvent?.uri !== uri) observedEvent = undefined
   if (id === undefined) return
   const changed = !!observedEvent && observedEvent.id !== String(id)
@@ -654,7 +655,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       if (supplement.value.status === 'idle') void loadSupplement()
       if (supplement.value.status === 'loading') return
     }
-    if (requested?.origin === 'supplement') pickedSupplementKeys.add(requested.key)
+    if (requested?.origin) pickedSupplementKeys.add(requested.key)
     if (requested) forgetFailure(requested.key, wasReady === true)
     requestedSourceKey.value = requested?.key ?? null
     resetAttempt(null)
@@ -668,10 +669,10 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     if (!automaticSource && query !== undefined && !requested && selectedSourceKey.value !== null) {
       void writeSourceQuery(selectedSourceKey.value, true)
     }
-  } else if (chainExhausted && (hasPublishedSupplement.value || supplement.value.status === 'merged')) {
+  } else if (chainExhausted) {
     expireRememberedHealth()
     const nextKey = options.find(source =>
-      source.origin === 'supplement' && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),
+      source.origin && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),
     )?.key
     if (nextKey) {
       selectedSourceKey.value = nextKey

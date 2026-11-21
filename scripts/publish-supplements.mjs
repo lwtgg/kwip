@@ -54,14 +54,26 @@ export async function fetchPitSportListing(deadline) {
   const { live, upcoming } = payload?.data ?? {}
   if (payload?.ok !== true || !Array.isArray(live) || !Array.isArray(upcoming)) return
 
-  const events = new Map()
+  const programs = new Map()
   for (const program of [...live, ...upcoming]) {
-    if (program?.hasVideo !== true || !Number.isSafeInteger(program.sessionStart) || program.sessionStart <= 0 ||
+    if (!Number.isSafeInteger(program?.sessionStart) || program.sessionStart <= 0 ||
         !Number.isSafeInteger(program.programId) || program.programId <= 0 ||
-        typeof program.slug !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(program.slug) ||
-        typeof program.playHref !== 'string' ||
-        /^\/programs\/(\d+)\/play$/.exec(program.playHref)?.[1] !== String(program.programId)) continue
+        typeof program.slug !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(program.slug)) continue
 
+    const key = `${program.slug}@${program.sessionStart}`
+    const existing = programs.get(key)
+    if (existing === null || (existing && existing.programId !== program.programId)) {
+      programs.set(key, null)
+      continue
+    }
+    const playable = program.hasVideo === true && typeof program.playHref === 'string' &&
+      /^\/programs\/(\d+)\/play$/.exec(program.playHref)?.[1] === String(program.programId)
+    if (!existing || (playable && !existing.playable)) programs.set(key, { ...program, playable })
+  }
+
+  const events = new Map()
+  for (const program of programs.values()) {
+    if (!program?.playable) continue
     const base = program.slug.replace(pitSportVariants, '')
     const key = `${base}@${program.sessionStart}`
     if (!events.has(key)) {
@@ -87,10 +99,9 @@ export async function fetchPitSportListing(deadline) {
   return { streams: [...events.values()] }
 }
 
-export function publishedPitSportSources(item, match) {
-  if (!match) return []
+export function dedupePublishedSources(item, sources) {
   const keys = new Set([...sourceUrls(item), item.source?.data].filter(url => typeof url === 'string').map(sourceKey))
-  return match.sources.filter(source => {
+  return sources.filter(source => {
     const key = sourceKey(source.data)
     if (keys.has(key)) return false
     keys.add(key)
