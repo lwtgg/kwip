@@ -40,4 +40,4 @@ The design pass fixed the mechanics; the look is still generic. Target the thing
 
 Dead-stream health signal, per-event poster quality, 390 px sweep, archive search, per-category OG art.
 
-Open verification: the supplement "Not live" treatment is unverified in a browser — the provider had no eligible fixture inside a live window. Re-check after 19:30Z against `bay-koe`, both as a chip that exists and as one that is reported live.
+"Not live" is verified in `tests/notLive_browser.py` against intercepted status endpoints at both widths: only a confirmed-offline variant is chipped, it stays selectable, a failed status leaves liveness unknown and unlabelled, and failover prefers a live equal-quality variant. The provider status endpoint is the only source of `false`.
