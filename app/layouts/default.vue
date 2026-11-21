@@ -39,7 +39,7 @@ const categories = computed(() => {
 </script>
 
 <template>
-  <div class="flex min-h-dvh flex-col bg-bg text-fg">
+  <div class="flex min-h-(--shell-min-height) flex-col bg-bg text-fg">
     <header class="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur-sm">
       <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <NuxtLink
@@ -150,7 +150,7 @@ const categories = computed(() => {
           <button
             type="button"
             :aria-pressed="isCompact"
-            aria-label="Compact layout"
+            :aria-label="isCompact ? 'Compact layout' : 'Comfortable layout'"
             :title="densityAction"
             class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
             @click="toggleDensity"
@@ -164,7 +164,8 @@ const categories = computed(() => {
               stroke-linecap="round"
               class="h-4 w-4"
             >
-              <path d="M4 7h16M4 12h16M4 17h16" />
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path :d="isCompact ? 'M7 10h10M7 14h10' : 'M7 8h10M7 16h10'" />
             </svg>
           </button>
         </div>
@@ -175,7 +176,7 @@ const categories = computed(() => {
       <slot />
     </div>
 
-    <footer class="mt-12 border-t border-border bg-surface">
+    <footer class="mt-(--footer-gap) border-t border-border bg-surface">
       <div class="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
         <p>{{ siteName }} · Live sports event directory</p>
         <nav aria-label="Footer navigation" class="flex flex-wrap items-center gap-4">
