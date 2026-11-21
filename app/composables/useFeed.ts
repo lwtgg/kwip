@@ -9,9 +9,9 @@ import {
   isCrossOriginFeed,
   type FeedEndpoint,
   type FeedProvenance,
-} from '../../server/utils/feed'
+} from '../../server/utils/feed.ts'
 
-export { FeedResponseError } from '../../server/utils/feed'
+export { FeedResponseError } from '../../server/utils/feed.ts'
 
 export interface FeedErrorPayload {
   success: false
@@ -232,6 +232,7 @@ function isSnapshotOmitted(error: { data?: unknown } | null | undefined): boolea
 export function isSnapshotUnavailable(error: { data?: unknown } | null | undefined): boolean {
   const data = error?.data
   return !!data && typeof data === 'object' && 'snapshotUnavailable' in data && data.snapshotUnavailable === true
+    && !isSnapshotOmitted(error)
 }
 
 export function usePing() {

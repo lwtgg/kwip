@@ -243,7 +243,7 @@ def check_stalled_feed(browser, directory, output):
             thread.join()
 
 
-def check_stalled_generation(browser, directory, output):
+def check_snapshot_generation(browser, directory, output):
     wrapped = directory / 'snapshot-worker'
     shutil.copytree(output, wrapped)
     entry = wrapped / 'server/index.mjs'
@@ -254,8 +254,13 @@ export default {
   fetch(request, env, ctx) {
     const snapshots = {
       async get(key, options) {
-        const response = await fetch(env.TEST_PROVIDER + (options ? '/r2/range' : '/r2/manifest'))
-        return { size: Number(response.headers.get('content-length')), etag: key,
+        const path = options
+          ? (env.TEST_READABLE === '1'
+            ? `/r2/range/${options.range.offset}/${options.range.length}`
+            : '/r2/range')
+          : '/r2/manifest'
+        const response = await fetch(env.TEST_PROVIDER + path)
+        return { size: Number(response.headers.get('x-object-size')), etag: key,
           body: response.body, arrayBuffer: () => response.arrayBuffer() }
       },
     }
@@ -266,11 +271,16 @@ export default {
 
     commit = '20261119T000000Z-01234567'
     date = '2026-11-19T00:00:00.000Z'
+    packed = b''
+    endpoints = []
+    for path in ('streams', 'vods'):
+        payload = (output / f'public/feed-cache/{path}.json').read_bytes()
+        endpoints.append(dict(path=path, offset=len(packed), length=len(payload)))
+        packed += payload
     manifest = dict(schema=1, commitId=commit, payloadId=commit,
                     payloadKey=f'snapshots/{commit}.bin', publishedAt=date,
-                    listsVerifiedAt=date, detailsVerifiedAt=date, size=2,
-                    endpoints=[dict(path='streams', offset=0, length=1),
-                               dict(path='vods', offset=1, length=1)])
+                    listsVerifiedAt=date, detailsVerifiedAt=date, size=len(packed),
+                    endpoints=endpoints)
     source = json.loads((output / 'public/feed-cache/streams.json').read_text())
     cow = next(item for group in source['streams'] for item in group['streams']
                if item['uri_name'] == '247-cows')
@@ -286,6 +296,9 @@ export default {
             requests.append(self.path)
             if self.path == '/r2/manifest':
                 data = manifest
+            elif self.path.startswith('/r2/range/'):
+                offset, length = map(int, self.path.split('/')[-2:])
+                data = packed[offset:offset + length]
             elif self.path == '/healthy/streams':
                 data = upstream
             elif self.path == '/healthy/vods':
@@ -293,10 +306,11 @@ export default {
             else:
                 release.wait()
                 return
-            body = json.dumps(data).encode()
+            body = data if isinstance(data, bytes) else json.dumps(data).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
+            self.send_header('X-Object-Size', str(len(packed) if isinstance(data, bytes) else len(body)))
             self.end_headers()
             self.wfile.write(body)
 
@@ -308,6 +322,24 @@ export default {
         thread.start()
         base = f'http://127.0.0.1:{provider.server_port}'
         try:
+            missing_paths = ('/live/nba/2026-11-20/nope', '/live/nope', '/vods/nope')
+            with worker(directory, 'generation-readable', wrapped, 'https://advertiser.example',
+                        False, variables=lambda _: {
+                            'TEST_PROVIDER': base,
+                            'TEST_READABLE': '1',
+                            'NUXT_PUBLIC_FEED_BASE': f'{base}/stalled',
+                            'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
+                        }) as origin, browser.new_context(java_script_enabled=False) as context:
+                page = context.new_page()
+                for path in missing_paths:
+                    requests.clear()
+                    response = page.goto(origin + path, wait_until='domcontentloaded')
+                    assert response.status == 404, (path, response.status)
+                    assert requests[0] == '/r2/manifest'
+                    assert any(request.startswith('/r2/range/') for request in requests), requests
+                    assert all(request.startswith('/r2/') for request in requests), requests
+                print('Readable R2 with omitted live and replay details: HTTP 404')
+
             for primary, marker in [('healthy', 'upstream-only'), ('stalled', '247-cows')]:
                 log = directory / f'generation-{primary}.log'
                 with worker(directory, f'generation-{primary}', wrapped, 'https://advertiser.example',
@@ -332,6 +364,12 @@ export default {
                             assert requests.count('/r2/manifest') == 2, requests
                             assert requests.index('/mirror/streams') < requests.index('/r2/manifest', 1)
                         print(f'Stalled R2, {primary} upstream {path}: HTTP 200 in {monotonic() - start:.2f}s')
+                    if primary == 'stalled':
+                        for path in ('/live/nope', '/vods/nope', '/live/247-cows', '/vods/back-to-the-beginning'):
+                            response = page.goto(origin + path, wait_until='domcontentloaded', timeout=6500)
+                            assert response.status == 200, (path, response.status)
+                            assert '"fromCache"' in response.text(), path
+                        print('Stalled R2 and upstreams with missing and seeded details: HTTP 200')
                     assert '"stage":"snapshot"' in log.read_text()
         finally:
             release.set()
@@ -348,7 +386,7 @@ def main():
             browser = pw.chromium.launch()
             check_source_health(browser, origin)
         check_stalled_feed(browser, Path(temp), args.output.resolve())
-        check_stalled_generation(browser, Path(temp), args.output.resolve())
+        check_snapshot_generation(browser, Path(temp), args.output.resolve())
         browser.close()
 
 
