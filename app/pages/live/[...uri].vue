@@ -8,6 +8,7 @@ import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
 import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
+import { slugifyCategory } from '~/utils/supplementMatch'
 import { formatViewersExact } from '~/utils/viewers'
 import { canClickUnder, isClickUnderEligible, openClickUnder } from '~/utils/clickUnder'
 
@@ -91,12 +92,15 @@ const supplement = shallowRef<SupplementState>({ status: 'idle' })
 onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
 
 const snapshotHealth = shallowRef<SnapshotHealth>()
+const hasPublishedSupplement = computed(() => streamResp.value?.fromSnapshot
+  && detail.value?.sources.some(source => source.origin === 'supplement'))
 const playerInput = computed(() => ({
+  hasPublishedSupplement: hasPublishedSupplement.value,
   locale: detail.value?.locale,
   source_tag: detail.value?.source_tag,
   sources: [
     ...(detail.value?.sources ?? []),
-    ...(supplement.value.status === 'merged' ? supplement.value.sources : []),
+    ...(!hasPublishedSupplement.value && supplement.value.status === 'merged' ? supplement.value.sources : []),
   ],
 }))
 const attemptSources = computed(() => usePlayerSources(playerInput.value))
@@ -140,7 +144,7 @@ onMounted(() => {
 async function loadSupplement() {
   const event = detail.value
   const now = Date.now()
-  if (supplement.value.status !== 'idle'
+  if (hasPublishedSupplement.value || supplement.value.status !== 'idle'
     || !event || event.always_live === 1
     || !(event.starts_at > 0 && event.starts_at <= now / 1000 && event.ends_at > now / 1000)) return
 
@@ -159,6 +163,12 @@ async function loadSupplement() {
   const loading = { status: 'loading' } as const
   const slug = categorySlug.value
   supplement.value = loading
+  function stillNeeded() {
+    if (supplement.value !== loading) return false
+    if (!hasPublishedSupplement.value) return true
+    supplement.value = { status: 'idle' }
+    return false
+  }
   try {
     const fixtures = /(?:^|\/)fixtures\/?$/.test(feedBase)
     const api = 'https://strmfree.pk/api/v1'
@@ -166,10 +176,10 @@ async function loadSupplement() {
     const response = await fetch(endpoint)
     if (!response.ok) throw new Error('Second provider request failed')
     const payload = await response.json()
-    if (supplement.value !== loading) return
+    if (!stillNeeded()) return
     const matched = await loadSupplementSources(event, slug, payload, fixtures ? undefined
       : key => fetch(`${api}/sources/${encodeURIComponent(key)}`))
-    if (supplement.value !== loading) return
+    if (!stillNeeded()) return
     if (matched === null) {
       supplement.value = { status: 'none' }
       return
@@ -187,7 +197,8 @@ async function loadSupplement() {
   }
 }
 
-const feedSources = computed(() => (detail.value?.sources ?? []).filter((source) => source.data))
+const feedSources = computed(() => (detail.value?.sources ?? [])
+  .filter(source => source.data && source.origin !== 'supplement'))
 
 const defaultSourceKey = computed(() => {
   const preferred = feedSources.value.find((source) => source.default)
@@ -456,12 +467,18 @@ function handleFrameError() {
 }
 
 function handleReloadPlayer() {
+  if (hasPublishedSupplement.value && currentSource.value?.origin === 'supplement') {
+    retryGeneration.value += 1
+    return
+  }
   if (currentSource.value?.origin === 'supplement') {
     const key = defaultSourceKey.value
     requestedSourceKey.value = key
     selectedSourceKey.value = key
     resetAttempt(key)
-    if (key !== null && isSupplementQuery(route.query.source)) void writeSourceQuery(key, true)
+    if (key !== null && findRequestedSource(sources.value, route.query.source)?.origin === 'supplement') {
+      void writeSourceQuery(key, true)
+    }
   }
   supplement.value = { status: 'idle' }
   retryGeneration.value += 1
@@ -486,14 +503,6 @@ function handleRetryFeed() {
     () => Promise.all([refreshStream(), refreshList()]),
     () => [streamResp.value, listResp.value],
   )
-}
-
-function slugifyCategory(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
 }
 
 const categoryLabel = computed(
@@ -648,7 +657,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     if (!automaticSource && query !== undefined && !requested && selectedSourceKey.value !== null) {
       void writeSourceQuery(selectedSourceKey.value, true)
     }
-  } else if (chainExhausted && supplement.value.status === 'merged') {
+  } else if (chainExhausted && (hasPublishedSupplement.value || supplement.value.status === 'merged')) {
     expireRememberedHealth()
     const nextKey = options.find(source =>
       source.origin === 'supplement' && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),

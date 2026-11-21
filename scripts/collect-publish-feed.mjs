@@ -6,6 +6,9 @@ import { loadEnvFile } from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { candidates, collectSourceHealth, nearbyEvent } from './probe-source-health.mjs'
+import {
+  fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources, supplementEvent,
+} from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
@@ -99,14 +102,17 @@ async function fetchProvider(base, path, run, deadline, bytesRemaining) {
   return Buffer.concat(chunks, length)
 }
 
-async function collectFeed(base, directory, current, result, deadline) {
+async function collectFeed(base, directory, current, result, deadline, fixture) {
   const run = { result, nextRequestAt: 0 }
   const entries = []
   const hashes = {}
   const details = new Map()
   let size = 0
   const eventTimes = new Map()
+  const supplementEvents = []
   const probeItems = []
+  const matches = []
+  const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
   const now = Date.now()
 
   async function append(path, bytes) {
@@ -148,14 +154,23 @@ async function collectFeed(base, directory, current, result, deadline) {
         if (details.has(path) && details.get(path) !== id) throw new Error(`Conflicting list IDs for ${path}`)
         details.set(path, id)
         if (collection === 'streams') {
-          eventTimes.set(path, { starts_at: item.starts_at ?? item.start_timestamp, always_live: item.always_live ?? category.always_live })
+          eventTimes.set(path, {
+            category: item.category_name || category.category,
+            starts_at: item.starts_at ?? item.start_timestamp, always_live: item.always_live ?? category.always_live,
+          })
         }
       }
     }
     if (details.size === count) throw new Error(`Empty ${collection} list`)
   }
 
-  if (current && ![...eventTimes.values()].some(item => nearbyEvent(item, now)) && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
+  const listing = await supplementListing
+  // Older manifests lack detail metadata. A nonempty listing requires one full refresh to populate it.
+  const publishedEvents = current?.supplementEvents
+  const needsDetails = [...eventTimes.values()].some(item => nearbyEvent(item, now))
+    || publishedEvents?.some(event => nearbyEvent(event, now) || matchPublishedSupplement(event, listing))
+    || (!publishedEvents && !!listing?.streams.length)
+  if (current && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
     return { unchanged: true }
@@ -168,34 +183,72 @@ async function collectFeed(base, directory, current, result, deadline) {
   for (const path of [...details.keys()].sort()) {
     const { payload, bytes } = await read(path)
     if (String(payload.data?.id) !== details.get(path)) throw new Error(`Mismatched detail ID for ${path}`)
-    detailHashes.push([path, sha256(bytes)])
+    const hash = [path, sha256(bytes)]
+    detailHashes.push(hash)
     const timing = eventTimes.get(path)
     if (timing) {
       const item = payload.data
-      probeItems.push({
-        starts_at: item.starts_at ?? item.start_timestamp ?? timing.starts_at,
-        always_live: Number(timing.always_live) === 1 ? 1 : item.always_live,
-        iframe: item.iframe,
-        sources: item.sources,
-        substreams: item.substreams,
-      })
+      const event = supplementEvent(item, timing)
+      supplementEvents.push(event)
+      const probeItem = { ...event, iframe: item.iframe, sources: item.sources, substreams: item.substreams }
+      if (!fixture) probeItems.push(probeItem)
+      const match = matchPublishedSupplement(event, listing)
+      if (match) {
+        const sources = publishedSupplementSources(item, match)
+        if (sources.length) matches.push({ match, sources, timing: probeItem, payload, entry: entries.at(-1), hash })
+      }
     }
   }
-  hashes.details = sha256(json(detailHashes))
-  const probes = candidates(probeItems, now)
-  if (probes.size) {
-    // Keep the existing publication deadline and leave room to write the payload.
-    const health = json(await collectSourceHealth(probes, Math.min(30_000, deadline - performance.now() - 10_000)))
-    if (size + health.length < snapshotLimit) await append('health.json', health)
+  const withStatus = matches.length ? await fetchSupplementStatuses(matches, now,
+    Math.min(performance.now() + 5_000, deadline - 40_000)) : undefined
+  // Primary probes share the existing deadline with supplements and establish the exact health reserve.
+  const probeDeadline = Math.min(performance.now() + 30_000, deadline - 10_000)
+  const primaryProbes = candidates(probeItems, now)
+  const health = await collectSourceHealth(primaryProbes, probeDeadline - performance.now())
+  let healthBytes = primaryProbes.size ? json(health) : undefined
+  const accepted = []
+  for (const match of matches) {
+    const { payload, entry, timing, hash } = match
+    const supplements = withStatus(match)
+    const sources = [...(payload.data.sources ?? []), ...supplements]
+    const bytes = json({ ...payload, data: { ...payload.data, sources } })
+    const delta = bytes.length - entry.endpoint.length
+    if (bytes.length > fileLimit || size + delta + (healthBytes?.length ?? 0) >= snapshotLimit) continue
+    entry.stored = bytes
+    entry.endpoint.length = bytes.length
+    size += delta
+    hash[1] = sha256(bytes)
+    accepted.push({ starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements })
   }
+  hashes.details = sha256(json(detailHashes))
+
+  // Apply the shared cap once to primaries followed by accepted supplements.
+  if (accepted.length) {
+    const supplementProbes = candidates([...probeItems, ...accepted], now)
+    for (const key of primaryProbes.keys()) supplementProbes.delete(key)
+    const supplementHealth = await collectSourceHealth(supplementProbes, probeDeadline - performance.now())
+    for (const [key, record] of Object.entries(supplementHealth)) {
+      const nextHealth = json({ ...health, [key]: record })
+      if (size + nextHealth.length >= snapshotLimit) continue
+      health[key] = record
+      healthBytes = nextHealth
+    }
+  }
+  if (healthBytes && size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)
   const bytes = Buffer.alloc(size)
+  let offset = 0
   for (const { endpoint, stored } of entries) {
+    endpoint.offset = offset
+    offset += endpoint.length
     timeLeft(deadline, 'Collection deadline exceeded')
     const data = typeof stored === 'string' ? await readFile(stored) : stored
     data.copy(bytes, endpoint.offset)
   }
   timeLeft(deadline, 'Collection deadline exceeded')
-  return { snapshot: { bytes, size, endpoints: entries.map(({ endpoint }) => endpoint), hashes } }
+  return { snapshot: {
+    bytes, size, endpoints: entries.map(({ endpoint }) => endpoint), hashes,
+    hasSupplements: accepted.length > 0, supplementEvents,
+  } }
 }
 
 async function credentials(bucket, filename) {
@@ -326,6 +379,11 @@ function validateManifest(manifest) {
   if (end !== manifest.size || !paths.has('streams') || !paths.has('vods')) {
     throw new Error('Invalid endpoint coverage in current snapshot manifest')
   }
+  if (manifest.supplementEvents !== undefined && (!Array.isArray(manifest.supplementEvents)
+    || !manifest.supplementEvents.every(event => typeof event?.name === 'string' && Number.isFinite(event.starts_at)
+      && (event.always_live === 0 || event.always_live === 1) && typeof event.categorySlug === 'string'))) {
+    throw new Error('Invalid supplement events in current snapshot manifest')
+  }
   return payloadId
 }
 
@@ -365,7 +423,7 @@ async function persistProviderStatus(r2, stateObject, status, retryAfter, dryRun
   return patch.paused ? 'paused' : 'backoff'
 }
 
-async function collectSnapshot(current, result, deadline, dryRun) {
+function configuredFeedUrl() {
   try {
     loadEnvFile()
   } catch (error) {
@@ -375,10 +433,18 @@ async function collectSnapshot(current, result, deadline, dryRun) {
   if (!url || !['http:', 'https:'].includes(url.protocol) || url.search || url.hash) {
     throw new Error('Missing or invalid external feed URL')
   }
+  return url
+}
+
+function isFixtureBase(url) {
+  return /\/fixtures\/?$/.test(url.pathname)
+}
+
+async function collectSnapshot(current, result, deadline, dryRun, url = configuredFeedUrl()) {
   const directory = dryRun ? undefined : await mkdtemp(join(tmpdir(), 'kwip-publish-'))
   const started = performance.now()
   try {
-    return await collectFeed(url.href.replace(/\/+$/, ''), directory, current, result, deadline)
+    return await collectFeed(url.href.replace(/\/+$/, ''), directory, current, result, deadline, isFixtureBase(url))
   } finally {
     result.durations.collectionMs = Math.round(performance.now() - started)
     if (directory) await rm(directory, { recursive: true, force: true })
@@ -402,7 +468,9 @@ async function publish(result, deadline) {
   if (!buckets.includes(bucket)) throw new Error('Unknown snapshot bucket')
   if (providerStatus !== undefined && !['429', 'blocked'].includes(providerStatus)) throw new Error('Invalid provider status')
   if (retryAfter !== undefined && providerStatus !== '429') throw new Error('--retry-after requires --provider-status 429')
-  const config = await credentials(bucket, values['credentials-file'])
+  const dryRunFeed = dryRun && !providerStatus ? configuredFeedUrl() : undefined
+  const config = dryRunFeed && isFixtureBase(dryRunFeed)
+    ? undefined : await credentials(bucket, values['credentials-file'])
   if (!config && !dryRun) throw new Error(`Missing bucket-scoped credentials for ${bucket}`)
   const publicationDeadline = deadline - stateReserveMs
   const r2 = config && storage(bucket, config, result, publicationDeadline)
@@ -430,7 +498,7 @@ async function publish(result, deadline) {
   const currentPayloadId = current ? validateManifest(current) : undefined
   let collected
   try {
-    collected = await collectSnapshot(current, result, publicationDeadline, dryRun)
+    collected = await collectSnapshot(current, result, publicationDeadline, dryRun, dryRunFeed)
     timeLeft(publicationDeadline, 'Collection deadline exceeded')
   } catch (error) {
     if (error instanceof ProviderError) {
@@ -453,10 +521,17 @@ async function publish(result, deadline) {
     : {
         schema: 1, commitId: result.commitId, payloadId: result.commitId, payloadKey: `snapshots/${result.commitId}.bin`,
         size: snapshot.size, hashes: snapshot.hashes, publishedAt: now,
+        ...(snapshot.hasSupplements ? { hasSupplements: true } : {}),
+        supplementEvents: snapshot.supplementEvents,
         listsVerifiedAt: now, detailsVerifiedAt: now, endpoints: snapshot.endpoints,
       }
 
-  const body = json(manifest)
+  let body = json(manifest)
+  if (!unchanged && body.length > fileLimit) {
+    // Readers limit the manifest to 2 MiB. Oversized detail metadata is optional.
+    delete manifest.supplementEvents
+    body = json(manifest)
+  }
   result.bytes = { snapshot: manifest.size, manifest: body.length, payloadPut: 0 }
   if (dryRun) {
     result.dryRun = true

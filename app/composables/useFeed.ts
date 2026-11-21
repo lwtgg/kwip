@@ -67,6 +67,8 @@ export interface FeedStreamsResponse {
 export type FeedSourceKind = 'iframe' | 'link'
 
 export interface FeedStreamSource {
+  origin?: 'supplement'
+  live?: boolean
   name: string
   default: boolean
   type: FeedSourceKind
@@ -305,6 +307,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
         : []
     })
 
+    const sources = raw.sources ?? []
     return {
       ...raw,
       ...fixtureItem,
@@ -317,7 +320,11 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       poster: fixtureItem?.poster || raw.poster,
       colors: fixtureItem?.colors?.length ? fixtureItem.colors : raw.colors ?? [],
       blurhash: fixtureItem?.blurhash || raw.blurhash || '',
-      sources: [...(raw.sources ?? []), ...alternatives],
+      sources: [
+        ...sources.filter(source => source.origin !== 'supplement'),
+        ...alternatives,
+        ...sources.filter(source => source.origin === 'supplement'),
+      ],
       substreams: undefined,
     }
   })

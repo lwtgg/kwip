@@ -84,3 +84,23 @@ test('liveness cannot cross an intervening quality, locale, or unknown-quality s
   const untagged = [{ ...offline, sourceTag: undefined }, { ...live, sourceTag: undefined }]
   assert.deepEqual(usePlayerSources({ sources: untagged }).map(({ url }) => url), untagged.map(({ data }) => data))
 })
+
+test('published supplements inherit snapshot health and move only within their band', () => {
+  const supplement = {
+    ...source('supplement', '720p', ''),
+    origin: 'supplement' as const, live: true,
+  }
+  const peer = source('peer', 'HD', '')
+  const boundary = source('boundary', 'SD', '')
+  const stream = { sources: [supplement, peer, boundary], hasPublishedSupplement: true }
+  const health = {
+    [sourceKey(supplement.data)]: {
+      embedOk: false, manifestOk: false, sequence: 'unknown' as const, checkedAt: new Date().toISOString(),
+    },
+  }
+  assert.deepEqual(usePlayerSources(stream, health).map(({ key, degraded }) => [key, degraded]), [
+    ['example.com/peer', undefined],
+    ['example.com/supplement', true],
+    ['example.com/boundary', undefined],
+  ])
+})

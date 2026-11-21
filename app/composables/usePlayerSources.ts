@@ -21,7 +21,7 @@ export interface SourceOption {
   degraded?: true
 }
 
-export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?: string; locale?: string }, health?: SnapshotHealth): SourceOption[] {
+export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?: string; locale?: string; hasPublishedSupplement?: boolean }, health?: SnapshotHealth): SourceOption[] {
   const uniqueSources = new Map<string, PlayerSource>()
 
   for (const source of stream.sources) {
@@ -36,8 +36,8 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     kind: source.type,
     host: sourceHost(source.data),
     key,
-    ...(!('origin' in source) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
-    ...('origin' in source ? { origin: source.origin, live: source.live } : {}),
+    ...((!source.origin || stream.hasPublishedSupplement) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
+    ...(source.origin === 'supplement' ? { origin: source.origin, live: source.live } : {}),
   }))
 
   const labels = options.map(({ label }) => label.toLowerCase())
@@ -62,9 +62,9 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
   // Sort only within contiguous runs of known quality and matching locale.
   const ranked = labelled.map((option, index) => {
     const source = uniqueSources.get(option.key)!
-    const tag = source.sourceTag ?? source.source_tag ?? (source.default && !('origin' in source) ? stream.source_tag : undefined)
+    const tag = source.sourceTag ?? source.source_tag ?? (source.default && !source.origin ? stream.source_tag : undefined)
     const quality = sourceQualityBand(tag)
-    const locale = source.locale ?? ('origin' in source ? undefined : stream.locale)
+    const locale = source.locale ?? (source.origin ? undefined : stream.locale)
     return {
       option,
       tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
