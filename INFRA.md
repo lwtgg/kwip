@@ -36,7 +36,9 @@ Runtime vars go on a version, never in `wrangler.toml`. `wrangler versions uploa
 
 The snapshot publisher probes source URLs on registered hosts only, inside the detail window and excluding 24/7 channels, and writes the result into the generation as `health.json` alongside the feed payloads. A host is a row in `scripts/probe-source-health.mjs` (URL shape, body markers, concurrency); unknown hosts stay unprobed rather than assumed healthy. The probe is bounded: 3 s per hop, 2 in flight per host, 40 sources per run, and one failing source never fails the publish.
 
-The Worker serves it at `/api/source-health?generation=<commitId>`, `no-store`, and the page fetches it after render for the generation that supplied the detail. A missing, unparsable or expired `health.json` is unknown health: no error, no 404, no `snapshotUnavailable`, and the picker order unchanged.
+A second provider (`strmfree.pk`) is merged into the detail payloads at publish time, so a supplement is probed like a primary. Probe slots are capped per side (40 primaries, 24 supplements) so neither starves the other; the cap bounds probing only and never removes a source from the payload, and cap drops are counted apart from deadline drops.
+
+The Worker serves it at `/api/source-health?generation=<commitId>`, `no-store`, and the page fetches it after render for the generation that supplied the detail. `?current=1` returns the live commit ID so a refreshed page can drop sources from a generation that is no longer current. A missing, unparsable or expired `health.json` is unknown health: no error, no 404, no `snapshotUnavailable`, and the picker order unchanged.
 
 Health is a tiebreak only. It may reorder sources inside one quality and locale band, never across a band, and a failing source gets a `degraded` chip while staying selectable and linked. Nothing is removed because of health.
 
