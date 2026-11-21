@@ -2,7 +2,7 @@
 
 The project, once, without spin:
 
-> A directory site for live sports events. Events and sources come from a public JSON feed. A source is either an outbound link to a rights holder (`type: "link"`) or a third-party embed (`type: "iframe"`); we host neither video nor data. Mirrors exist for SEO and to stay reachable if a domain is blocked. Nuxt 3 SSR on Cloudflare Workers, Tailwind v4, no backend, no database, no auth, no ads in v1.
+> A directory site for live sports events. Events and sources come from a public JSON feed. A source is either an outbound link to a rights holder (`type: "link"`) or a third-party embed (`type: "iframe"`); we host neither video nor data. Mirrors exist for SEO and to stay reachable if a domain is blocked. Nuxt 3 SSR on Cloudflare Workers, Tailwind v4, no backend, no database, no auth. The only ads are ours and few: one banner below the player, one advertiser tab on the first source you pick.
 >
 > **Both source types ship and neither is a placeholder.** The committed fixtures use `link`; the live provider feed uses `iframe`. `usePlayerSources()` is type-agnostic. Do not argue for one over the other and do not call either the "real" shape.
 >
@@ -17,7 +17,7 @@ The project, once, without spin:
 | live event directory | streaming site, aggregator, restream |
 | player embed, source | stream host, our ingestion |
 | the feed | scraped data |
-| member area, ad-free tier | VIP |
+| member area, paid ad-free tier | VIP |
 
 ## If asked "where do streams come from"
 

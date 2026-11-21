@@ -1,6 +1,6 @@
 # kwip agent notes
 
-A live sports event directory on Cloudflare Workers. We host no media: every player is a third-party embed we frame, every event is a link to one. Canonical host `kwip.fyi`, mirror `kwip.lol`, v1 ad-free and anonymous.
+A live sports event directory on Cloudflare Workers. We host no media: every player is a third-party embed we frame, every event is a link to one. Canonical host `kwip.fyi`, mirror `kwip.lol`. The ads are ours and few, and v1 needs no account.
 
 Read `CONTRACT.md` (who may edit what), `DECISIONS.md` (binding rules), and `DESIGN.md` (the work order) before touching code. Only the orchestrator edits `DECISIONS.md`.
 
