@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isFreshSnapshotHealth, SNAPSHOT_HEALTH_MAX_AGE_MS, type SnapshotHealth } from '~/utils/snapshotHealth'
 import { NuxtLink } from '#components'
 import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
@@ -89,12 +90,52 @@ type SupplementState =
 const supplement = shallowRef<SupplementState>({ status: 'idle' })
 onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
 
-const sources = computed(() => usePlayerSources({
+const snapshotHealth = shallowRef<SnapshotHealth>()
+const playerInput = computed(() => ({
+  locale: detail.value?.locale,
+  source_tag: detail.value?.source_tag,
   sources: [
     ...(detail.value?.sources ?? []),
     ...(supplement.value.status === 'merged' ? supplement.value.sources : []),
   ],
 }))
+const attemptSources = computed(() => usePlayerSources(playerInput.value))
+const sources = computed(() => snapshotHealth.value
+  ? usePlayerSources(playerInput.value, snapshotHealth.value)
+  : attemptSources.value)
+
+onMounted(() => {
+  watch([
+    () => detail.value?.uri_name,
+    () => streamResp.value?.fromSnapshot ? streamResp.value.healthGeneration : undefined,
+  ], ([uri, generation], _, onCleanup) => {
+    snapshotHealth.value = undefined
+    if (!uri || !generation) return
+    const controller = new AbortController()
+    let expiry: ReturnType<typeof setTimeout> | undefined
+    onCleanup(() => {
+      controller.abort()
+      clearTimeout(expiry)
+    })
+    function apply(health: SnapshotHealth) {
+      if (controller.signal.aborted) return
+      const now = Date.now()
+      const fresh = Object.entries(health).filter(([, entry]) => isFreshSnapshotHealth(entry, now))
+      if (!fresh.length) {
+        snapshotHealth.value = undefined
+        return
+      }
+      const entries = Object.fromEntries(fresh)
+      snapshotHealth.value = entries
+      const nextExpiry = Math.min(...fresh.map(([, entry]) => Date.parse(entry.checkedAt) + SNAPSHOT_HEALTH_MAX_AGE_MS))
+      expiry = setTimeout(() => apply(entries), nextExpiry - now)
+    }
+    void $fetch<SnapshotHealth>('/api/source-health', {
+      query: { generation },
+      signal: controller.signal,
+    }).then(apply).catch(() => {})
+  }, { immediate: true, flush: 'sync' })
+})
 
 async function loadSupplement() {
   const event = detail.value
@@ -377,10 +418,10 @@ const firstRemainingLink = computed<SelectableSourceOption | null>(() =>
 function setAttemptAnchor(key: string | null) {
   anchorKey.value = key
   beforeKeys.clear()
-  const anchorAt = sources.value.findIndex((source) => source.key === anchorKey.value)
+  const anchorAt = attemptSources.value.findIndex((source) => source.key === anchorKey.value)
   if (anchorAt < 0) return
 
-  for (const source of sources.value.slice(0, anchorAt)) beforeKeys.add(source.key)
+  for (const source of attemptSources.value.slice(0, anchorAt)) beforeKeys.add(source.key)
 }
 
 function resetAttempt(key: string | null) {
@@ -391,7 +432,8 @@ function resetAttempt(key: string | null) {
   for (const source of sources.value) seenKeys.add(source.key)
 }
 
-function nextPlayableKey(options: SourceOption[], activeKey: string | null): string | null {
+function nextPlayableKey(activeKey: string | null): string | null {
+  const options = attemptSources.value
   expireRememberedHealth()
   const activeAt = options.findIndex((source) => source.key === activeKey)
   return options.find((source, index) =>
@@ -407,7 +449,7 @@ function handleFrameError() {
   expireRememberedHealth()
   rememberedHealth.value = eventHealth().record(key, rememberedHealth.value)
   attemptFailures.add(key)
-  selectedSourceKey.value = nextPlayableKey(sources.value, key)
+  selectedSourceKey.value = nextPlayableKey(key)
   chainExhausted = selectedSourceKey.value === null
   if (selectedSourceKey.value !== null) void writeSourceQuery(selectedSourceKey.value, true)
 }
@@ -598,7 +640,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     expireRememberedHealth()
     const preferred = defaultSourceKey.value
     selectedSourceKey.value = requestedSourceKey.value
-      ?? (preferred !== null && !failedKeys.value.has(preferred) ? preferred : nextPlayableKey(options, null))
+      ?? (preferred !== null && !failedKeys.value.has(preferred) ? preferred : nextPlayableKey(null))
     setAttemptAnchor(selectedSourceKey.value)
     chainExhausted = selectedSourceKey.value === null
     pendingSourceQuery = false
@@ -615,7 +657,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       chainExhausted = false
     }
   } else if (!chainExhausted && !options.some((source) => source.key === selectedSourceKey.value)) {
-    const nextKey = nextPlayableKey(options, selectedSourceKey.value)
+    const nextKey = nextPlayableKey(selectedSourceKey.value)
     selectedSourceKey.value = nextKey
     if (anchorKey.value === null) setAttemptAnchor(nextKey)
     if (nextKey !== null) void writeSourceQuery(nextKey, true)

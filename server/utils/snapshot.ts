@@ -1,5 +1,7 @@
 import { feedDetailPath, isSnapshotPath, type FeedCollection } from './feed-path.ts'
 
+import { isFreshSnapshotHealth, type SnapshotHealth, type SnapshotSourceHealth } from '../../app/utils/snapshotHealth.ts'
+
 interface ByteRange {
   offset: number
   length: number
@@ -200,7 +202,7 @@ export function compactSnapshotPayload(path: string, payload: SnapshotPayload): 
   } else {
     const item = record(payload.data)
     envelope.data = path.startsWith('streams/')
-      ? pick(item, [...streamFields, 'uri', 'start_timestamp', 'end_timestamp', 'sources', 'substreams'])
+      ? pick(item, [...streamFields, 'source_tag', 'locale', 'uri', 'start_timestamp', 'end_timestamp', 'sources', 'substreams'])
       : { ...pick(item, [...vodFields, 'source']),
           recommended_vods: Array.isArray(item.recommended_vods)
             ? item.recommended_vods.map(compactVod).filter(Boolean) : undefined }
@@ -271,5 +273,32 @@ export function createSnapshotReader(bucket: SnapshotBucket) {
     return { payloads, has: (path: string) => generation.ranges.has(path) }
   }
 
-  return { open, read }
+  async function readHealth(commitId: string, now = Date.now()): Promise<SnapshotHealth> {
+    try {
+      const generation = await open()
+      const range = generation.ranges.get('health.json')
+      if (generation.commitId !== commitId || !range) return {}
+      const object = await bucket.get(generation.payloadKey, { range })
+      if (!object || object.size !== generation.size) {
+        await object?.body.cancel()
+        return {}
+      }
+      const bytes = await object.arrayBuffer()
+      if (bytes.byteLength !== range.length) return {}
+      const entries = Object.entries(record(JSON.parse(decoder.decode(bytes))))
+      for (const [key, value] of entries) {
+        const { embedOk, manifestOk, sequence, checkedAt, segmentMs, error } = record(value)
+        if (!key || typeof embedOk !== 'boolean' || typeof manifestOk !== 'boolean'
+          || (sequence !== 'advancing' && sequence !== 'frozen' && sequence !== 'unknown')
+          || typeof checkedAt !== 'string' || !Number.isFinite(Date.parse(checkedAt))
+          || (segmentMs !== undefined && (!Number.isSafeInteger(segmentMs) || Number(segmentMs) < 0))
+          || (error !== undefined && (typeof error !== 'string' || !/^[a-z][a-z\d-]{1,31}$/.test(error)))) return {}
+      }
+      return Object.fromEntries(entries.filter(([, value]) => isFreshSnapshotHealth(value as SnapshotSourceHealth, now))) as SnapshotHealth
+    } catch {
+      return {}
+    }
+  }
+
+  return { open, read, readHealth }
 }

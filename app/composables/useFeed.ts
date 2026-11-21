@@ -224,8 +224,8 @@ function useFeedEndpoint<T extends { success: boolean }>(
   return feed
 }
 
-function isSnapshotOmitted(error: { data?: unknown } | null | undefined): boolean {
-  const data = error?.data
+function isSnapshotOmitted(error: unknown): boolean {
+  const data = error && typeof error === 'object' && 'data' in error ? error.data : undefined
   return !!data && typeof data === 'object' && 'snapshotOmitted' in data && data.snapshotOmitted === true
 }
 
@@ -257,6 +257,7 @@ type RawStreamDetail = Omit<FeedStreamDetail,
   colors?: string[]
   blurhash?: string
   substreams?: (Pick<FeedSubstream, 'name'> & {
+    locale?: string
     iframe?: string
     source_tag?: string
     sources?: FeedStreamSource[]
@@ -295,7 +296,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       ? fixtureItem.substreams : raw.substreams
     const alternatives = (substreams ?? []).flatMap((substream) => {
       const name = [substream.name, substream.source_tag].filter(Boolean).join(' · ')
-      const identity = { name, substreamName: substream.name ?? '', sourceTag: substream.source_tag }
+      const identity = { name, substreamName: substream.name ?? '', sourceTag: substream.source_tag, ...(substream.locale ? { locale: substream.locale } : {}) }
       if (substream.sources?.length) {
         return substream.sources.map((source) => ({ ...source, ...identity, default: false }))
       }

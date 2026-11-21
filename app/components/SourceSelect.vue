@@ -45,6 +45,7 @@ const hasSelection = computed(() =>
 
 function chipStatus(source: SelectableSourceOption) {
   if (props.failedKeys?.includes(source.key)) return 'Failed'
+  if (source.degraded) return 'Degraded'
   if (source.live === false) return 'Not live'
 }
 

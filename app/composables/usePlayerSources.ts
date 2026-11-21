@@ -1,8 +1,14 @@
-import { sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
-import type { SupplementSource } from '~/utils/strmfree'
+import type { SnapshotHealth } from '~/utils/snapshotHealth'
+import { sourceHost, sourceKey, sourceLabel } from '../utils/sourceIdentity.ts'
+import { sourceQualityBand, type SupplementSource } from '../utils/strmfree.ts'
 import type { FeedStreamSource, FeedSourceKind } from './useFeed'
 
-type PlayerSource = FeedStreamSource | SupplementSource
+type PlayerSource = (FeedStreamSource | SupplementSource) & {
+  sourceTag?: string
+  source_tag?: string
+  locale?: string
+  viewers?: string | number
+}
 
 export interface SourceOption {
   label: string
@@ -12,9 +18,10 @@ export interface SourceOption {
   key: string
   origin?: SupplementSource['origin']
   live?: boolean
+  degraded?: true
 }
 
-export function usePlayerSources(stream: { sources: PlayerSource[] }): SourceOption[] {
+export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?: string; locale?: string }, health?: SnapshotHealth): SourceOption[] {
   const uniqueSources = new Map<string, PlayerSource>()
 
   for (const source of stream.sources) {
@@ -29,13 +36,14 @@ export function usePlayerSources(stream: { sources: PlayerSource[] }): SourceOpt
     kind: source.type,
     host: sourceHost(source.data),
     key,
+    ...(!('origin' in source) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
     ...('origin' in source ? { origin: source.origin, live: source.live } : {}),
   }))
 
   const labels = options.map(({ label }) => label.toLowerCase())
   const reserved = new Set(labels)
   const used = new Set<string>()
-  return options.map((option, index) => {
+  const labelled = options.map((option, index) => {
     const base = labels[index]!
     if (!used.has(base)) {
       used.add(base)
@@ -47,4 +55,31 @@ export function usePlayerSources(stream: { sources: PlayerSource[] }): SourceOpt
     reserved.add(label.toLowerCase())
     return { ...option, label }
   })
+
+  if (!labelled.some(option => option.degraded)) return labelled
+
+  // Sort only within contiguous runs of known quality and matching locale.
+  const ranked = labelled.map((option, index) => {
+    const source = uniqueSources.get(option.key)!
+    const tag = source.sourceTag ?? source.source_tag ?? (source.default && !('origin' in source) ? stream.source_tag : undefined)
+    const quality = sourceQualityBand(tag)
+    const locale = source.locale ?? ('origin' in source ? undefined : stream.locale)
+    return {
+      option,
+      tier: quality && !('origin' in source) ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
+      viewers: Number(source.viewers) || 0,
+    }
+  })
+  const ordered: SourceOption[] = []
+  for (let start = 0; start < ranked.length;) {
+    let end = start + 1
+    while (end < ranked.length && ranked[end]!.tier === ranked[start]!.tier) end++
+    const group = ranked.slice(start, end)
+    if (group.some(({ option }) => option.degraded)) {
+      group.sort((a, b) => Number(!!a.option.degraded) - Number(!!b.option.degraded) || b.viewers - a.viewers)
+    }
+    ordered.push(...group.map(({ option }) => option))
+    start = end
+  }
+  return ordered
 }
