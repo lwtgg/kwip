@@ -25,7 +25,7 @@ export async function lookupEdgePage(event: H3Event) {
   if (getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin !== url.origin) return
 
   const { feedSnapshotBinding, public: config } = useRuntimeConfig(event)
-  const identity = await getFeedCacheIdentity(event, feedSnapshotBinding, config)
+  const identity = await getFeedCacheIdentity(event, feedSnapshotBinding, config, url)
   if (!identity) return
   const query = renderSearch(url)
   const timed = /^(?:\/$|\/(?:live|c)\/)/i.test(url.pathname)

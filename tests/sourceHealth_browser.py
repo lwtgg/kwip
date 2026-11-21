@@ -3,9 +3,13 @@
     python tests/sourceHealth_browser.py .output
 """
 import argparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import re
 from pathlib import Path
 import tempfile
+from threading import Event, Thread
+from time import monotonic
 from urllib.parse import quote, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
@@ -174,6 +178,61 @@ def check_source_health(browser, origin):
     print('Source failure persists across reload and revisit, clears on retry or explicit selection, and stays in its session')
 
 
+def check_stalled_feed(browser, directory, output):
+    release = Event()
+    requests = []
+
+    class StalledFeed(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            release.wait()
+
+    log_path = directory / 'stalled-feed.log'
+    with ThreadingHTTPServer(('127.0.0.1', 0), StalledFeed) as provider:
+        thread = Thread(target=provider.serve_forever, daemon=True)
+        thread.start()
+        base = f'http://127.0.0.1:{provider.server_port}'
+        try:
+            with worker(directory, 'stalled-feed', output, 'https://advertiser.example', False,
+                        variables=lambda _: {
+                            'NUXT_PUBLIC_FEED_BASE': base + '/primary',
+                            'NUXT_PUBLIC_FEED_MIRROR_BASE': base + '/mirror',
+                        }, log_path=log_path) as origin, browser.new_context() as context:
+                context.route('**/*', lambda route: route.continue_()
+                              if route.request.url.startswith(origin + '/') else route.abort())
+                page = context.new_page()
+                for path, marker in {
+                    '/': '"fromCache"',
+                    '/live/247-cows': '24/7 COWS',
+                    '/vods': 'Event Archive',
+                    '/sitemap.xml': 'https://kwip.fyi/live/247-cows',
+                }.items():
+                    start = monotonic()
+                    response = page.goto(origin + path, wait_until='domcontentloaded', timeout=9000)
+                    elapsed = monotonic() - start
+                    assert response.status == 200, (path, response.status)
+                    assert marker in response.text(), path
+                    if path == '/':
+                        expect(page.get_by_role('status').filter(
+                            has_text='Directory data is older than 5 minutes.',
+                        )).to_be_visible()
+                    print(f'Stalled upstream {path} -> HTTP 200 in {elapsed:.2f}s')
+                assert {'/primary/streams', '/mirror/streams'} <= set(requests), requests
+                timeouts = [
+                    json.loads(match) for match in re.findall(
+                        r'\{"event":"feed_timeout"[^{}]+\}', log_path.read_text(),
+                    )
+                ]
+                assert {(entry['endpoint'], entry['stage']) for entry in timeouts} >= {
+                    (kind, stage) for kind in ('streams', 'stream', 'vods') for stage in ('primary', 'mirror')
+                }, log_path.read_text()
+                print('Worker timeout log:', json.dumps(timeouts[0]))
+        finally:
+            release.set()
+            provider.shutdown()
+            thread.join()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
@@ -182,7 +241,8 @@ def main():
         with worker(Path(temp), 'source-health', args.output.resolve(), 'https://advertiser.example', False, player='/fixtures') as origin:
             browser = pw.chromium.launch()
             check_source_health(browser, origin)
-            browser.close()
+        check_stalled_feed(browser, Path(temp), args.output.resolve())
+        browser.close()
 
 
 if __name__ == '__main__':

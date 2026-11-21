@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 import { createSnapshotReader, type SnapshotBucket } from '../server/utils/snapshot.ts'
-import { getFeedGeneration, readFeedGeneration } from '../server/utils/feed.ts'
+import { FEED_DEADLINES_MS, fetchFeed, getFeedCacheIdentity, getFeedGeneration, readFeedGeneration } from '../server/utils/feed.ts'
 
 const commitId = '20261119T000000Z-01234567'
 const time = '2026-11-19T00:00:00.000Z'
@@ -341,4 +341,120 @@ test('sitemap omits a detail missing from the pinned manifest', async () => {
   } } } })
   assert.match(seed, /\/live\/sport\/example/)
   assert.doesNotMatch(seed, /\/live\/missing/)
+})
+
+const deadlineConfig = {
+  feedBase: 'https://primary.example', feedMirrorBase: 'https://mirror.example', canonicalHost: requestUrl.host,
+}
+const never = () => new Promise<never>(() => {})
+const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve))
+
+function trackTimeouts(context) {
+  context.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  return context.mock.method(console, 'warn', () => {})
+}
+
+test('a hung primary is aborted and logs once before the mirror and bundled snapshot', async (context) => {
+  const warnings = trackTimeouts(context)
+  const calls: string[] = []
+  let primarySignal: AbortSignal | undefined
+  const result = fetchFeed(async (url, options) => {
+    calls.push(url)
+    if (url.startsWith(deadlineConfig.feedBase)) {
+      primarySignal = options.signal
+      return never()
+    }
+    if (url.startsWith(deadlineConfig.feedMirrorBase)) throw new Error('Mirror unreachable')
+    return channels
+  }, deadlineConfig, requestUrl, endpoints[0])
+
+  context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+  assert.deepEqual(await result, { ...channels, fromCache: true })
+  assert.equal(primarySignal?.aborted, true)
+  assert.deepEqual(calls, [
+    'https://primary.example/streams', 'https://mirror.example/streams', 'https://kwip.fyi/feed-cache/streams.json',
+  ])
+  assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
+    event: 'feed_timeout', endpoint: 'streams', stage: 'primary', elapsedMs: FEED_DEADLINES_MS.upstream,
+  }])
+})
+
+test('fast network errors retain failover order without timeout logs', async (context) => {
+  const warnings = trackTimeouts(context)
+  const calls: string[] = []
+  const result = await fetchFeed(async (url, options) => {
+    calls.push(url)
+    if (calls.length < 3) {
+      options.onRequestError?.()
+      throw new Error('Network failure')
+    }
+    return channels
+  }, deadlineConfig, requestUrl, endpoints[0])
+  assert.deepEqual(result, { ...channels, fromCache: true })
+  assert.deepEqual(calls, [
+    'https://primary.example/streams', 'https://mirror.example/streams', 'https://kwip.fyi/feed-cache/streams.json',
+  ])
+  context.mock.timers.runAll()
+  assert.equal(warnings.mock.callCount(), 0)
+})
+
+test('the mirror and bundled assets get their own budgets after a primary timeout', async (context) => {
+  const warnings = trackTimeouts(context)
+  const signals: AbortSignal[] = []
+  const result = fetchFeed(async (_url, options) => {
+    signals.push(options.signal)
+    return never()
+  }, deadlineConfig, requestUrl, endpoints[0], { async fetch() { return never() } })
+  context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+  await nextTurn()
+  assert.equal(signals[1].aborted, false)
+  context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+  await nextTurn()
+  assert.equal(signals[1].aborted, true)
+  assert.equal(warnings.mock.callCount(), 2)
+  context.mock.timers.tick(FEED_DEADLINES_MS.seed)
+  await assert.rejects(result, { name: 'FeedTimeoutError', message: 'Feed deadline exceeded at seed' })
+  assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0]).stage), ['primary', 'mirror', 'seed'])
+})
+
+test('a stalled R2 identity is shared by cache lookup and SSR, which renders the seed', async (context) => {
+  const warnings = trackTimeouts(context)
+  let opens = 0
+  const event = { context: { cloudflare: { env: {
+    FEED_SNAPSHOTS: { get() { opens++; return never() } },
+    ASSETS: { async fetch() { return Response.json({ ...channels, timestamp: 42 }) } },
+  } } } }
+  const url = new URL('/', requestUrl)
+  const identity = getFeedCacheIdentity(event, 'FEED_SNAPSHOTS', deadlineConfig, url)
+  context.mock.timers.tick(FEED_DEADLINES_MS.identity)
+  assert.equal(await identity, 'seed')
+  const generation = await getFeedGeneration(event, 'FEED_SNAPSHOTS', unreachable, deadlineConfig, url)
+  assert.equal(generation.cacheIdentity, 'seed')
+  assert.equal(generation.get(endpoints[0])?.timestamp, 42)
+  assert.equal(generation.get(endpoints[0])?.fromSnapshot, true)
+  assert.equal(opens, 1)
+  assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
+    event: 'feed_timeout', endpoint: 'streams', stage: 'identity', elapsedMs: FEED_DEADLINES_MS.identity,
+  }])
+})
+
+test('stalled R2 ranges fall through to the seed without caching it under the R2 identity', async (context) => {
+  const warnings = trackTimeouts(context)
+  const { bucket } = fixture()
+  const result = readFeedGeneration({
+    get(key, options) { return options ? never() : bucket.get(key) },
+  }, unreachable, requestUrl, requestUrl.host, [...endpoints], {
+    async fetch(request) {
+      return Response.json(request.url.endsWith('/streams.json') ? { ...channels, timestamp: 42 } : detail)
+    },
+  })
+  await nextTurn()
+  context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
+  const generation = await result
+  assert.equal(generation.cacheIdentity, undefined)
+  assert.equal(generation.get(endpoints[0])?.timestamp, 42)
+  assert.equal(generation.get(endpoints[1])?.fromCache, true)
+  assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
+    event: 'feed_timeout', endpoint: 'stream', stage: 'snapshot', elapsedMs: FEED_DEADLINES_MS.snapshot,
+  }])
 })

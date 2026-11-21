@@ -96,31 +96,80 @@ function replaceHostTokens<T>(value: T, host: string): T {
   return value
 }
 
+// Keep sequential attempts well inside the edge timeout, with time reserved
+// for seed reads and SSR after the upstream or R2 budgets are exhausted.
+export const FEED_DEADLINES_MS = {
+  upstream: 1_500,
+  identity: 300,
+  snapshot: 1_000,
+  seed: 500,
+} as const
+
+type FeedStage = 'primary' | 'mirror' | 'identity' | 'snapshot' | 'seed'
+
+class FeedTimeoutError extends Error {
+  constructor(stage: FeedStage) {
+    super(`Feed deadline exceeded at ${stage}`)
+    this.name = 'FeedTimeoutError'
+  }
+}
+
+async function withinFeedDeadline<T>(
+  endpoint: FeedEndpoint['kind'],
+  stage: FeedStage,
+  duration: number,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const start = Date.now()
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new FeedTimeoutError(stage)
+      console.warn(JSON.stringify({ event: 'feed_timeout', endpoint, stage, elapsedMs: Date.now() - start }))
+      reject(error)
+      controller.abort(error)
+    }, duration)
+  })
+  try {
+    // The race also bounds clients and R2 reads that cannot honor the signal.
+    return await Promise.race([deadline, run(controller.signal)])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function fetchFromBase<T extends { success: boolean }>(
   fetcher: typeof $fetch,
   url: string,
   requestUrl: URL,
   host: string,
+  endpoint: FeedEndpoint['kind'],
+  stage: 'primary' | 'mirror' | 'seed',
   assets?: FeedAssets,
   onRequestError?: () => void,
 ): Promise<T> {
-  let payload: unknown
-  if (assets && URL.canParse(url) && new URL(url).origin === requestUrl.origin) {
-    const request = new Request(url)
-    let response: Response
-    try {
-      response = await assets.fetch(request)
-    } catch (error) {
-      onRequestError?.()
-      throw error
+  const duration = stage === 'seed' ? FEED_DEADLINES_MS.seed : FEED_DEADLINES_MS.upstream
+  const payload = await withinFeedDeadline(endpoint, stage, duration, async (signal) => {
+    let payload: unknown
+    if (assets && URL.canParse(url) && new URL(url).origin === requestUrl.origin) {
+      const request = new Request(url, { signal })
+      let response: Response
+      try {
+        response = await assets.fetch(request)
+      } catch (error) {
+        onRequestError?.()
+        throw error
+      }
+      if (!response.ok) {
+        throw new FeedResponseError(`Feed request failed with HTTP ${response.status}`)
+      }
+      payload = await response.json()
+    } else {
+      payload = await fetcher(url, { responseType: 'json', retry: 0, signal, onRequestError })
     }
-    if (!response.ok) {
-      throw new FeedResponseError(`Feed request failed with HTTP ${response.status}`)
-    }
-    payload = await response.json()
-  } else {
-    payload = await fetcher(url, { responseType: 'json', retry: 0, onRequestError })
-  }
+    return payload
+  })
 
   if (!payload || typeof payload !== 'object' || !('success' in payload) || payload.success !== true) {
     const message =
@@ -140,7 +189,7 @@ export function fetchBrowserFeed<T extends { success: boolean }>(
   endpoint: FeedEndpoint,
 ): Promise<T> {
   const url = resolveEndpointUrl(config.feedBase, requestUrl, endpoint)
-  return fetchFromBase<T>(fetcher, url, requestUrl, requestUrl.host || config.canonicalHost)
+  return fetchFromBase<T>(fetcher, url, requestUrl, requestUrl.host || config.canonicalHost, endpoint.kind, 'primary')
 }
 
 export async function fetchFeedSnapshot<T extends { success: boolean }>(
@@ -152,7 +201,7 @@ export async function fetchFeedSnapshot<T extends { success: boolean }>(
   onRequestError?: () => void,
 ): Promise<T & FeedProvenance> {
   const url = resolveEndpointUrl('/feed-cache', requestUrl, endpoint)
-  const cached = await fetchFromBase<T>(fetcher, `${url}.json`, requestUrl, host, assets, onRequestError)
+  const cached = await fetchFromBase<T>(fetcher, `${url}.json`, requestUrl, host, endpoint.kind, 'seed', assets, onRequestError)
   return { ...cached, fromCache: true }
 }
 
@@ -169,14 +218,14 @@ export async function fetchFeed<T extends { success: boolean }>(
   const mirrorUrl = config.feedMirrorBase ? resolveUrl(config.feedMirrorBase) : null
   let networkFailure = false
   try {
-    return await fetchFromBase<T>(fetcher, primaryUrl, requestUrl, host, assets, () => {
+    return await fetchFromBase<T>(fetcher, primaryUrl, requestUrl, host, endpoint.kind, 'primary', assets, () => {
       networkFailure = true
     })
   } catch (err) {
     let upstreamError = err
-    if (networkFailure && mirrorUrl && mirrorUrl !== primaryUrl) {
+    if ((networkFailure || err instanceof FeedTimeoutError) && mirrorUrl && mirrorUrl !== primaryUrl) {
       try {
-        return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, assets)
+        return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, endpoint.kind, 'mirror', assets)
       } catch (error) {
         upstreamError = error
       }
@@ -191,7 +240,7 @@ export async function fetchFeed<T extends { success: boolean }>(
       })
     } catch (cacheError) {
       const cacheMissing = cacheError instanceof Error && 'statusCode' in cacheError && cacheError.statusCode === 404
-      if (!assets && (cacheMissing || cacheUnreachable)) throw upstreamError
+      if (!assets && (cacheMissing || cacheUnreachable || cacheError instanceof FeedTimeoutError)) throw upstreamError
       throw cacheError
     }
   }
@@ -216,6 +265,8 @@ function pageRequirements(requestUrl: URL): FeedEndpoint[] {
     if (route === 'live') {
       const uriName = decodeURIComponent(path.slice('/live/'.length))
       if (validFeedPath('streams', uriName)) endpoints.push({ kind: 'stream', uriName })
+    } else if (route === 'sitemap.xml') {
+      endpoints.push({ kind: 'vods' })
     } else if (route === 'vods') {
       endpoints.push({ kind: 'vods' })
       const slug = decodeURIComponent(path.slice('/vods/'.length))
@@ -313,6 +364,15 @@ function listsReplay(payload: SnapshotPayload | undefined, path: string): boolea
 
 type SnapshotPayload = Record<string, unknown> & { success: true } & FeedProvenance
 
+function createRequestSnapshotReader(bucket: SnapshotBucket, endpoint: FeedEndpoint['kind']) {
+  const reader = createSnapshotReader(bucket)
+  let identity: ReturnType<typeof reader.open> | undefined
+  return {
+    open: () => identity ??= withinFeedDeadline(endpoint, 'identity', FEED_DEADLINES_MS.identity, reader.open),
+    read: reader.read,
+  }
+}
+
 export async function readFeedGeneration(
   bucket: SnapshotBucket,
   fetcher: typeof $fetch,
@@ -322,7 +382,7 @@ export async function readFeedGeneration(
   assets?: FeedAssets,
   seedDetails: readonly string[] = [],
   now = Math.floor(Date.now() / 1000),
-  reader = createSnapshotReader(bucket),
+  reader = createRequestSnapshotReader(bucket, endpoints.at(-1)?.kind ?? 'streams'),
 ) {
   const paths = endpoints.map(snapshotPath)
   const streamPath = paths.find(path => path.startsWith('streams/'))
@@ -331,31 +391,33 @@ export async function readFeedGeneration(
   let hasDetail: (path: string) => boolean = () => false
   let identity: string | undefined
   try {
-    identity = (await reader.open()).commitId
-  } catch {
     identity = 'seed'
-  }
-  try {
-    const snapshot = await reader.read(paths)
-    for (const [path, { payload, hasHostToken }] of snapshot.payloads) {
-      const resolved = hasHostToken ? replaceHostTokens(payload, host) : payload
-      const slash = path.indexOf('/')
-      const normalized = slash !== -1
-        ? { ...resolved, data: { ...resolved.data as object, uri_name: path.slice(slash + 1) } }
-        : resolved
-      payloads.set(path, { ...normalized, fromCache: true, fromSnapshot: true })
-    }
-    window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined
-    const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
-    if (streamPath && replayPath && snapshot.has(replayPath)) {
-      const vods = (await reader.read(['vods'])).payloads.get('vods')?.payload
-      if (listsReplay(vods, replayPath)) payloads.get(streamPath)!.hasSnapshotReplay = true
-    }
-    hasDetail = snapshot.has
+    identity = (await reader.open()).commitId
+    await withinFeedDeadline(endpoints.at(-1)?.kind ?? 'streams', 'snapshot', FEED_DEADLINES_MS.snapshot, async (signal) => {
+      const snapshot = await reader.read(paths)
+      signal.throwIfAborted()
+      for (const [path, { payload, hasHostToken }] of snapshot.payloads) {
+        const resolved = hasHostToken ? replaceHostTokens(payload, host) : payload
+        const slash = path.indexOf('/')
+        const normalized = slash !== -1
+          ? { ...resolved, data: { ...resolved.data as object, uri_name: path.slice(slash + 1) } }
+          : resolved
+        payloads.set(path, { ...normalized, fromCache: true, fromSnapshot: true })
+      }
+      window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined
+      const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
+      if (streamPath && replayPath && snapshot.has(replayPath)) {
+        const vods = (await reader.read(['vods'])).payloads.get('vods')?.payload
+        signal.throwIfAborted()
+        if (listsReplay(vods, replayPath)) payloads.get(streamPath)!.hasSnapshotReplay = true
+      }
+      hasDetail = snapshot.has
+    })
   } catch {
     // A failed payload read can recover while this manifest remains current.
     if (identity !== 'seed') identity = undefined
     payloads.clear()
+    window = undefined
     // Wait for the complete seed batch before making any payload visible to SSR.
     try {
       const seed = await Promise.all(endpoints.map(endpoint =>
@@ -399,21 +461,21 @@ const requestReader = Symbol.for('kwip.snapshotReader')
 
 type FeedContext = H3Event['context'] & {
   [requestGeneration]?: ReturnType<typeof readFeedGeneration>
-  [requestReader]?: { bucket: SnapshotBucket; reader: ReturnType<typeof createSnapshotReader> }
+  [requestReader]?: { bucket: SnapshotBucket; reader: ReturnType<typeof createRequestSnapshotReader> }
 }
 
-function getRequestReader(event: H3Event, binding: string, config: FeedConfig) {
+function getRequestReader(event: H3Event, binding: string, config: FeedConfig, requestUrl: URL) {
   if (!isExternalFeed(config.feedBase)) return
   const context: FeedContext = event.context
   if (context[requestReader]) return context[requestReader]
   const candidate = getCloudflareEnv(event)?.[binding] as Partial<SnapshotBucket> | undefined
   if (typeof candidate?.get !== 'function') return
   const bucket = candidate as SnapshotBucket
-  return context[requestReader] = { bucket, reader: createSnapshotReader(bucket) }
+  return context[requestReader] = { bucket, reader: createRequestSnapshotReader(bucket, pageRequirements(requestUrl).at(-1)!.kind) }
 }
 
-export async function getFeedCacheIdentity(event: H3Event, binding: string, config: FeedConfig) {
-  const pinned = getRequestReader(event, binding, config)
+export async function getFeedCacheIdentity(event: H3Event, binding: string, config: FeedConfig, requestUrl: URL) {
+  const pinned = getRequestReader(event, binding, config, requestUrl)
   if (!pinned) return
   try {
     return (await pinned.reader.open()).commitId
@@ -438,7 +500,7 @@ export function getFeedGeneration(
   now?: number,
 ) {
   if (!event) return
-  const pinned = getRequestReader(event, binding, config)
+  const pinned = getRequestReader(event, binding, config, requestUrl)
   if (!pinned) return
 
   const context: FeedContext = event.context
