@@ -61,7 +61,11 @@ export async function lookupEdgePage(event: H3Event, candidate: ReturnType<typeo
     })
     logPageBoundary(event, 'edge_cache_match', { found: !!cached })
     // The absolute deadline also excludes entries written before the current TTL rules.
-    if (cached && isFresh(cached)) return edgeHit(cached)
+    if (cached && isFresh(cached) && !page?.renderFinished) {
+      // The total deadline can reject this result even before either timer callback runs.
+      if (page && endpoint === 'page') page.cachedFallback = cached
+      return edgeHit(cached)
+    }
     if (cached?.body) event.waitUntil(cached.body.cancel().catch(() => {}))
   } catch {
     logPageBoundary(event, 'edge_cache_match', { failed: true })

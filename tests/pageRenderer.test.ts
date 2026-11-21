@@ -62,7 +62,10 @@ const manifest = {
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 
-function setup(context: TestContext, { lateCache = false } = {}) {
+function setup(
+  context: TestContext,
+  { lateCache = false, pendingMatch }: { lateCache?: boolean; pendingMatch?: Promise<Response> } = {},
+) {
   context.mock.timers.enable({ apis: ['setTimeout'] })
   let now = Date.parse(stamp)
   context.mock.method(Date, 'now', () => now)
@@ -78,6 +81,7 @@ function setup(context: TestContext, { lateCache = false } = {}) {
     configurable: true,
     value: { default: {
       async match(key: Request) {
+        if (pendingMatch) return pendingMatch
         if (lateCache) {
           await new Promise(resolve => setTimeout(resolve, 450))
           return new Response('late cache', { headers: { 'content-type': 'text/html' } })
@@ -209,4 +213,26 @@ test('Nuxt payload requests bypass page logging', async context => {
     assert.equal(body, 'payload')
   }
   assert.equal(logs.mock.callCount(), 0)
+})
+
+
+test('a fresh cache hit wins after eight seconds while both timeout callbacks are pending', async context => {
+  let resolveMatch!: (response: Response) => void
+  const pendingMatch = new Promise<Response>(resolve => { resolveMatch = resolve })
+  const { run, moveClock, logs, put } = setup(context, { pendingMatch })
+  const pending = run('/vods', () => assert.fail('cache hit reached SSR'))
+  await tick()
+  moveClock(8_100)
+  resolveMatch(new Response('fresh cached html', { headers: { 'content-type': 'text/html' } }))
+
+  const { body } = await pending
+  assert.ok(body instanceof Response)
+  assert.equal(body.status, 200)
+  assert.equal(body.headers.get('x-kwip-cache'), 'hit')
+  assert.equal(await body.text(), 'fresh cached html')
+  assert.ok(logs.mock.calls.some(({ arguments: [line] }) => {
+    const log = JSON.parse(String(line))
+    return log.event === 'page_render_timeout' && log.fallback === 'cache' && log.elapsedMs === 8_100
+  }))
+  assert.equal(put.mock.callCount(), 0)
 })

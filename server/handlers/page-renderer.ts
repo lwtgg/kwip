@@ -27,13 +27,14 @@ export default defineEventHandler(async event => {
   const request = getPageRequest(event) ?? startPageRequest(event, url.pathname)
   const canonical = canonicalOrigin(event) + request.path
   let seedPath: string | undefined
+  let cacheHit: Response | undefined
   try {
-    return await withinPageRender(
+    const response = await withinPageRender(
       request.start,
       FEED_DEADLINES_MS.seed + 50,
       async () => {
-        const cached = await lookupEdgePage(event, request.candidate)
-        if (cached || request.cancelled) return cached
+        cacheHit = await lookupEdgePage(event, request.candidate)
+        if (cacheHit || request.cancelled) return cacheHit
         return render(event)
       },
       async () => {
@@ -77,6 +78,9 @@ export default defineEventHandler(async event => {
         })
       },
     )
+    // An accepted hit owns the cached body. The timeout path takes it in finishEdgeLookup.
+    if (cacheHit && response === cacheHit) delete request.cachedFallback
+    return response
   } finally {
     finishEdgeLookup(event, false)
   }
