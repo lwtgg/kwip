@@ -1,3 +1,4 @@
+import { findSupplement, type StrmfreeStream } from './supplementMatch.ts'
 import type { FeedStreamDetail, FeedStreamSource } from '../composables/useFeed'
 
 export interface SupplementSource extends FeedStreamSource {
@@ -7,25 +8,6 @@ export interface SupplementSource extends FeedStreamSource {
   live: boolean | undefined
 }
 
-interface StrmfreeStream {
-  name: string
-  category: string
-  match_timestamp: number
-  stream_key?: string
-  iframe?: string
-  additional_sources?: { url: string }[]
-}
-
-const categories = new Map([
-  ['basketball', 'basketball'],
-  ['football', 'american-football'],
-  ['soccer', 'football'],
-  ['hockey', 'hockey'],
-  ['tennis', 'tennis'],
-  ['cricket', 'cricket'],
-  ['racing', 'motorsport'],
-  ['combat', 'boxing'],
-])
 const hosts = ['strmfree.st', 'streamfree.top', 'strmfree.pk']
 const qualities = ['4K', 'FHD', 'HD', 'SD']
 const variantQualities = new Map([
@@ -37,16 +19,6 @@ export function sourceQualityBand(tag: unknown) {
   if (typeof tag !== 'string') return
   const label = /^(4k|uhd|fhd|hd|sd|\d{3,4}p)\b/i.exec(tag.trim())?.[1]?.toLowerCase()
   if (label) return variantQualities.get(label) ?? (label === 'uhd' ? '4K' : label.toUpperCase())
-}
-
-function teams(name: string): string[] {
-  return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
-    .split(/(?<![\p{L}\p{N}])(?:vs|v|at)(?![\p{L}\p{N}])/u)
-    .map(team => team.trim().split(/\s+/)
-      .map(token => token.replace(/[^\p{L}\p{N}]/gu, ''))
-      .filter(token => token && !/^(?:fc|afc|cf|sc)$/.test(token))
-      .join(' '))
-    .sort()
 }
 
 export function isSupplementHost(host: string): boolean {
@@ -81,25 +53,6 @@ export function isCachedSupplement(value: unknown, now: number): value is {
     )
 }
 
-function findSupplement(
-  event: Pick<FeedStreamDetail, 'name' | 'starts_at'>,
-  categorySlug: string,
-  payload: { streams: StrmfreeStream[] },
-): StrmfreeStream | undefined {
-  const pair = teams(event.name)
-  if (pair.length !== 2 || !pair[0] || !pair[1]) return
-
-  const candidates = payload.streams.filter((stream) => {
-    if (!(Math.abs(stream.match_timestamp - event.starts_at) <= 3 * 3600)) return false
-    const other = teams(stream.name)
-    return other.length === 2 && other[0] === pair[0] && other[1] === pair[1]
-  })
-  const tied = candidates.length > 1
-    ? candidates.filter(stream => categories.get(stream.category) === categorySlug)
-    : candidates
-  return tied.length === 1 ? tied[0] : undefined
-}
-
 function embedVariant(url: string, streamKey?: string) {
   const path = url.split(/[?#]/, 1)[0] ?? ''
   const id = path.replace(/\/+$/, '').split('/').pop() ?? ''
@@ -109,8 +62,8 @@ function embedVariant(url: string, streamKey?: string) {
   return { id, resolution }
 }
 
-function supplementSources(match: StrmfreeStream): SupplementSource[] {
-  const sources = [
+export function supplementSources(match: StrmfreeStream, useProviderQuality = false): SupplementSource[] {
+  const sources: NonNullable<StrmfreeStream['additional_sources']> = [
     ...(match.additional_sources ?? []),
     ...(match.iframe ? [{ url: match.iframe }] : []),
   ]
@@ -122,7 +75,8 @@ function supplementSources(match: StrmfreeStream): SupplementSource[] {
   return sources.filter(source => allowedUrl(source.url))
     .map(source => {
       const { resolution } = embedVariant(source.url, match.stream_key)
-      const quality = variantQualities.get(resolution ?? '')
+      const declared = useProviderQuality ? sourceQualityBand(source.quality) : undefined
+      const quality = declared && qualities.includes(declared) ? declared : variantQualities.get(resolution ?? '')
       return { ...source, quality }
     })
     .sort((a, b) => rank(a.quality) - rank(b.quality))
@@ -163,21 +117,24 @@ export async function loadSupplementSources(
     const response = await fetchStatus(match.stream_key)
     if (response.ok) {
       const payload = await response.json()
-      if (Array.isArray(payload?.sources)) {
-        const liveVariants = new Set<string>()
-        for (const entry of payload.sources) {
-          if (entry?.live !== true || typeof entry.url !== 'string') continue
-          const { id } = embedVariant(entry.url)
-          if (id) liveVariants.add(id)
-        }
-        return sources.map(source => ({
-          ...source,
-          live: liveVariants.has(embedVariant(source.data).id),
-        }))
-      }
+      return applySupplementStatus(sources, payload)
     }
   } catch {
     // Keep the matched sources selectable if the status request fails.
   }
   return sources
+}
+
+export function applySupplementStatus(sources: SupplementSource[], payload: { sources?: unknown } | undefined) {
+  if (!Array.isArray(payload?.sources)) return sources
+  const liveVariants = new Set<string>()
+  for (const entry of payload.sources) {
+    if (entry?.live !== true || typeof entry.url !== 'string') continue
+    const { id } = embedVariant(entry.url)
+    if (id) liveVariants.add(id)
+  }
+  return sources.map(source => ({
+    ...source,
+    live: liveVariants.has(embedVariant(source.data).id),
+  }))
 }

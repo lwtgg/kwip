@@ -31,7 +31,7 @@ export function nearbyEvent(item, now = Date.now()) {
   return Number(item?.always_live) !== 1 && start > 0 && start >= now - 30 * 60_000 && start <= now + 3 * 3600_000
 }
 
-function* sourceUrls(item) {
+export function* sourceUrls(item) {
   const substreams = Array.isArray(item.substreams) ? item.substreams : []
   for (const stream of [item, ...substreams]) {
     if (stream?.iframe) yield stream.iframe
@@ -41,6 +41,8 @@ function* sourceUrls(item) {
   }
 }
 
+export const sourceProbeCap = 40
+
 export function candidates(items, now = Date.now()) {
   const unique = new Map()
   for (const item of items) {
@@ -48,7 +50,7 @@ export function candidates(items, now = Date.now()) {
     for (const raw of sourceUrls(item)) {
       const entry = registered(raw)
       if (entry && !unique.has(sourceKey(raw))) unique.set(sourceKey(raw), entry)
-      if (unique.size === 40) return unique
+      if (unique.size === sourceProbeCap) return unique
     }
   }
   return unique
