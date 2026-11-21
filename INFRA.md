@@ -32,6 +32,10 @@ Mirrors never diverge in content; see rule 13 in `DECISIONS.md` for the canonica
 
 Runtime vars go on a version, never in `wrangler.toml`. `wrangler versions upload --var KEY:VALUE` splits on every colon, so a JSON value (`NUXT_PUBLIC_BANNER_CREATIVES`) arrives under a mangled name: pass it as a `[vars]` entry in a throwaway config copy (absolute `main`/`assets` paths, since a config outside the repo resolves those against its own directory) and upload with `--config`. The flag is `NUXT_PUBLIC_ADS`. Both are live from `04f7be6d`.
 
+## Reading the logs
+
+Page requests log `page_start` and each cache boundary with the ray, so a request that stalls is matchable to its lines. 5xx counts in raw analytics are **not** user-facing errors: every 504 in the day of 2026-11-21 was `requestSource: edgeWorkerCacheAPI`, Cloudflare's internal record of a `caches.default.match()` miss (its `PUT 204` partner is `cache.put`). Filter `requestSource: eyeball` for real requests; `cache.match` misses appear there as `originResponseStatus: 0`, which is normal and not evidence of a dead origin.
+
 ## Not yet
 
 DDoS-Guard, image proxy, own player, R2.
