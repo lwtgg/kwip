@@ -160,6 +160,7 @@ function findRequestedSource(options: SourceOption[], query: unknown) {
   return entry ? options.find(source => source.key === sourceKey(entry.data)) : undefined
 }
 
+const renderNoscriptPlayer = import.meta.server
 const initialFeedSource = computed(() =>
   findRequestedSource(sources.value, route.query.source)
     ?? sources.value.find(source => source.key === defaultSourceKey.value),
@@ -847,13 +848,22 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         >
           <PlayerFrame
             :key="`${retryGeneration}:${currentSource.key}`"
-            :src="currentSource.url"
+            :src="mounted && !rememberedFailures.includes(currentSource.key) ? currentSource.url : undefined"
             :poster="detail.poster"
-            :active="mounted && !rememberedFailures.includes(currentSource.key)"
             :title="`${detail.name} — ${currentSource.label}`"
             :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
             @error="handleFrameError"
           />
+          <noscript v-once data-allow-mismatch="children">
+            <iframe
+              v-if="renderNoscriptPlayer"
+              :src="currentSource.url"
+              :title="`${detail.name} — ${currentSource.label}`"
+              allow="autoplay; fullscreen; picture-in-picture"
+              allowfullscreen
+              class="aspect-video w-full rounded-[var(--radius)] border border-border bg-surface"
+            />
+          </noscript>
         </div>
 
         <div

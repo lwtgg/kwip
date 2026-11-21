@@ -3,6 +3,7 @@
     python tests/sourceHealth_browser.py .output
 """
 import argparse
+import re
 from pathlib import Path
 import tempfile
 from urllib.parse import quote, urlsplit
@@ -40,6 +41,9 @@ def check_source_health(browser, origin):
         response = page.goto(origin + EVENT, wait_until='domcontentloaded')
         assert response.ok
         html = response.text()
+        startup_html = re.sub(r'<noscript[^>]*>.*?</noscript>', '', html, flags=re.S)
+        frames = re.findall(r'<iframe\b[^>]*>', startup_html)
+        assert len(frames) == 1 and not re.search(r'\ssrc=', frames[0]), frames
         assert f'<iframe src="{origin}/fixtures/one"' in html
         assert '/fixtures/poster-1.jpg"' in html
         chips = page.get_by_role('group', name='Playback source')
@@ -92,10 +96,12 @@ def check_source_health(browser, origin):
         page.wait_for_function('history.state.automaticSource === null')
 
         # Revisit without the query written by failover to exercise default selection.
+        frame_requests.clear()
         page.goto(origin + EVENT, wait_until='networkidle')
         expect(failed).to_have_attribute('aria-pressed', 'false')
         expect(second).to_have_attribute('aria-pressed', 'true')
         expect(frame).to_have_attribute('src', second_url)
+        assert [url for url in frame_requests if url in (first_url, second_url)] == [second_url], frame_requests
         assert chips.get_by_role('button').evaluate_all('buttons => buttons.map(button => button.value)') == original_order
         previous_frame = frame.element_handle()
         failed.click()
@@ -157,10 +163,10 @@ def check_source_health(browser, origin):
         no_js.route('**/*', intercept)
         page = no_js.new_page()
         page.goto(origin + EVENT, wait_until='networkidle')
-        expect(page.locator('iframe')).to_have_attribute('src', first_url)
+        expect(page.locator('iframe:visible')).to_have_attribute('src', first_url)
         page.get_by_label('Change source').select_option(second_key)
         page.get_by_role('button', name='Change source').click()
-        expect(page.locator('iframe')).to_have_attribute('src', second_url)
+        expect(page.locator('iframe:visible')).to_have_attribute('src', second_url)
     print('Source failure persists across reload and revisit, clears on retry or explicit selection, and stays in its session')
 
 

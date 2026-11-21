@@ -1,16 +1,14 @@
 <script setup lang="ts">
 const props = withDefaults(
   defineProps<{
-    src: string
+    src?: string
     title: string
     poster?: string | null
-    active?: boolean
     sandbox?: string
     timeoutMs?: number
   }>(),
   {
     timeoutMs: 12_000,
-    active: true,
   },
 )
 
@@ -53,11 +51,7 @@ function startTimer() {
   clearTimer()
   settled = false
   loaded.value = false
-  if (!import.meta.client || !props.active) return
-  if (!props.src) {
-    failOnce()
-    return
-  }
+  if (!import.meta.client || !props.src) return
   if (frameHasDocument()) {
     succeedOnce()
     return
@@ -89,17 +83,17 @@ function frameHasDocument(allowLoading = false): boolean {
 }
 
 function handleLoad() {
-  if (props.active && frameHasDocument()) succeedOnce()
+  if (props.src && frameHasDocument()) succeedOnce()
 }
 
 function handleError() {
-  if (!props.active) return
+  if (!props.src) return
   if (frameHasDocument(true)) succeedOnce()
   else failOnce()
 }
 
 function handleWindowMessage(event: MessageEvent) {
-  if (!props.active || settled || !frameRef.value?.contentWindow) return
+  if (!props.src || settled || !frameRef.value?.contentWindow) return
   if (event.source === frameRef.value.contentWindow) {
     succeedOnce()
   }
@@ -116,7 +110,7 @@ function syncFrameFocus() {
 }
 
 watch(
-  [() => props.src, () => props.sandbox, () => props.active],
+  [() => props.src, () => props.sandbox],
   () => {
     startTimer()
     syncFrameFocus()
@@ -144,7 +138,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface">
+  <div class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
+    :class="{ '[@media(scripting:none)]:hidden': !src }"
+  >
     <div
       v-if="!loaded"
       aria-live="polite"
@@ -169,7 +165,6 @@ onBeforeUnmount(() => {
     />
 
     <iframe
-      v-if="src"
       ref="frameRef"
       :key="JSON.stringify([src, sandbox])"
       :src="src"
