@@ -11,23 +11,33 @@ const publisher = fileURLToPath(new URL('../scripts/collect-publish-feed.mjs', i
 const mock = String.raw`
   import assert from 'node:assert/strict'
   import { registerHooks } from 'node:module'
+  const mode = process.env.PUBLISH_TEST_MODE
+  const nearbyPitSport = ['pitsport-nearby', 'pitsport-probe'].includes(mode)
+  const verifyPitSport = mode === 'pitsport-probe'
   const signer = 'data:text/javascript,export class AwsClient { sign(url, options) { return new Request(url, options) } }'
   registerHooks({
     resolve(specifier, context, nextResolve) {
       if (specifier === 'aws4fetch') return { url: signer, shortCircuit: true }
+      if (nearbyPitSport && context.parentURL?.endsWith('/publish-supplements.mjs') && specifier.endsWith('/strmfree.ts')) {
+        // Simulate the same URL becoming eligible through two providers.
+        const { url } = nextResolve(specifier, context)
+        const wrapper = "export * from " + JSON.stringify(url) + "; import { supplementSources as read } from " +
+          JSON.stringify(url) + "; export const supplementSources = (...args) => read(...args).map(source => " +
+          "source.data.endsWith('/shared-720p') ? { ...source, data: 'https://pitsport.st/programs/101/play?strmfree' } : source)"
+        return { url: 'data:text/javascript,' + encodeURIComponent(wrapper), shortCircuit: true }
+      }
       return nextResolve(specifier, context)
     },
   })
   const fixture = ${JSON.stringify(fixture)}
   const current = JSON.parse(process.env.PUBLISH_TEST_CURRENT)
-  const mode = process.env.PUBLISH_TEST_MODE
   const startsAt = Math.floor(Date.now() / 1000)
   const primary = { name: 'Primary', type: 'iframe', default: true, data: 'https://strmfree.st/embed/soccer/away-home?primary' }
   const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(4000) : '') + '720p'
   const disagreement = ['detail-baseline', 'detail-match', 'list-only-match'].includes(mode)
   const shortcut = disagreement || ['shortcut-baseline', 'unmatched', 'out-of-window', 'plausible'].includes(mode)
   const split = ['split', 'deadline'].includes(mode)
-  const start = shortcut ? 2_000_000_000 : startsAt + (split || ['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
+  const start = shortcut ? 2_000_000_000 : startsAt + (split || nearbyPitSport || ['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
   const splitAlternates = Array.from({ length: 26 }, (_, index) =>
     'https://strmfree.st/embed/soccer/supplement-' + index + '-720p')
   const deadline = new AbortController()
@@ -44,6 +54,12 @@ const mock = String.raw`
     Object.assign(fixture['streams/foo'].data, {
       name: 'Home FC vs. Away FC', starts_at: start, sources: [primary],
     })
+  }
+  const pitSportModes = ['pitsport', 'pitsport-down']
+  const pitSportAvailable = mode === 'pitsport' || nearbyPitSport
+  const pitSportUrl = id => 'https://pitsport.st/programs/' + id + '/play'
+  if (pitSportModes.includes(mode)) {
+    fixture['streams/foo'].data.sources.push({ ...primary, data: pitSportUrl(100) + '?original=1' })
   }
   const primarySources = [primary]
   if (split || mode === 'capacity') {
@@ -75,23 +91,54 @@ const mock = String.raw`
     }
     assert.equal(Object.values(fixture).reduce((sum, payload) => sum + Buffer.byteLength(wire(payload)), 0), target)
   }
+  if (verifyPitSport) {
+    const { probeHosts } = await import(new URL('./probe-source-health.mjs', new URL(process.argv[1], 'file:')))
+    probeHosts.set('pitsport.st', { path: /^\/programs\/\d+\/play$/, markers: [/player-ready/], concurrency: 2 })
+  }
   let listingRequests = 0
+  let pitSportRequests = 0
   let packed
   const probeRequests = []
-  const expectedProbes = mode === 'capacity' ? [...primarySources.map(source => source.data), acceptedAlternate]
+  const expectedProbes = nearbyPitSport ? [
+    primary.data, alternate, ...(verifyPitSport ? [pitSportUrl(100), pitSportUrl(101) + '?strmfree', pitSportUrl(102), pitSportUrl(103)] : []),
+  ] : mode === 'capacity' ? [...primarySources.map(source => source.data), acceptedAlternate]
     : split ? [...primarySources.slice(0, 40).map(source => source.data), ...splitAlternates.slice(0, 24)] : []
   let active = 0
   process.on('exit', () => {
     assert.equal(listingRequests, mode === 'fixture' ? 0 : 1)
+    assert.equal(pitSportRequests, mode === 'fixture' ? 0 : 1)
     if (mode === 'deadline') assert.deepEqual(probeRequests, [primary.data, splitAlternates[0]])
     else assert.deepEqual(probeRequests.sort(), expectedProbes.sort())
   })
   globalThis.fetch = async (request, options) => {
     if (typeof request === 'string') {
       const url = new URL(request)
+      if (url.href === 'https://pitsport.st/api/v1/home') {
+        pitSportRequests++
+        assert.equal(options.redirect, 'manual')
+        assert.ok(options.signal instanceof AbortSignal)
+        if (!pitSportAvailable) return new Response(null, { status: 503 })
+        const program = (programId, slug, subtitle, sessionStart = start) => ({
+          programId, slug, subtitle, sessionStart, footer: 'Serie A', hasVideo: true,
+          playHref: '/programs/' + programId + '/play',
+        })
+        const portuguese = program(102, 'away-vs-home-portuguese', '   ')
+        return Response.json({ ok: true, data: {
+          live: [
+            program(100, 'away-vs-home', 'HD | English'),
+            program(101, 'away-vs-home-hd-spanish', 'HD'),
+            portuguese,
+            { ...program(104, 'away-vs-home-fhd-invalid', 'FHD'), playHref: '/programs/999/play' },
+            program(106, 'away-vs-home-hd-italian', 'HD | Italian'),
+            program(107, 'away-vs-home-hd-italian', 'HD | Italian'),
+            program(105, 'away-vs-home', 'FHD', start + 10_801),
+          ],
+          upcoming: [portuguese, program(103, 'away-vs-home-hd-multiview', 'HD | ')],
+        } })
+      }
       if (url.href === 'https://strmfree.pk/api/v1/streams') {
         listingRequests++
-        if (!split && !['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible', 'detail-match', 'list-only-match'].includes(mode)) {
+        if (!split && !nearbyPitSport && !['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible', 'detail-match', 'list-only-match'].includes(mode)) {
           return new Response(null, { status: 503 })
         }
         const streams = [{
@@ -103,6 +150,7 @@ const mock = String.raw`
             { url: alternate, quality: 'HD' },
           ],
         }]
+        if (nearbyPitSport) streams[0].additional_sources.push({ url: 'https://streamfree.top/embed/soccer/shared-720p', quality: 'HD' })
         if (split) streams[0].additional_sources = splitAlternates.map(url => ({ url, quality: 'HD' }))
         if (mode === 'capacity') streams.push({
           name: 'West at East', category: 'soccer', match_timestamp: start,
@@ -129,6 +177,7 @@ const mock = String.raw`
         await new Promise(resolve => setImmediate(resolve))
         active--
       }
+      if (verifyPitSport && request.hostname === 'pitsport.st') return new Response('player-ready')
       return new Response(null, { status: 503 })
     }
     const path = new URL(request.url).pathname
@@ -151,7 +200,7 @@ const mock = String.raw`
       if (packed) assert.equal(manifest.payloadId, manifest.commitId)
       else assert.equal(manifest.payloadId, current.payloadKey.slice(10, -4))
       const paths = ['streams', 'vods', ...Object.keys(fixture).filter(path => path.includes('/')).sort()]
-      if (split || mode === 'capacity') paths.push('health.json')
+      if (split || nearbyPitSport || mode === 'capacity') paths.push('health.json')
       assert.deepEqual(manifest.endpoints.map(({ path }) => path), paths)
       if (packed) {
         let end = 0
@@ -163,6 +212,10 @@ const mock = String.raw`
             const health = JSON.parse(bytes)
             assert.deepEqual(Object.keys(health).sort(), mode === 'deadline' ? []
               : expectedProbes.map(url => url.split('?')[0].slice(8)).sort())
+            if (verifyPitSport) {
+              assert.equal(health['pitsport.st/programs/101/play'].embedOk, true)
+              assert.equal(health['pitsport.st/programs/102/play'].error, 'manifest-unverified')
+            }
             if (mode !== 'deadline') assert.equal(health['strmfree.st/embed/soccer/away-home'].error, 'embed-503')
           } else if (split && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
@@ -171,6 +224,22 @@ const mock = String.raw`
           } else if (mode === 'capacity' && path === 'streams/foo.json/bar') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.map(source => source.data), [acceptedAlternate])
+          } else if (pitSportAvailable && path === 'streams/foo') {
+            const { sources } = JSON.parse(bytes).data
+            const originals = fixture[path].data.sources.length
+            assert.deepEqual(sources.slice(0, originals), fixture[path].data.sources)
+            if (nearbyPitSport) {
+              assert.deepEqual(sources.slice(originals, originals + 2).map(source => [source.origin, source.data]), [
+                ['supplement', alternate], ['supplement', pitSportUrl(101) + '?strmfree'],
+              ])
+            }
+            assert.deepEqual(sources.slice(originals + (nearbyPitSport ? 2 : 0)), [
+              ...(nearbyPitSport ? [[100, 'English', 'HD']] : [[101, 'Spanish', 'HD']]),
+              [102, 'Portuguese', undefined], [103, 'Multiview', 'HD'],
+            ].map(([id, variant, sourceTag]) => ({
+              name: 'PitSport · ' + variant, ...(sourceTag ? { sourceTag } : {}), origin: 'pitsport', type: 'iframe',
+              default: false, data: pitSportUrl(id),
+            })))
           } else if (['duplicates', 'plausible', 'detail-match'].includes(mode) && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
             assert.equal(sources.length, 2)
@@ -302,4 +371,25 @@ test('publisher reports probe deadline drops by side and still publishes', async
     primary: { queued: 40, deadlineDropped: 40 },
     supplement: { queued: 24, capExcluded: 2, deadlineDropped: 24 },
   })
+})
+
+test('PitSport appends validated catalogue variants and a 503 leaves baseline bytes intact', async () => {
+  const [available, unavailable] = await Promise.all([
+    publish([], null, 'pitsport'),
+    publish([], null, 'pitsport-down'),
+  ])
+  assert.equal(available.outcome, 'published')
+  assert.equal(unavailable.outcome, 'published')
+  assert.equal(available.providerRequests, unavailable.providerRequests)
+})
+
+test('nearby PitSport dedupes against the admitted Strmfree payload and shares the probe gate', async () => {
+  const [unverified, verified] = await Promise.all([
+    publish([], null, 'pitsport-nearby'),
+    publish([], null, 'pitsport-probe'),
+  ])
+  assert.equal(unverified.outcome, 'published')
+  assert.equal(verified.outcome, 'published')
+  assert.equal(unverified.probes.supplement.queued, 1)
+  assert.equal(verified.probes.supplement.queued, 5)
 })

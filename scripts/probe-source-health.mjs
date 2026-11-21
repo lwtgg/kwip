@@ -16,6 +16,9 @@ export const probeHosts = new Map([
   }],
   ['strmfree.st', strmfree],
   ['streamfree.top', strmfree],
+  // Both player shells can return 200 while the nested player blocks playback.
+  ['pitsport.st', { unverified: true }],
+  ['embdlol.st', { unverified: true }],
 ])
 
 function registered(url) {

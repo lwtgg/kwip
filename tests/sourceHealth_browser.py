@@ -419,6 +419,24 @@ export default {
                 payloadKey=f'snapshots/{refreshed_commit}.bin', endpoints=refreshed_endpoints, size=len(refreshed_packed),
             )
 
+            pitsport_url = 'https://pitsport.st/programs/103172/play'
+            pitsport_key = pitsport_url.removeprefix('https://')
+            pitsport_detail = dict(detail, sources=[*detail['sources'], dict(
+                name='PitSport', data=pitsport_url, default=False, type='iframe', sourceTag='HD', origin='pitsport',
+            )])
+            pitsport_packed = b''
+            pitsport_endpoints = []
+            for path, item in [('streams', upstream), (f'streams/{uri}', {'success': True, 'data': pitsport_detail}),
+                               ('health.json', health)]:
+                payload = json.dumps(item).encode()
+                pitsport_endpoints.append(dict(path=path, offset=len(pitsport_packed), length=len(payload)))
+                pitsport_packed += payload
+            pitsport_commit = '20261119T003000Z-01234567'
+            pitsport_manifest = dict(
+                original_manifest, commitId=pitsport_commit, payloadId=pitsport_commit,
+                payloadKey=f'snapshots/{pitsport_commit}.bin', size=len(pitsport_packed), endpoints=pitsport_endpoints,
+            )
+
             with worker(directory, 'generation-refresh', wrapped, 'https://advertiser.example',
                         False, variables=lambda _: {
                             'TEST_PROVIDER': base,
@@ -426,8 +444,10 @@ export default {
                             'NUXT_PUBLIC_FEED_BASE': f'{base}/healthy',
                             'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
                         }) as origin:
-                for mode in ('unchanged', 'duplicate', 'new-id', 'new-generation', 'expiry', 'active-snapshot'):
-                    manifest, packed = original_manifest, original_packed
+                for mode in ('unchanged', 'duplicate', 'new-id', 'new-generation', 'expiry', 'active-snapshot', 'pitsport-only'):
+                    manifest, packed = ((pitsport_manifest, pitsport_packed) if mode == 'pitsport-only'
+                                        else (original_manifest, original_packed))
+                    expected_commit = refreshed_commit if mode == 'new-generation' else manifest['commitId']
                     updated = dict(detail, name='Refreshed upstream event')
                     if mode == 'new-id':
                         updated['id'] += 1
@@ -452,7 +472,7 @@ export default {
                                           headers={'Access-Control-Allow-Origin': '*'})
                         elif url == f'{base}/healthy/streams':
                             route.fulfill(json=upstream, headers={'Access-Control-Allow-Origin': '*'})
-                        elif url in (first_url, supplement_url):
+                        elif url in (first_url, supplement_url, pitsport_url):
                             route.fulfill(body='<h1>Playback fixture</h1>', content_type='text/html')
                         elif url == origin + '/api/source-health?current=1':
                             browser_requests.append('generation')
@@ -477,7 +497,8 @@ export default {
                                     type: 'iframe', default: false,
                                 }}],
                             }}))''')
-                        url = origin + EVENT + '?source=' + quote(supplement_key)
+                        key = pitsport_key if mode == 'pitsport-only' else supplement_key
+                        url = origin + EVENT + '?source=' + quote(key)
                         generation_url = origin + '/api/source-health?current=1'
                         checks_generation = mode not in ('new-id', 'active-snapshot')
                         if checks_generation:
@@ -485,12 +506,12 @@ export default {
                                 response = page.goto(url)
                             checked = generation_check.value
                             assert checked.headers['cache-control'] == 'no-store'
-                            assert checked.json() == {'commitId': refreshed_commit if mode == 'new-generation' else commit}
+                            assert checked.json() == {'commitId': expected_commit}
                         else:
                             response = page.goto(url, wait_until='domcontentloaded')
                         assert response.ok
                         picker = page.get_by_role('group', name='Playback source')
-                        chip = picker.locator(f'button[value="{supplement_key}"]')
+                        chip = picker.locator(f'button[value="{key}"]')
                         primary = picker.locator(f'button[value="{first_url.removeprefix("https://")}"]')
                         if mode == 'active-snapshot':
                             expect(chip).to_have_attribute('aria-pressed', 'true')
@@ -508,6 +529,13 @@ export default {
                             print('Active snapshot keeps its supplements after ten minutes')
                             continue
                         expect(page.get_by_role('heading', name=updated['name'], exact=True)).to_be_visible()
+                        if mode == 'pitsport-only':
+                            expect(chip).to_have_accessible_name('PitSport · HD, third provider')
+                            expect(chip).to_have_attribute('aria-pressed', 'true')
+                            expect(page.locator('iframe')).to_have_attribute('src', pitsport_url)
+                            assert sorted(browser_requests) == ['detail', 'generation', 'provider'], browser_requests
+                            print('PitSport-only carry-over preserves selection and the Strmfree fallback')
+                            continue
                         if mode not in ('new-id', 'new-generation'):
                             expect(chip).to_have_count(1)
                             expect(chip).to_contain_text('Strmfree · FHD')

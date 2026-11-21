@@ -69,12 +69,16 @@ export interface FeedStreamsResponse {
 export type FeedSourceKind = 'iframe' | 'link'
 
 export interface FeedStreamSource {
-  origin?: 'supplement'
+  origin?: 'supplement' | 'pitsport'
   live?: boolean
   name: string
   default: boolean
   type: FeedSourceKind
   data: string
+}
+
+export function isSupplementSource(source: Pick<FeedStreamSource, 'origin'>) {
+  return source.origin === 'supplement' || source.origin === 'pitsport'
 }
 
 export interface FeedStreamDetail extends FeedStreamItem {
@@ -311,7 +315,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       adopted = { uri, id, generation }
       publishedDetail.value = {
         generation,
-        sources: currentItem.sources?.filter(source => source.origin === 'supplement') ?? [],
+        sources: currentItem.sources?.filter(isSupplementSource) ?? [],
         healthGeneration: payload.healthGeneration,
       }
       return
@@ -371,9 +375,9 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     const publishedSources = publishedDetail.value?.sources ?? []
     const publishedByKey = new Map(publishedSources.map(source => [sourceKey(source.data), source]))
     const ordered = [
-      ...sources.filter(source => source.origin !== 'supplement'),
+      ...sources.filter(source => !isSupplementSource(source)),
       ...alternatives,
-      ...(feed.data.value?.detailGeneration ? [] : sources.filter(source => source.origin === 'supplement')),
+      ...(feed.data.value?.detailGeneration ? [] : sources.filter(isSupplementSource)),
     ]
     return {
       ...raw,
