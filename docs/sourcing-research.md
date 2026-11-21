@@ -36,8 +36,8 @@ contract that their own player polls it (`https://strmfree.pk/api`).
 the provider does the matching. Risk: a private domain can be revoked, so never let one provider be
 the only one.
 
-**b. Derive the embed URL from the event, and hit the host directly.** `embed.st` takes
-`/embed/admin/ppv-<slug>/<n>` with `n ∈ {1,3,5}`; a published scraper enumerates exactly that
+**b. Derive the embed URL from the event, and hit the host directly.** A published scraper used
+`/embed/admin/ppv-<slug>/<n>` with `n ∈ {1,3,5}` on `embed.st`, now settled in §3.
 (`https://pypi.org/project/live-stream-thief/`). `strmfree.st` takes
 `/embed/<category>/<slug><variant>` with variants `1080p`, `1080p2…5`, `720p…5` — all 20 variants
 are listed in the embed page's own token map. This is the cheapest mechanism and the only one that
@@ -90,14 +90,98 @@ tiebreak, and "backup" is implicit in position. No one exposes bitrate, and only
 |---|---|---|---|---|
 | `taifood-blog.asia` | `/embed/<league>/<date>/<slug>`, `/embed/<slug>` for 24/7 | no, path is derivable | yes (frames loaded) | **Carries 100% of ppv.st and was down from one network all session.** Single-host dependency. |
 | `strmfree.st` / `streamfree.top` | `/embed/<category>/<slug><variant>`, variant `""`/`1080p`/`1080p2…5`/`720p…5` | no | `x-frame-options: ALLOWALL` | Best of the set. Embed 200 in 0.3 s, token map exposes 20 variants, manifest 200, segments on `*.ttcdn-us.com`. Still 404s once the event ends. |
-| `thedaddy.li` | `/stream/stream-<id>.php`, aliased under `cast`/`watch`/`plus`/`casting`/`player` | yes, channel id from keyed API | **unverified** (curl resets; frames loaded once) | Documented for iframing, six folder aliases as built-in redundancy, per-partner domain, 24/7 emergency contact. Ads-heavy. |
-| `pitsport.st` | `/programs/<id>/play` | yes | no XFO/CSP on the player route | Own SvelteKit player, `api/v1/programs/<id>` is clean, no external embed host. Framable but not a source multiplier. |
-| `embed.st` | `/embed/admin/ppv-<slug>/<n>`, n ∈ {1,3,5} | no | **unverified** | Degraded today: NXDOMAIN at the local resolver, then 404 on the old paths. Do not lead with it. |
+| `thedaddy.li` | `/{stream,cast,watch,plus,casting,player}/stream-<id>.php` | Public IDs exist. Keyed feed awaits a key. | No framing restrictions in the sampled response headers. Embedded playback **unverified**. | 2026-11-21 · Public wrappers respond. Some aliases return blocked-access bodies. |
+| `pitsport.st` | `/programs/<id>/play` | Needs an ID source. The public `/api/v1/home` lists IDs. | No framing restrictions in the sampled player response headers. Embedded playback **unverified**. | 2026-11-21 · Source multiplier in the catalog. Four variants for one event shared one embed origin. |
+| `embed.st` | Historical `/embed/admin/ppv-<slug>/<n>` | — | No DNS resolution in the checks below. | 2026-11-21 · Dead at this hostname. Successor **unverified**. |
 | `ppv.st` (site) | `/live/<uri_name>` | no | **no** — SAMEORIGIN + `frame-ancestors 'self'` | Useful as a fallback *link*, never as a frame. |
-| `cdnlivetv.tv` | `api/v1/channels/player/?name=<channel>&code=<cc>&user=&plan=` | name + plan | **unverified** | 401 bare; needs the `user`/`plan` pair that circulates in IPTV playlists. |
+| `cdnlivetv.tv` | `/api/v1/channels/player/?name=<channel>&code=<cc>&user=<user>&plan=<plan>` | Needs an ID source for exact catalog names and codes. | Successful player response **unverified**. | 2026-11-21 · Public free pair works on the catalog. All three player requests returned `401`. |
 
-Rule that falls out of the table: only `taifood`, `strmfree` and `embed.st` are derivable from an
-event name alone. Everything else needs an id, which means an upstream list, which means a provider.
+### Host checks on 2026-11-21
+
+**`embed.st` settled as dead at the sampled hostname.** Local DNS and direct queries to
+Cloudflare `1.1.1.1` both returned `status: NXDOMAIN` and `ANSWER: 0`. Cloudflare DoH
+returned `HTTP/2 200`, `content-type: application/dns-json`, and `"Status":3`.
+Google DoH returned `HTTP/2 200`, `content-type: application/json; charset=UTF-8`, and
+`"Status":3`. Both DoH bodies identified the question as `"name":"embed.st.","type":1`
+and included the `st` SOA. These checks used one local network. An independent network
+path is **unverified**.
+
+- `https://ppv.st/` returned `HTTP/2 200`, `content-type: text/html`, and
+  `<link rel="preconnect" href="https://api.ppv.st">`. The linked API at
+  `https://api.ppv.st/api/streams` returned `HTTP/2 200`,
+  `content-type: application/json`, with 319 `iframe` fields on `taifood-blog.asia`,
+  including `"iframe":"https://taifood-blog.asia/embed/nfl-network"`. The mirror
+  `https://api.ppv.cx/api/streams` failed with `curl: (6) Could not resolve host: api.ppv.cx`.
+- The homepage's linked client bundle `/_app-1/DhnyEgIM.js` advertised
+  `https://discord.gg/mVmQWBRPbe`. The invite returned `HTTP/2 301` with
+  `location: https://discord.com/invite/mVmQWBRPbe`, then `HTTP/2 200` with
+  `content-type: text/html` and the description `Check out the Hub community on Discord`.
+  No successor was identified in the retrieved homepage, its linked scripts, the feed,
+  or the public invite. Discord channel content and a successor URL remain **unverified**.
+
+**`cdnlivetv.tv`.** The [provider docs](https://cdnlivetv.tv/) returned `HTTP/2 200`
+and `content-type: text/html; charset=UTF-8`. The public iframe example contains
+`user=cdnlivetv&plan=free`. The [public catalog](https://api.cdnlivetv.tv/api/v1/channels/?user=cdnlivetv&plan=free)
+returned `HTTP/2 200`, `content-type: application/json; charset=utf-8`, and
+`"total_channels":405`. It returned `"name":"Sky Sports Golf FHD UK","code":""` with
+the corresponding player URL and the same pair. That establishes account-free publication
+and catalog access on this date. Stability over time and reuse in public playlists are
+**unverified**.
+
+The kwip feed returned `"id":29059,"name":"Sky Sports Golf"`. Requests to
+`https://cdnlivetv.tv/api/v1/channels/player/` produced:
+
+| Query | Status | Header | Body |
+|---|---|---|---|
+| `name=Sky%20Sports%20Golf&code=&user=&plan=` | `HTTP/2 401` | `content-type: text/html; charset=utf-8` | `<html><body><h1>401 Unauthorized</h1></body></html>` |
+| `name=Sky%20Sports%20Golf&code=&user=cdnlivetv&plan=free` | `HTTP/2 401` | `content-type: text/html; charset=utf-8` | `<html><body><h1>401 Unauthorized</h1></body></html>` |
+| `name=Sky%20Sports%20Golf%20FHD%20UK&code=&user=cdnlivetv&plan=free` (exact catalog URL) | `HTTP/2 401` | `content-type: text/html; charset=utf-8` | `<html><body><h1>401 Unauthorized</h1></body></html>` |
+
+**`pitsport.st`.** The homepage returned `HTTP/1.1 200 OK`, `Content-Type: text/html`.
+Its linked client bundle calls `/home` under `https://pitsport.st/api/v1`.
+`/api/v1/home` returned `HTTP/1.1 200 OK`, `Content-Type: application/json; charset=UTF-8`,
+and listed `"programId":103180,"slug":"ufc-fight-night-prochazka-vs-stirling"`. Match against
+that upstream list. Derivation of PitSport IDs from kwip IDs or slugs is **unverified**.
+
+- `/api/v1/programs/103074` returned `HTTP/1.1 200 OK`,
+  `Content-Type: application/json; charset=UTF-8`, and `X-Frame-Options: DENY`.
+  The body included `"playHref":"/programs/103074/play"`, `"liveState":"ended"`,
+  and a video with `"origin":"https://embdlol.st","allowed":true`.
+- `/api/v1/programs/103180` listed four variants with labels `HD | English`,
+  `HD | Spanish`, `HD | Portuguese`, and `HD | Multiview`. All four detail responses
+  returned `HTTP/1.1 200 OK` and `Content-Type: application/json; charset=UTF-8`.
+  Their bodies paired program IDs `103180`, `103334`, `103335`, and `103336` with
+  `"embedId":102542`, `"embedId":102543`, `"embedId":102544`, and
+  `"embedId":102545`, respectively. Each contained `"origin":"https://embdlol.st"`.
+  This is a source multiplier at the catalog level. Playback and CDN independence are **unverified**.
+- Both `/programs/103074/play` and `/programs/103180/play` returned `HTTP/1.1 200 OK`,
+  `Content-Type: text/html` and `x-sveltekit-page: true`. Neither response contained
+  `X-Frame-Options` or `Content-Security-Policy`. The HTML includes
+  `<div id="app-splash"><div></div></div>`. The English variant's child embed also
+  returned `HTTP/1.1 200 OK`, `Content-Type: text/html`, with neither framing header. Its
+  body contains `<body data-sveltekit-preload-data="hover">`. A successful cross-origin browser frame and playback remain **unverified**.
+
+**`thedaddy.li`.** The public homepage and `/api.php` both returned `HTTP/2 200`
+and `content-type: text/html; charset=UTF-8`. The homepage contains
+`href="/stream/stream-46.php"`, and the docs publish `/stream/stream-302.php` in their
+iframe example. The documented channels endpoint without a key,
+`/daddyapi.php?endpoint=channels`, returned `HTTP/2 401`, `content-type: application/json`,
+and `{"error":"Unauthorized","message":"Missing API key","code":401}`. Waiting on a key for a
+structured provider feed.
+
+All six documented `stream-302.php` routes returned `HTTP/2 200` and
+`content-type: text/html; charset=UTF-8`. None included `X-Frame-Options` or
+`Content-Security-Policy`. The bodies differed:
+
+| Folder | Body excerpt |
+|---|---|
+| `stream`, `watch` | `<iframe src="https://dembed.st/premiumtv/daddy.php?id=302"` |
+| `cast` | `<iframe src="https://waterera.net/e/pq1gwzp9y0h03"` |
+| `plus` | `Access Blocked - Please use official site! : DaddyLive.pk` |
+| `casting`, `player` | `Direct access blocked, place iframe embed code on your website.` |
+
+Cross-origin rendering and playback are **unverified**, including whether the last three
+aliases behave differently inside a frame.
 
 ## 4. Reliability measurement
 
@@ -165,8 +249,8 @@ That is every field. No host, no quality, no bitrate, no id, no health. Four con
    viewers; auto-advance only on timeout or a failed `embedOk`. 1 day. Depends on 1 and 2.
 5. **Honest degradation** — when a host's probe is red, badge it in the picker as `degraded` instead
    of removing it; when the chain is exhausted, keep the retry block. 0.5 day.
-6. **`thedaddy.li` keyed API** — contact for a key, six folder aliases as the first real redundancy
-   against a single host dying. 1 day plus their reply time.
+6. **`thedaddy.li` keyed API** — waiting on a key. Verify embedded playback and aliases before
+   counting them as fallback sources. See §3 for the public routes.
 
 ## What not to bother with
 
@@ -174,7 +258,6 @@ That is every field. No host, no quality, no bitrate, no id, no health. Four con
   the embed page's cookie/token pair, and the segment host is third-party. The frame already solves it.
 - **A media proxy.** Nothing in §4 needs one; the segment CDN sends `access-control-allow-origin: *`.
 - **Scraping `streamed.pk`.** Dead, front page is a closure notice. Retarget anything that assumed it.
-- **Leading with `embed.st`.** Flaky DNS and 404s on the paths every scraper still hardcodes.
 - **Puppeteer/headless extraction of m3u8 in CI.** Manifest health can be had with two plain fetches;
   reserve a browser for the manual spot-check.
 - **User source submissions.** Unmoderated, and ppv.st's own request form is event-level anyway.
