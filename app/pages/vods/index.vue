@@ -104,7 +104,7 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-inset) sm:px-6">
     <div class="space-y-1">
       <nav aria-label="Breadcrumb" class="text-xs text-muted">
         <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>

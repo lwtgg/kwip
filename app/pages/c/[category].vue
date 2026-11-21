@@ -106,8 +106,8 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
-    <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+  <div class="mx-auto max-w-7xl space-y-(--page-inset) px-4 py-(--page-inset) sm:px-6">
+    <div class="flex flex-col justify-between gap-x-4 gap-y-[calc(var(--section-gap)/2)] sm:flex-row sm:items-center">
       <div class="space-y-1">
         <nav aria-label="Breadcrumb" class="text-xs text-muted">
           <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
@@ -170,7 +170,7 @@ useSeoMeta({
         "
       />
 
-      <div v-else class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div v-else class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">
         <StreamCard
           v-for="stream in filteredStreams"
           :key="stream.id"

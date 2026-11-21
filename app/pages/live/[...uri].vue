@@ -627,7 +627,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-inset) sm:px-6">
     <StateBlock
       v-if="isStale && detail"
       variant="stale"
@@ -636,7 +636,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     />
 
     <!-- Header rendered in every state so loading, error, and empty still expose the page h1 -->
-    <div class="space-y-4">
+    <div class="space-y-[calc(var(--section-gap)/2)]">
       <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
         <span>/</span>
@@ -651,7 +651,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         <span class="truncate text-fg">{{ pageHeading }}</span>
       </nav>
 
-      <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+      <div class="flex flex-col justify-between gap-x-4 gap-y-[calc(var(--section-gap)/2)] lg:flex-row lg:items-end">
         <div class="space-y-2">
           <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
             {{ pageHeading }}
@@ -917,7 +917,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       <AdSlot format="leaderboard" placement="event-banner" />
 
       <!-- Related streams in same category -->
-      <section class="space-y-3">
+      <section class="space-y-[calc(var(--page-inset)/2)]">
         <div class="flex items-baseline justify-between gap-3">
           <h2 class="text-lg font-semibold tracking-tight text-fg">
             Related in {{ detail.category_name }}
@@ -933,7 +933,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 
         <div
           v-if="relatedStreams.length > 0"
-          class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
+          class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4"
         >
           <StreamCard
             v-for="stream in relatedStreams"
