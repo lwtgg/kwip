@@ -10,6 +10,7 @@ import {
   fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
+import { sourceKey } from '../app/utils/sourceIdentity.ts'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
 // Collection starts after the publisher pins the manifest ETag.
@@ -102,7 +103,7 @@ async function fetchProvider(base, path, run, deadline, bytesRemaining) {
   return Buffer.concat(chunks, length)
 }
 
-async function collectFeed(base, directory, current, result, deadline) {
+async function collectFeed(base, directory, current, result, deadline, fixture) {
   const run = { result, nextRequestAt: 0 }
   const entries = []
   const hashes = {}
@@ -111,7 +112,7 @@ async function collectFeed(base, directory, current, result, deadline) {
   const eventTimes = new Map()
   const probeItems = []
   const matches = []
-  const supplementListing = fetchSupplementListing(deadline)
+  const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
   const now = Date.now()
 
   async function append(path, bytes) {
@@ -190,7 +191,7 @@ async function collectFeed(base, directory, current, result, deadline) {
         sources: item.sources,
         substreams: item.substreams,
       }
-      probeItems.push(probeItem)
+      if (!fixture) probeItems.push(probeItem)
       const match = typeof item.name === 'string' && matchPublishedSupplement(item, probeItem, listing)
       if (match) {
         const sources = publishedSupplementSources(item, match)
@@ -198,31 +199,52 @@ async function collectFeed(base, directory, current, result, deadline) {
       }
     }
   }
-  const supplementProbeItems = []
-  if (matches.length) {
-    const withStatus = await fetchSupplementStatuses(matches, now,
-      Math.min(performance.now() + 5_000, deadline - 40_000))
-    for (const match of matches) {
-      const { payload, entry, timing, hash } = match
-      const supplements = withStatus(match)
-      const sources = [...(payload.data.sources ?? []), ...supplements]
-      const bytes = json({ ...payload, data: { ...payload.data, sources } })
-      const delta = bytes.length - entry.endpoint.length
-      if (bytes.length > fileLimit || size + delta >= snapshotLimit) continue
-      entry.stored = bytes
-      entry.endpoint.length = bytes.length
-      size += delta
-      hash[1] = sha256(bytes)
-      supplementProbeItems.push({ starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements })
+  const withStatus = matches.length ? await fetchSupplementStatuses(matches, now,
+    Math.min(performance.now() + 5_000, deadline - 40_000)) : undefined
+  const proposed = matches.map(match => {
+    const { payload, entry } = match
+    const supplements = withStatus(match)
+    const sources = [...(payload.data.sources ?? []), ...supplements]
+    const bytes = json({ ...payload, data: { ...payload.data, sources } })
+    return { ...match, supplements, bytes, delta: bytes.length - entry.endpoint.length }
+  }).filter(({ bytes, delta }) => bytes.length <= fileLimit && size + delta < snapshotLimit)
+
+  // Keep primary probes in the same order even when their queue fills the cap.
+  const primaryProbes = candidates(probeItems, now)
+  const probes = proposed.length ? candidates([
+    ...probeItems,
+    ...proposed.map(({ timing, supplements }) => ({
+      starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements,
+    })),
+  ], now) : primaryProbes
+  // Keep the existing publication deadline and leave room to write the payload.
+  const health = probes.size
+    ? await collectSourceHealth(probes, Math.min(30_000, deadline - performance.now() - 10_000))
+    : {}
+  const healthEntries = Object.entries(health)
+  let healthKeys = new Set(primaryProbes.keys())
+  const healthBytes = keys => json(Object.fromEntries(healthEntries.filter(([key]) => keys.has(key))))
+  let reservedHealth = healthBytes(healthKeys)
+  let hasSupplements = false
+  for (const { supplements, bytes, delta, entry, hash } of proposed) {
+    const keys = new Set(healthKeys)
+    for (const source of supplements) {
+      const key = sourceKey(source.data)
+      if (probes.has(key)) keys.add(key)
     }
+    const nextHealth = healthBytes(keys)
+    if (size + delta + (keys.size ? nextHealth.length : 0) >= snapshotLimit) continue
+    entry.stored = bytes
+    entry.endpoint.length = bytes.length
+    size += delta
+    hash[1] = sha256(bytes)
+    healthKeys = keys
+    reservedHealth = nextHealth
+    hasSupplements = true
   }
   hashes.details = sha256(json(detailHashes))
-  // Keep primary probes in the same order even when their queue fills the cap.
-  const probes = candidates([...probeItems, ...supplementProbeItems], now)
-  if (probes.size) {
-    // Keep the existing publication deadline and leave room to write the payload.
-    const health = json(await collectSourceHealth(probes, Math.min(30_000, deadline - performance.now() - 10_000)))
-    if (size + health.length < snapshotLimit) await append('health.json', health)
+  if (healthKeys.size && size + reservedHealth.length < snapshotLimit) {
+    await append('health.json', reservedHealth)
   }
   const bytes = Buffer.alloc(size)
   let offset = 0
@@ -236,7 +258,7 @@ async function collectFeed(base, directory, current, result, deadline) {
   timeLeft(deadline, 'Collection deadline exceeded')
   return { snapshot: {
     bytes, size, endpoints: entries.map(({ endpoint }) => endpoint), hashes,
-    hasSupplements: supplementProbeItems.length > 0,
+    hasSupplements,
   } }
 }
 
@@ -407,7 +429,7 @@ async function persistProviderStatus(r2, stateObject, status, retryAfter, dryRun
   return patch.paused ? 'paused' : 'backoff'
 }
 
-async function collectSnapshot(current, result, deadline, dryRun) {
+function configuredFeedUrl() {
   try {
     loadEnvFile()
   } catch (error) {
@@ -417,10 +439,18 @@ async function collectSnapshot(current, result, deadline, dryRun) {
   if (!url || !['http:', 'https:'].includes(url.protocol) || url.search || url.hash) {
     throw new Error('Missing or invalid external feed URL')
   }
+  return url
+}
+
+function isFixtureBase(url) {
+  return /\/fixtures\/?$/.test(url.pathname)
+}
+
+async function collectSnapshot(current, result, deadline, dryRun, url = configuredFeedUrl()) {
   const directory = dryRun ? undefined : await mkdtemp(join(tmpdir(), 'kwip-publish-'))
   const started = performance.now()
   try {
-    return await collectFeed(url.href.replace(/\/+$/, ''), directory, current, result, deadline)
+    return await collectFeed(url.href.replace(/\/+$/, ''), directory, current, result, deadline, isFixtureBase(url))
   } finally {
     result.durations.collectionMs = Math.round(performance.now() - started)
     if (directory) await rm(directory, { recursive: true, force: true })
@@ -444,7 +474,9 @@ async function publish(result, deadline) {
   if (!buckets.includes(bucket)) throw new Error('Unknown snapshot bucket')
   if (providerStatus !== undefined && !['429', 'blocked'].includes(providerStatus)) throw new Error('Invalid provider status')
   if (retryAfter !== undefined && providerStatus !== '429') throw new Error('--retry-after requires --provider-status 429')
-  const config = await credentials(bucket, values['credentials-file'])
+  const dryRunFeed = dryRun && !providerStatus ? configuredFeedUrl() : undefined
+  const config = dryRunFeed && isFixtureBase(dryRunFeed)
+    ? undefined : await credentials(bucket, values['credentials-file'])
   if (!config && !dryRun) throw new Error(`Missing bucket-scoped credentials for ${bucket}`)
   const publicationDeadline = deadline - stateReserveMs
   const r2 = config && storage(bucket, config, result, publicationDeadline)
@@ -472,7 +504,7 @@ async function publish(result, deadline) {
   const currentPayloadId = current ? validateManifest(current) : undefined
   let collected
   try {
-    collected = await collectSnapshot(current, result, publicationDeadline, dryRun)
+    collected = await collectSnapshot(current, result, publicationDeadline, dryRun, dryRunFeed)
     timeLeft(publicationDeadline, 'Collection deadline exceeded')
   } catch (error) {
     if (error instanceof ProviderError) {

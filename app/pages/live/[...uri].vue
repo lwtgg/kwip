@@ -467,6 +467,10 @@ function handleFrameError() {
 }
 
 function handleReloadPlayer() {
+  if (hasPublishedSupplement.value && currentSource.value?.origin === 'supplement') {
+    retryGeneration.value += 1
+    return
+  }
   if (currentSource.value?.origin === 'supplement') {
     const key = defaultSourceKey.value
     requestedSourceKey.value = key
