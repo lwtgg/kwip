@@ -26,8 +26,7 @@ export function useFeedFreshness(
   onBeforeUnmount(() => clearInterval(clockTimer))
 
   const isStale = computed(() => {
-    const now = clientNow.value
-    if (now === null) return false
+    const now = nowSeconds.value
     if (acknowledgedAt.value !== null && now - acknowledgedAt.value < staleAfterSeconds) {
       return false
     }

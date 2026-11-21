@@ -15,8 +15,11 @@ const progress = computed(() => {
 
   const percentage = Math.min(100, Math.max(0, (now - startsAt) / (endsAt - startsAt) * 100))
   const label = windowLabel(props)
-  const aria = now >= startsAt && now < endsAt ? remainingLabel(endsAt, now) : label.aria
-  return { percentage, text: label.text, aria }
+  const live = now >= startsAt && now < endsAt
+  const aria = live ? remainingLabel(endsAt, now) : label.aria
+  const exactTime = new Date((live ? endsAt : startsAt) * 1000).toUTCString()
+  const timing = live ? 'Ends' : now < startsAt ? 'Starts' : 'Started'
+  return { percentage, text: label.text, aria: `${aria}. ${timing} ${exactTime}` }
 })
 </script>
 
@@ -28,15 +31,15 @@ const progress = computed(() => {
       aria-valuemax="100"
       :aria-valuenow="Math.round(progress.percentage)"
       :aria-label="progress.aria"
-      class="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2"
+      class="h-1 min-w-0 flex-1 overflow-hidden bg-surface-2"
       data-allow-mismatch="attribute"
     >
       <div
-        class="h-full rounded-full bg-live"
+        class="h-full bg-accent"
         :style="{ width: `${progress.percentage}%` }"
         data-allow-mismatch="style"
       />
     </div>
-    <span v-if="showLabel" aria-hidden="true" class="text-xs text-muted" data-allow-mismatch="text">{{ progress.text }}</span>
+    <span v-if="showLabel" aria-hidden="true" class="listing-numeric text-xs text-muted" data-allow-mismatch="text">{{ progress.text }}</span>
   </div>
 </template>

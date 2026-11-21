@@ -114,11 +114,11 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
-          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-full border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
+          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-listing border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
           :class="[
-            source.key === modelValue ? 'border-accent' : 'border-border hover:border-accent',
+            source.key === modelValue ? 'border-muted' : 'border-border hover:border-muted',
             chipStatus(source) ? 'bg-surface-2 text-muted'
-              : source.key === modelValue ? 'bg-accent-strong text-accent-strong-fg' : 'bg-surface-2 text-fg',
+              : source.key === modelValue ? 'bg-surface text-fg underline underline-offset-4' : 'bg-surface-2 text-fg',
           ]"
           @click="onChipClick($event, source.key)"
           @keydown="onChipKeydown($event, index)"
@@ -126,7 +126,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           <span class="min-w-0 wrap-anywhere" data-allow-mismatch="children">
             {{ source.label }}
             <span v-if="chipStatus(source)"> · {{ chipStatus(source) }}</span>
-            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs" :class="source.key === modelValue && !chipStatus(source) ? 'text-accent-strong-fg' : 'text-muted'">
+            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs text-muted no-underline">
               {{ source.host }}
             </span>
             <span v-if="source.host" :id="`${id}-host-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
@@ -158,7 +158,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           :id="id"
           name="source"
           :disabled="sources.length === 0"
-          class="rounded-[var(--radius)] border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11 disabled:cursor-not-allowed disabled:opacity-50"
+          class="rounded-listing border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="" disabled :selected="!noscriptSourceKey">Change source</option>
           <option
@@ -173,7 +173,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
         <button
           type="submit"
           :disabled="sources.length === 0"
-          class="rounded-[var(--radius)] border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11"
+          class="rounded-listing border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11"
         >
           Change source
         </button>

@@ -22,6 +22,6 @@ const initials = computed(() =>
       :style="{ backgroundImage: background }"
     />
     <span class="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-    <span class="relative text-2xl font-bold text-white/70">{{ initials }}</span>
+    <span class="listing-display relative z-10 rounded-listing bg-bg px-2 text-2xl text-fg">{{ initials }}</span>
   </div>
 </template>

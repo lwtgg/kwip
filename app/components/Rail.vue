@@ -36,13 +36,13 @@ const categoryHref = computed(() => {
 </script>
 
 <template>
-  <section v-if="streams.length > 0" class="space-y-3">
-    <div class="flex items-baseline justify-between gap-3">
-      <h2 class="text-lg font-semibold tracking-tight text-fg">
+  <section v-if="streams.length > 0" class="space-y-(--card-gap)">
+    <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
+      <h2 class="listing-display text-lg text-fg">
         <NuxtLink
           v-if="categoryHref"
           :to="categoryHref"
-          class="inline-flex items-center gap-1.5 max-sm:min-h-11 hover:text-accent"
+          class="inline-flex items-center gap-1.5 max-sm:min-h-11 hover:underline"
         >
           <span>{{ title }}</span>
           <span aria-hidden="true" class="text-sm text-muted">→</span>
@@ -52,9 +52,9 @@ const categoryHref = computed(() => {
       <NuxtLink
         v-if="categoryHref"
         :to="categoryHref"
-        class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:text-accent"
+        class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:underline"
       >
-        View all ({{ streams.length }})
+        View all <span class="listing-numeric">({{ streams.length }})</span>
       </NuxtLink>
     </div>
 
@@ -67,7 +67,7 @@ const categoryHref = computed(() => {
         class="w-full md:w-72 md:shrink-0 md:snap-start xl:w-80"
       >
         <StreamCard
-          class="md:focus-visible:outline-offset-[-2px]"
+          class="md:focus-visible:outline-offset-(--focus-ring-inset)"
           :stream="stream"
           :now="now"
           :to="`${linkBase}/${stream.uri_name}`"

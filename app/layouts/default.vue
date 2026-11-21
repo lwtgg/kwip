@@ -63,10 +63,10 @@ const categories = computed(() => {
           <NuxtLink
             to="/"
             :aria-current="route.path === '/' ? 'page' : undefined"
-            class="shrink-0 rounded-full max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap motion-safe:transition-colors"
+            class="shrink-0 rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap"
             :class="
               route.path === '/'
-                ? 'bg-accent text-accent-fg'
+                ? 'bg-surface-2 text-fg underline underline-offset-4'
                 : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
             "
           >
@@ -77,10 +77,10 @@ const categories = computed(() => {
             :key="cat.id"
             :to="`/c/${cat.slug}`"
             :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
-            class="shrink-0 rounded-full max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap motion-safe:transition-colors"
+            class="shrink-0 rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap"
             :class="
               isCategoryActive(cat.slug)
-                ? 'bg-accent text-accent-fg'
+                ? 'bg-surface-2 text-fg underline underline-offset-4'
                 : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
             "
           >
@@ -93,7 +93,7 @@ const categories = computed(() => {
             to="/mirrors"
             aria-label="Mirror domains"
             title="Mirror domains"
-            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
+            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-listing border border-border bg-surface text-muted hover:border-muted hover:text-fg"
           >
             <svg
               aria-hidden="true"
@@ -115,7 +115,7 @@ const categories = computed(() => {
             type="button"
             :aria-label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
             :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
+            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-listing border border-border bg-surface text-muted hover:border-muted hover:text-fg"
             @click="toggleTheme"
           >
             <svg

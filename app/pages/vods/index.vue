@@ -111,13 +111,13 @@ useSeoMeta({
         <span class="mx-1.5">/</span>
         <span class="text-fg">Archive</span>
       </nav>
-      <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+      <h1 class="listing-display text-2xl text-fg sm:text-3xl">
         Event Archive
       </h1>
       <NuxtLink
         v-if="activeFilter"
         to="/vods"
-        class="inline-flex items-center gap-1.5 text-xs font-medium text-muted max-sm:min-h-11 hover:text-accent"
+        class="inline-flex items-center gap-1.5 text-xs font-medium text-muted max-sm:min-h-11 hover:underline"
       >
         <span aria-hidden="true">←</span>
         <span>All categories</span>
