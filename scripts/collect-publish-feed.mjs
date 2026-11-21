@@ -7,7 +7,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { candidates, collectSourceHealth, nearbyEvent, supplementProbeCap } from './probe-source-health.mjs'
 import {
-  fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources, supplementEvent,
+  fetchPitSportListing, fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement,
+  publishedPitSportSources, publishedSupplementSources, supplementEvent,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
@@ -115,6 +116,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   const probeItems = []
   const matches = []
   const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
+  const pitSportListing = fixture ? undefined : fetchPitSportListing(deadline)
   const now = Date.now()
 
   async function append(path, bytes) {
@@ -166,12 +168,13 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     if (details.size === count) throw new Error(`Empty ${collection} list`)
   }
 
-  const listing = await supplementListing
+  const [listing, pitSport] = await Promise.all([supplementListing, pitSportListing])
   // Older manifests lack detail metadata. A nonempty listing requires one full refresh to populate it.
   const publishedEvents = current?.supplementEvents
   const needsDetails = [...eventTimes.values()].some(item => nearbyEvent(item, now))
-    || publishedEvents?.some(event => nearbyEvent(event, now) || matchPublishedSupplement(event, listing))
-    || (!publishedEvents && !!listing?.streams.length)
+    || publishedEvents?.some(event => nearbyEvent(event, now)
+      || matchPublishedSupplement(event, listing) || matchPublishedSupplement(event, pitSport))
+    || (!publishedEvents && (listing?.streams.length || pitSport?.streams.length))
   if (current && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
@@ -195,14 +198,17 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       supplementEvents.push(event)
       const probeItem = { ...event, iframe: item.iframe, sources: item.sources, substreams: item.substreams }
       if (!fixture) probeItems.push(probeItem)
-      const match = performance.now() < supplementDeadline && matchPublishedSupplement(event, listing)
-      if (match) {
-        const sources = publishedSupplementSources(item, match)
-        if (sources.length) matches.push({ match, sources, timing: probeItem, payload, entry: entries.at(-1), hash })
+      if (performance.now() >= supplementDeadline) continue
+      const match = matchPublishedSupplement(event, listing)
+      const sources = match ? publishedSupplementSources(item, match) : []
+      const pitSportSources = publishedPitSportSources(item, matchPublishedSupplement(event, pitSport))
+      if (sources.length || pitSportSources.length) {
+        matches.push({ match, sources, pitSportSources, timing: probeItem, payload, entry: entries.at(-1), hash })
       }
     }
   }
-  const withStatus = matches.length ? await fetchSupplementStatuses(matches, now,
+  const statusMatches = matches.filter(({ sources }) => sources.length)
+  const withStatus = statusMatches.length ? await fetchSupplementStatuses(statusMatches, now,
     Math.min(performance.now() + 5_000, supplementDeadline)) : undefined
   const primaryProbes = candidates(probeItems, now)
   const supplementProbes = new Map()
@@ -215,13 +221,17 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   const recordReserve = key => json(key).length + maxHealthRecordBytes + 2
   let healthReserve = [...primaryProbes.keys()].reduce((size, key) => size + recordReserve(key), 1)
   let hasSupplements = false
-  for (const [index, match] of matches.entries()) {
+  // Give existing supplements first use of the shared admission and probe budgets.
+  const admissions = [
+    ...statusMatches.map(match => ({ ...match, supplements: withStatus(match) })),
+    ...matches.filter(({ pitSportSources }) => pitSportSources.length)
+      .map(match => ({ ...match, supplements: match.pitSportSources })),
+  ]
+  for (const [index, { payload, entry, timing, hash, supplements }] of admissions.entries()) {
     if (performance.now() >= supplementDeadline) {
-      result.supplementAdmissionSkippedEvents = matches.length - index
+      result.supplementAdmissionSkippedEvents = admissions.length - index
       break
     }
-    const { payload, entry, timing, hash } = match
-    const supplements = withStatus(match)
     const eligible = candidates([{
       starts_at: timing.starts_at, always_live: timing.always_live, sources: supplements,
     }],
@@ -237,11 +247,12 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     const bytes = json({ ...payload, data: { ...payload.data, sources } })
     const delta = bytes.length - entry.endpoint.length
     if (performance.now() >= supplementDeadline) {
-      result.supplementAdmissionSkippedEvents = matches.length - index
+      result.supplementAdmissionSkippedEvents = admissions.length - index
       break
     }
     const hasProbes = primaryProbes.size || supplementProbes.size || pending.size
     if (bytes.length > fileLimit || size + delta + (hasProbes ? nextReserve : 0) >= snapshotLimit) continue
+    payload.data.sources = sources
     entry.stored = bytes
     entry.endpoint.length = bytes.length
     size += delta

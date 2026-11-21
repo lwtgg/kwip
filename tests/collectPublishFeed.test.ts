@@ -45,6 +45,11 @@ const mock = String.raw`
       name: 'Home FC vs. Away FC', starts_at: start, sources: [primary],
     })
   }
+  const pitSportModes = ['pitsport', 'pitsport-down']
+  const pitSportUrl = id => 'https://pitsport.st/programs/' + id + '/play'
+  if (pitSportModes.includes(mode)) {
+    fixture['streams/foo'].data.sources.push({ ...primary, data: pitSportUrl(100) + '?original=1' })
+  }
   const primarySources = [primary]
   if (split || mode === 'capacity') {
     const count = split ? 42 : 39
@@ -76,6 +81,7 @@ const mock = String.raw`
     assert.equal(Object.values(fixture).reduce((sum, payload) => sum + Buffer.byteLength(wire(payload)), 0), target)
   }
   let listingRequests = 0
+  let pitSportRequests = 0
   let packed
   const probeRequests = []
   const expectedProbes = mode === 'capacity' ? [...primarySources.map(source => source.data), acceptedAlternate]
@@ -83,12 +89,34 @@ const mock = String.raw`
   let active = 0
   process.on('exit', () => {
     assert.equal(listingRequests, mode === 'fixture' ? 0 : 1)
+    assert.equal(pitSportRequests, mode === 'fixture' ? 0 : 1)
     if (mode === 'deadline') assert.deepEqual(probeRequests, [primary.data, splitAlternates[0]])
     else assert.deepEqual(probeRequests.sort(), expectedProbes.sort())
   })
   globalThis.fetch = async (request, options) => {
     if (typeof request === 'string') {
       const url = new URL(request)
+      if (url.href === 'https://pitsport.st/api/v1/home') {
+        pitSportRequests++
+        assert.equal(options.redirect, 'manual')
+        assert.ok(options.signal instanceof AbortSignal)
+        if (mode !== 'pitsport') return new Response(null, { status: 503 })
+        const program = (programId, slug, subtitle, sessionStart = start) => ({
+          programId, slug, subtitle, sessionStart, footer: 'Serie A', hasVideo: true,
+          playHref: '/programs/' + programId + '/play',
+        })
+        const portuguese = program(102, 'away-vs-home-portuguese', 'UHD | Portuguese')
+        return Response.json({ ok: true, data: {
+          live: [
+            program(100, 'away-vs-home', 'HD | English'),
+            program(101, 'away-vs-home-hd-spanish', 'HD | Spanish'),
+            portuguese,
+            { ...program(104, 'away-vs-home', 'FHD'), playHref: '/programs/999/play' },
+            program(105, 'away-vs-home', 'FHD', start + 10_801),
+          ],
+          upcoming: [portuguese, program(103, 'away-vs-home-hd-multiview', 'HD | Multiview')],
+        } })
+      }
       if (url.href === 'https://strmfree.pk/api/v1/streams') {
         listingRequests++
         if (!split && !['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible', 'detail-match', 'list-only-match'].includes(mode)) {
@@ -171,6 +199,15 @@ const mock = String.raw`
           } else if (mode === 'capacity' && path === 'streams/foo.json/bar') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.map(source => source.data), [acceptedAlternate])
+          } else if (mode === 'pitsport' && path === 'streams/foo') {
+            const { sources } = JSON.parse(bytes).data
+            assert.deepEqual(sources.slice(0, 2), fixture[path].data.sources)
+            assert.deepEqual(sources.slice(2), [
+              [101, 'Spanish', 'HD'], [102, 'Portuguese', '4K'], [103, 'Multiview', 'HD'],
+            ].map(([id, variant, sourceTag]) => ({
+              name: 'PitSport · ' + variant, sourceTag, origin: 'pitsport', type: 'iframe',
+              default: false, data: pitSportUrl(id),
+            })))
           } else if (['duplicates', 'plausible', 'detail-match'].includes(mode) && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
             assert.equal(sources.length, 2)
@@ -302,4 +339,14 @@ test('publisher reports probe deadline drops by side and still publishes', async
     primary: { queued: 40, deadlineDropped: 40 },
     supplement: { queued: 24, capExcluded: 2, deadlineDropped: 24 },
   })
+})
+
+test('PitSport appends validated catalogue variants and a 503 leaves baseline bytes intact', async () => {
+  const [available, unavailable] = await Promise.all([
+    publish([], null, 'pitsport'),
+    publish([], null, 'pitsport-down'),
+  ])
+  assert.equal(available.outcome, 'published')
+  assert.equal(unavailable.outcome, 'published')
+  assert.equal(available.providerRequests, unavailable.providerRequests)
 })

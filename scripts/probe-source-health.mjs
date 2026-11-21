@@ -16,6 +16,16 @@ export const probeHosts = new Map([
   }],
   ['strmfree.st', strmfree],
   ['streamfree.top', strmfree],
+  ['pitsport.st', {
+    path: /^\/programs\/[1-9]\d*\/play$/,
+    markers: [/<div id="app-splash">/, /"PUBLIC_API_BASE_URL":"https:\/\/pitsport\.st\/api\/v1"/],
+    concurrency: 2,
+  }],
+  ['embdlol.st', {
+    path: /^\/embed\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
+    markers: [/window\.__sandGuardLoaded/, /<script src="\/plum\.js" async>/],
+    concurrency: 2,
+  }],
 ])
 
 function registered(url) {

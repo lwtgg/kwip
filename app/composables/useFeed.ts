@@ -69,7 +69,7 @@ export interface FeedStreamsResponse {
 export type FeedSourceKind = 'iframe' | 'link'
 
 export interface FeedStreamSource {
-  origin?: 'supplement'
+  origin?: 'supplement' | 'pitsport'
   live?: boolean
   name: string
   default: boolean
@@ -371,7 +371,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     const publishedSources = publishedDetail.value?.sources ?? []
     const publishedByKey = new Map(publishedSources.map(source => [sourceKey(source.data), source]))
     const ordered = [
-      ...sources.filter(source => source.origin !== 'supplement'),
+      ...sources.filter(source => source.origin !== 'supplement' && source.origin !== 'pitsport'),
       ...alternatives,
       ...(feed.data.value?.detailGeneration ? [] : sources.filter(source => source.origin === 'supplement')),
     ]
@@ -390,6 +390,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       sources: [
         ...ordered.filter(source => !publishedByKey.has(sourceKey(source.data))),
         ...publishedByKey.values(),
+        ...sources.filter(source => source.origin === 'pitsport'),
       ],
       substreams: undefined,
     }

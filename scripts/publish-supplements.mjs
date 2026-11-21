@@ -1,15 +1,15 @@
 import { findSupplement, slugifyCategory } from '../app/utils/supplementMatch.ts'
-import { applySupplementStatus, supplementSources } from '../app/utils/strmfree.ts'
+import { applySupplementStatus, sourceQualityBand, supplementSources } from '../app/utils/strmfree.ts'
 import { sourceKey } from '../app/utils/sourceIdentity.ts'
 import { nearbyEvent, sourceProbeCap, sourceUrls } from './probe-source-health.mjs'
 
 const api = 'https://strmfree.pk/api/v1'
 
-async function fetchJson(path, deadline) {
+async function fetchJson(url, deadline) {
   const remaining = Math.floor(deadline - performance.now())
   if (remaining <= 0) return
   try {
-    const response = await fetch(`${api}/${path}`, {
+    const response = await fetch(url, {
       redirect: 'manual',
       signal: AbortSignal.timeout(Math.min(3000, remaining)),
     })
@@ -31,7 +31,7 @@ async function fetchJson(path, deadline) {
 }
 
 export async function fetchSupplementListing(deadline) {
-  const payload = await fetchJson('streams', deadline)
+  const payload = await fetchJson(`${api}/streams`, deadline)
   if (!Array.isArray(payload?.streams) || !payload.streams.every(stream =>
     typeof stream?.name === 'string' && Number.isFinite(stream.match_timestamp)
     && (stream.stream_key == null || (typeof stream.stream_key === 'string' && stream.stream_key.isWellFormed()))
@@ -40,6 +40,62 @@ export async function fetchSupplementListing(deadline) {
       && stream.additional_sources.every(source => typeof source?.url === 'string'))),
   )) return
   return payload
+}
+
+const pitSport = 'https://pitsport.st'
+const pitSportCategories = new Map([
+  ['nba', 'basketball'], ['nfl', 'football'], ['nhl', 'hockey'], ['tennis', 'tennis'],
+  ['ufc', 'combat'], ['wrestling', 'combat'],
+])
+const pitSportVariants = /-(?:(?:uhd|fhd|hd|sd)-.+|spanish|portuguese|multiview)$/
+
+export async function fetchPitSportListing(deadline) {
+  const payload = await fetchJson(`${pitSport}/api/v1/home`, deadline)
+  const { live, upcoming } = payload?.data ?? {}
+  if (payload?.ok !== true || !Array.isArray(live) || !Array.isArray(upcoming)) return
+
+  const events = new Map()
+  for (const program of [...live, ...upcoming]) {
+    if (program?.hasVideo !== true || !Number.isSafeInteger(program.sessionStart) || program.sessionStart <= 0 ||
+        !Number.isSafeInteger(program.programId) || program.programId <= 0 ||
+        typeof program.slug !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(program.slug) ||
+        typeof program.playHref !== 'string' ||
+        /^\/programs\/(\d+)\/play$/.exec(program.playHref)?.[1] !== String(program.programId)) continue
+
+    const base = program.slug.replace(pitSportVariants, '')
+    const key = `${base}@${program.sessionStart}`
+    if (!events.has(key)) {
+      events.set(key, {
+        name: base.replaceAll('-', ' '),
+        category: pitSportCategories.get(program.competitionSlug) ?? 'soccer',
+        match_timestamp: program.sessionStart,
+        sources: [],
+      })
+    }
+    const label = typeof program.subtitle === 'string' ? program.subtitle.trim() : ''
+    const band = sourceQualityBand(label)
+    const variant = band ? label.split('|').slice(1).join('|').trim() : label
+    events.get(key).sources.push({
+      name: variant ? `PitSport · ${variant}` : 'PitSport',
+      sourceTag: band,
+      origin: 'pitsport',
+      type: 'iframe',
+      default: false,
+      data: pitSport + program.playHref,
+    })
+  }
+  return { streams: [...events.values()] }
+}
+
+export function publishedPitSportSources(item, match) {
+  if (!match) return []
+  const keys = new Set([...sourceUrls(item), item.source?.data].filter(url => typeof url === 'string').map(sourceKey))
+  return match.sources.filter(source => {
+    const key = sourceKey(source.data)
+    if (keys.has(key)) return false
+    keys.add(key)
+    return true
+  })
 }
 
 export function supplementEvent(item, timing) {
@@ -84,7 +140,7 @@ export async function fetchSupplementStatuses(matches, now, deadline) {
   await Promise.all(Array.from({ length: Math.min(4, keys.size) }, async () => {
     for (const key of queue) {
       if (performance.now() >= deadline) break
-      statuses.set(key, await fetchJson(`sources/${encodeURIComponent(key)}`, deadline))
+      statuses.set(key, await fetchJson(`${api}/sources/${encodeURIComponent(key)}`, deadline))
     }
   }))
   return ({ match, sources, timing }) => applySupplementStatus(
