@@ -98,6 +98,10 @@ tiebreak, and "backup" is implicit in position. No one exposes bitrate, and only
 
 ### Host checks on 2026-11-21
 
+The CDNLiveTV, PitSport, and DaddyLive HTTP responses quoted below came from command-line
+`curl` on the local Mac used for the DNS checks. The public egress IP and results from an
+independent HTTP network path are **unverified**.
+
 **`embed.st` settled as dead at the sampled hostname.** Local DNS and direct queries to
 Cloudflare `1.1.1.1` both returned `status: NXDOMAIN` and `ANSWER: 0`. Cloudflare DoH
 returned `HTTP/2 200`, `content-type: application/dns-json`, and `"Status":3`.
