@@ -6,6 +6,7 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import re
+import shutil
 from pathlib import Path
 import tempfile
 from threading import Event, Thread
@@ -233,6 +234,102 @@ def check_stalled_feed(browser, directory, output):
             thread.join()
 
 
+def check_stalled_generation(browser, directory, output):
+    wrapped = directory / 'snapshot-worker'
+    shutil.copytree(output, wrapped)
+    entry = wrapped / 'server/index.mjs'
+    entry.rename(entry.with_name('original.mjs'))
+    entry.write_text("""
+import worker from './original.mjs'
+export default {
+  fetch(request, env, ctx) {
+    const snapshots = {
+      async get(key, options) {
+        const response = await fetch(env.TEST_PROVIDER + (options ? '/r2/range' : '/r2/manifest'))
+        return { size: Number(response.headers.get('content-length')), etag: key,
+          body: response.body, arrayBuffer: () => response.arrayBuffer() }
+      },
+    }
+    return worker.fetch(request, { ...env, FEED_SNAPSHOTS: snapshots }, ctx)
+  },
+}
+""")
+
+    commit = '20261119T000000Z-01234567'
+    date = '2026-11-19T00:00:00.000Z'
+    manifest = dict(schema=1, commitId=commit, payloadId=commit,
+                    payloadKey=f'snapshots/{commit}.bin', publishedAt=date,
+                    listsVerifiedAt=date, detailsVerifiedAt=date, size=2,
+                    endpoints=[dict(path='streams', offset=0, length=1),
+                               dict(path='vods', offset=1, length=1)])
+    source = json.loads((output / 'public/feed-cache/streams.json').read_text())
+    cow = next(item for group in source['streams'] for item in group['streams']
+               if item['uri_name'] == '247-cows')
+    cow.update(uri_name='upstream-only', name='Upstream-only event', always_live=1)
+    upstream = {'success': True, 'streams': [
+        {'category': 'Test Events', 'id': 1, 'always_live': 1, 'streams': [cow]},
+    ]}
+    release = Event()
+    requests = []
+
+    class Provider(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            if self.path == '/r2/manifest':
+                data = manifest
+            elif self.path == '/healthy/streams':
+                data = upstream
+            elif self.path == '/healthy/vods':
+                data = {'success': True, 'vods': []}
+            else:
+                release.wait()
+                return
+            body = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(('127.0.0.1', 0), Provider) as provider:
+        thread = Thread(target=provider.serve_forever, daemon=True)
+        thread.start()
+        base = f'http://127.0.0.1:{provider.server_port}'
+        try:
+            for primary, marker in [('healthy', 'upstream-only'), ('stalled', '247-cows')]:
+                log = directory / f'generation-{primary}.log'
+                with worker(directory, f'generation-{primary}', wrapped, 'https://advertiser.example',
+                            False, variables=lambda _: {
+                                'TEST_PROVIDER': base,
+                                'NUXT_PUBLIC_FEED_BASE': f'{base}/{primary}',
+                                'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
+                            }, log_path=log) as origin, browser.new_context(java_script_enabled=False) as context:
+                    page = context.new_page()
+                    for path in ('/', '/sitemap.xml'):
+                        requests.clear()
+                        start = monotonic()
+                        response = page.goto(origin + path, wait_until='domcontentloaded', timeout=6500)
+                        assert response.status == 200, (path, response.status)
+                        content = response.text()
+                        assert f'/live/{marker}' in content, (primary, path)
+                        if path == '/':
+                            assert ('"fromCache"' in content) == (primary == 'stalled')
+                        assert requests[0] == '/r2/manifest'
+                        assert requests.index('/r2/range') < requests.index(f'/{primary}/streams')
+                        if primary == 'stalled':
+                            assert requests.count('/r2/manifest') == 2, requests
+                            assert requests.index('/mirror/streams') < requests.index('/r2/manifest', 1)
+                        print(f'Stalled R2, {primary} upstream {path}: HTTP 200 in {monotonic() - start:.2f}s')
+                    assert '"stage":"snapshot"' in log.read_text()
+        finally:
+            release.set()
+            provider.shutdown()
+            thread.join()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
@@ -242,6 +339,7 @@ def main():
             browser = pw.chromium.launch()
             check_source_health(browser, origin)
         check_stalled_feed(browser, Path(temp), args.output.resolve())
+        check_stalled_generation(browser, Path(temp), args.output.resolve())
         browser.close()
 
 

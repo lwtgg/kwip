@@ -31,6 +31,7 @@ export interface FeedSubstream {
 }
 
 export interface FeedStreamItem {
+  uri?: string
   id: number
   name: string
   tag: string
@@ -167,23 +168,25 @@ function useFeedEndpoint<T extends { success: boolean }>(
         if (browserRefresh) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
         }
-        if (import.meta.server) {
-          const generation = endpoint.kind !== 'ping' &&
-            getFeedGeneration(event, config.feedSnapshotBinding, fetcher, config.public, requestUrl, undefined, config.seedDetailPaths, now?.value)
-          if (generation) {
-            const payload = (await generation).get<T>(endpoint)
-            if (!payload) {
-              throw createError({
-                statusCode: 503,
-                statusMessage: 'Feed endpoint unavailable',
-                data: { snapshotUnavailable: true },
-              })
-            }
-            return payload
-          }
-        }
+        const generation = import.meta.server && endpoint.kind !== 'ping'
+          ? await getFeedGeneration(event, config.feedSnapshotBinding, config.public, requestUrl, undefined, now?.value)
+          : undefined
+        const payload = generation?.get<T>(endpoint)
+        if (payload) return payload
+
         const assets = import.meta.server ? getFeedAssets(event) : undefined
-        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets, { event, binding: config.feedSnapshotBinding })
+        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets, {
+          event,
+          binding: config.feedSnapshotBinding,
+          generation: generation && (generation.readable ? 'omitted' : 'unreadable'),
+        }).catch(error => {
+          if (!generation) throw error
+          throw createError({
+            statusCode: 503,
+            statusMessage: 'Feed endpoint unavailable',
+            data: { snapshotUnavailable: true },
+          })
+        })
       } catch (error) {
         if (signal.aborted || key !== cacheKey.value) throw error
         if (previous) return { ...previous, fromCache: true }

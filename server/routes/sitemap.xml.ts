@@ -30,27 +30,26 @@ export default defineEventHandler(async (event) => {
   const { public: config, feedSnapshotBinding, seedDetailPaths } = useRuntimeConfig(event)
   const requestUrl = getRequestURL(event)
   const assets = getFeedAssets(event)
-  const generation = await getFeedGeneration(event, feedSnapshotBinding, $fetch, config, requestUrl, [
+  const generation = await getFeedGeneration(event, feedSnapshotBinding, config, requestUrl, [
     { kind: 'streams' }, { kind: 'vods' },
-  ], seedDetailPaths)
+  ])
   let snapshotCoverage: ((path: string) => boolean) | undefined
   const fallback = {
     event,
     binding: feedSnapshotBinding,
+    generation: generation && (generation.readable ? 'omitted' as const : 'unreadable' as const),
     onCoverage: (hasDetail: (path: string) => boolean) => { snapshotCoverage = hasDetail },
   }
-  const [streams, vods] = generation ? [
-    generation.get<FeedStreamsResponse>({ kind: 'streams' }),
-    generation.get<FeedVodsResponse>({ kind: 'vods' }),
-  ] : await Promise.all([
-    fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }, assets, fallback).catch(() => null),
-    fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }, assets, fallback).catch(() => null),
+  const [streams, vods] = await Promise.all([
+    generation?.get<FeedStreamsResponse>({ kind: 'streams' }) ??
+      fetchFeed<FeedStreamsResponse>($fetch, config, requestUrl, { kind: 'streams' }, assets, fallback).catch(() => null),
+    generation?.get<FeedVodsResponse>({ kind: 'vods' }) ??
+      fetchFeed<FeedVodsResponse>($fetch, config, requestUrl, { kind: 'vods' }, assets, fallback).catch(() => null),
   ])
 
   const seedCoverage = new Set(seedDetailPaths)
   const covered = (path: string, payload?: { fromCache?: true; fromSnapshot?: true } | null) => {
-    if (generation) return generation.hasDetail(path)
-    if (payload?.fromSnapshot) return snapshotCoverage?.(path) ?? false
+    if (payload?.fromSnapshot) return (snapshotCoverage ?? generation?.hasDetail)?.(path) ?? false
     return !payload?.fromCache || seedCoverage.has(path)
   }
 
@@ -63,7 +62,7 @@ export default defineEventHandler(async (event) => {
 
   for (const cat of streams?.streams ?? []) {
     for (const s of cat.streams ?? []) {
-      const path = feedDetailPath('streams', s.uri_name)
+      const path = feedDetailPath('streams', s.uri_name ?? s.uri)
       if (path && covered(path, streams)) {
         push(`/live/${encodePath(path.slice('streams/'.length))}`, toLastmod(s.starts_at))
       }

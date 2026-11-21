@@ -84,7 +84,7 @@ test('shares a single manifest and resolves the validated byte ranges', async ()
 test('request consumers share the whole batch and keep origin and cache provenance', async () => {
   const { bucket, calls } = fixture()
   const event = { context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } }
-  const read = () => getFeedGeneration(event, 'FEED_SNAPSHOTS', unreachable, {
+  const read = () => getFeedGeneration(event, 'FEED_SNAPSHOTS', {
     feedBase: 'https://upstream.example', feedMirrorBase: '', canonicalHost: requestUrl.host,
   }, requestUrl)
   assert.equal(read(), read())
@@ -105,7 +105,7 @@ const unreachable = async () => { throw new Error('Unexpected network access') }
 test('normalizes a validated live detail to the pinned route', async () => {
   for (const uri of ['/sport/example', undefined]) {
     const { bucket } = fixture(true, { ...detail, data: { ...detail.data, uri } })
-    const generation = await readFeedGeneration(bucket, unreachable, requestUrl, requestUrl.host, [...endpoints])
+    const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
     assert.equal(generation.get(endpoints[1])?.data.uri_name, 'sport/example')
   }
 })
@@ -114,7 +114,7 @@ test('normalizes a validated VOD slug when the manifest omits the list', async (
   const { bucket } = fixture(false, detail, true, 'sport/example', false)
   const vod = { kind: 'vod', slug: 'replay' } as const
   const generation = await readFeedGeneration(
-    bucket, unreachable, requestUrl, requestUrl.host, [{ kind: 'vods' }, vod],
+    bucket, requestUrl, requestUrl.host, [{ kind: 'vods' }, vod],
   )
   assert.equal(generation.get({ kind: 'vods' }), undefined)
   assert.equal(generation.get(vod)?.data.uri_name, 'replay')
@@ -145,7 +145,7 @@ test('listing deadlines follow home and category filters and ignore 24/7 schedul
     ['/sitemap.xml', 100, Infinity],
   ] as const) {
     const generation = await readFeedGeneration(
-      bucket, unreachable, new URL(path, requestUrl), requestUrl.host, [{ kind: 'streams' }], undefined, [], now,
+      bucket, new URL(path, requestUrl), requestUrl.host, [{ kind: 'streams' }], now,
     )
     assert.equal(generation.cacheBoundary, boundary, path)
   }
@@ -157,7 +157,7 @@ test('live cache coverage moves from kickoff to the whistle to ended replay', as
   ] as const) {
     const { bucket } = fixture(true, endedDetail, true, 'replay')
     const generation = await readFeedGeneration(
-      bucket, unreachable, requestUrl, requestUrl.host, [...replayEndpoints], undefined, [], now,
+      bucket, requestUrl, requestUrl.host, [...replayEndpoints], now,
     )
     assert.equal(generation.cacheBoundary, boundary)
     assert.equal(generation.get(replayEndpoints[1])?.hasSnapshotReplay, replay)
@@ -168,7 +168,7 @@ test('reads the replay range only for ended streams with detail coverage', async
   for (const [covered, now, hasReplay] of [[true, 499, false], [false, 500, false], [true, 500, true]] as const) {
     const { bucket, calls } = fixture(true, endedDetail, covered, 'replay')
     const generation = await readFeedGeneration(
-      bucket, unreachable, requestUrl, requestUrl.host, [...replayEndpoints], undefined, [], now,
+      bucket, requestUrl, requestUrl.host, [...replayEndpoints], now,
     )
     assert.equal(!!generation.get(replayEndpoints[1])?.hasSnapshotReplay, hasReplay)
     assert.equal(calls.length, hasReplay ? 4 : 3)
@@ -176,76 +176,30 @@ test('reads the replay range only for ended streams with detail coverage', async
   }
 })
 
-test('a corrupt required replay range retries the entire batch against the seed', async () => {
+test('a corrupt required replay range invalidates the whole snapshot batch', async () => {
   const { bucket, manifest, corrupt } = fixture(true, endedDetail, true, 'replay')
   corrupt(manifest.endpoints.find(endpoint => endpoint.path === 'vods')!.offset)
-  for (const seedReplay of ['available', 'omitted', 'unreadable']) {
-    const requests: string[] = []
-    const generation = await readFeedGeneration(bucket, unreachable, requestUrl,
-      requestUrl.host, [...replayEndpoints], {
-        async fetch(request) {
-          const path = new URL(request.url).pathname
-          requests.push(path)
-          if (path.endsWith('/streams.json')) {
-            return Response.json({ ...channels, timestamp: 42, streams: [{
-              category: 'Sports', always_live: 0, streams: [{ id: 1, name: 'Bundled', uri_name: 'replay' }],
-            }] })
-          }
-          if (path.endsWith('/vods.json')) {
-            return seedReplay === 'available' ? Response.json(replayList) : new Response(null, { status: 404 })
-          }
-          return Response.json({ ...endedDetail, data: { ...endedDetail.data, uri: 'replay', name: 'Bundled' } })
-        },
-      }, seedReplay === 'omitted' ? [] : ['vods/replay'], 500)
-    assert.deepEqual(requests, [
-      '/feed-cache/streams.json', '/feed-cache/streams/replay.json',
-      ...(seedReplay === 'omitted' ? [] : ['/feed-cache/vods.json']),
-    ])
-    if (seedReplay === 'unreadable') {
-      assert.equal(generation.get(replayEndpoints[0]), undefined)
-      assert.equal(generation.get(replayEndpoints[1]), undefined)
-      assert.equal(generation.hasDetail('vods/replay'), false)
-    } else {
-      assert.equal(generation.get(replayEndpoints[0])?.timestamp, 42)
-      assert.equal(generation.get(replayEndpoints[1])?.data.name, 'Bundled')
-      assert.equal(generation.get(replayEndpoints[1])?.hasSnapshotReplay, seedReplay === 'available' ? true : undefined)
-    }
-  }
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...replayEndpoints], 500)
+  assert.equal(generation.readable, false)
+  assert.equal(generation.get(replayEndpoints[0]), undefined)
+  assert.equal(generation.get(replayEndpoints[1]), undefined)
 })
 
-test('authoritative omissions never fall back to the seed', async () => {
+test('an authoritative omission leaves the generation readable', async () => {
   const { bucket } = fixture(false)
-  let seedReads = 0
-  const generation = await readFeedGeneration(bucket, unreachable, requestUrl, requestUrl.host, [...endpoints], {
-    async fetch() { seedReads++; return Response.json(detail) },
-  })
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
+  assert.equal(generation.readable, true)
   assert.equal(generation.get(endpoints[0]).fromCache, true)
   assert.equal(generation.get(endpoints[1]), undefined)
-  assert.equal(seedReads, 0)
 })
 
-test('a corrupt range retries every requirement from the seed, or yields an unavailable batch', async () => {
+test('a corrupt range invalidates every endpoint in the batch', async () => {
   const { bucket, manifest, corrupt } = fixture()
   corrupt(manifest.endpoints.at(-1)!.offset)
-  const requests: string[] = []
-  let missing = false
-  const read = () => readFeedGeneration(bucket, unreachable, requestUrl, requestUrl.host, [...endpoints, { kind: 'vods' }], {
-    async fetch(request) {
-      const path = new URL(request.url).pathname
-      requests.push(path)
-      if (path.endsWith('/streams.json')) return Response.json({ ...channels, timestamp: 42 })
-      if (path.endsWith('/vods.json')) return missing ? new Response(null, { status: 404 }) : Response.json({ success: true, vods: [] })
-      return Response.json(detail)
-    },
-  })
-  const fallback = await read()
-  assert.equal(fallback.get(endpoints[0]).timestamp, 42)
-  assert.equal(fallback.get(endpoints[1]).fromCache, true)
-  assert.deepEqual(requests, ['/feed-cache/streams.json', '/feed-cache/streams/sport/example.json', '/feed-cache/vods.json'])
-  missing = true
-  const unavailable = await read()
-  assert.equal(unavailable.get(endpoints[0]), undefined)
-  assert.equal(unavailable.get(endpoints[1]), undefined)
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
+  assert.equal(generation.readable, false)
+  assert.equal(generation.get(endpoints[0]), undefined)
+  assert.equal(generation.get(endpoints[1]), undefined)
 })
 
 type Manifest = ReturnType<typeof fixture>['manifest']
@@ -417,7 +371,7 @@ test('the mirror and bundled assets get their own budgets after a primary timeou
   assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0]).stage), ['primary', 'mirror', 'seed'])
 })
 
-test('a stalled R2 identity is shared by cache lookup and SSR, which renders the seed', async (context) => {
+test('a stalled R2 identity is shared by cache lookup and SSR, which leaves the generation unusable', async (context) => {
   const warnings = trackTimeouts(context)
   let opens = 0
   const event = { context: { cloudflare: { env: {
@@ -427,33 +381,30 @@ test('a stalled R2 identity is shared by cache lookup and SSR, which renders the
   const url = new URL('/', requestUrl)
   const identity = getFeedCacheIdentity(event, 'FEED_SNAPSHOTS', deadlineConfig, url)
   context.mock.timers.tick(FEED_DEADLINES_MS.identity)
-  assert.equal(await identity, 'seed')
-  const generation = await getFeedGeneration(event, 'FEED_SNAPSHOTS', unreachable, deadlineConfig, url)
-  assert.equal(generation.cacheIdentity, 'seed')
-  assert.equal(generation.get(endpoints[0])?.timestamp, 42)
-  assert.equal(generation.get(endpoints[0])?.fromSnapshot, true)
+  assert.equal(await identity, undefined)
+  const generation = await getFeedGeneration(event, 'FEED_SNAPSHOTS', deadlineConfig, url)
+  assert.equal(generation.cacheIdentity, undefined)
+  assert.equal(generation.readable, false)
+  assert.equal(generation.get(endpoints[0]), undefined)
   assert.equal(opens, 1)
   assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
     event: 'feed_timeout', endpoint: 'streams', stage: 'identity', elapsedMs: FEED_DEADLINES_MS.identity,
   }])
 })
 
-test('stalled R2 ranges fall through to the seed without caching it under the R2 identity', async (context) => {
+test('stalled R2 ranges leave the batch unusable and uncacheable', async (context) => {
   const warnings = trackTimeouts(context)
   const { bucket } = fixture()
   const result = readFeedGeneration({
     get(key, options) { return options ? never() : bucket.get(key) },
-  }, unreachable, requestUrl, requestUrl.host, [...endpoints], {
-    async fetch(request) {
-      return Response.json(request.url.endsWith('/streams.json') ? { ...channels, timestamp: 42 } : detail)
-    },
-  })
+  }, requestUrl, requestUrl.host, [...endpoints])
   await nextTurn()
   context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
   const generation = await result
   assert.equal(generation.cacheIdentity, undefined)
-  assert.equal(generation.get(endpoints[0])?.timestamp, 42)
-  assert.equal(generation.get(endpoints[1])?.fromCache, true)
+  assert.equal(generation.readable, false)
+  assert.equal(generation.get(endpoints[0]), undefined)
+  assert.equal(generation.get(endpoints[1]), undefined)
   assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
     event: 'feed_timeout', endpoint: 'stream', stage: 'snapshot', elapsedMs: FEED_DEADLINES_MS.snapshot,
   }])
@@ -535,4 +486,54 @@ test('sitemap direct-feed fallback uses R2 coverage after both upstreams time ou
   assert.equal(attempts.length, 4)
   assert.match(xml, /\/live\/sport\/example/)
   assert.doesNotMatch(xml, /\/live\/missing/)
+})
+
+test('a failed R2 retry discards the whole sitemap batch before serving the seed', async (context) => {
+  trackTimeouts(context)
+  const { bucket, manifest } = fixture()
+  let opens = 0
+  const calls: string[] = []
+  context.mock.method(globalThis, '$fetch', url => {
+    calls.push(new URL(url).hostname)
+    return never()
+  })
+  context.mock.method(globalThis, 'useRuntimeConfig', () => ({
+    feedSnapshotBinding: 'FEED_SNAPSHOTS',
+    seedDetailPaths: ['streams/missing'],
+    public: deadlineConfig,
+  }))
+  const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
+  const result = sitemap({ context: { cloudflare: { env: {
+    FEED_SNAPSHOTS: {
+      get(key, options) {
+        if (!options) {
+          opens++
+          calls.push('manifest')
+        } else if (opens === 1 || options.range.offset === manifest.endpoints[1].offset) {
+          return never()
+        }
+        return bucket.get(key, options)
+      },
+    },
+    ASSETS: {
+      async fetch(request: Request) {
+        const path = new URL(request.url).pathname
+        calls.push(path)
+        return Response.json(path.endsWith('/streams.json') ? channels : { success: true, vods: [] })
+      },
+    },
+  } } } })
+  await nextTurn()
+  for (const budget of [FEED_DEADLINES_MS.snapshot, FEED_DEADLINES_MS.upstream, FEED_DEADLINES_MS.upstream]) {
+    context.mock.timers.tick(budget)
+    await nextTurn()
+  }
+  assert.deepEqual(calls, [
+    'manifest', 'primary.example', 'primary.example', 'mirror.example', 'mirror.example', 'manifest',
+  ])
+  context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
+  const xml = await result
+  assert.match(xml, /\/live\/missing/)
+  assert.doesNotMatch(xml, /\/live\/sport\/example/)
+  assert.deepEqual(calls.slice(-2), ['/feed-cache/streams.json', '/feed-cache/vods.json'])
 })
