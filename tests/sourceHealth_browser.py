@@ -42,8 +42,8 @@ def check_source_health(browser, origin):
         assert response.ok
         html = response.text()
         startup_html = re.sub(r'<noscript[^>]*>.*?</noscript>', '', html, flags=re.S)
-        frames = re.findall(r'<iframe\b[^>]*>', startup_html)
-        assert len(frames) == 1 and not re.search(r'\ssrc=', frames[0]), frames
+        assert not re.search(r'<iframe\b', startup_html)
+        assert 'Loading player embed' in startup_html
         assert f'<iframe src="{origin}/fixtures/one"' in html
         assert '/fixtures/poster-1.jpg"' in html
         chips = page.get_by_role('group', name='Playback source')
@@ -55,6 +55,7 @@ def check_source_health(browser, origin):
         second_url = origin + '/fixtures/two'
 
         expect(first).to_have_attribute('aria-pressed', 'true')
+        expect(frame).to_have_count(1)
         expect(frame).to_have_attribute('src', first_url)
         poster = page.get_by_role('region', name='Event player').locator('img[src$="/fixtures/poster-1.jpg"]')
         expect(poster).to_be_visible()
@@ -163,10 +164,13 @@ def check_source_health(browser, origin):
         no_js.route('**/*', intercept)
         page = no_js.new_page()
         page.goto(origin + EVENT, wait_until='networkidle')
-        expect(page.locator('iframe:visible')).to_have_attribute('src', first_url)
+        frame = page.locator('iframe')
+        expect(frame).to_have_count(1)
+        expect(frame).to_have_attribute('src', first_url)
         page.get_by_label('Change source').select_option(second_key)
         page.get_by_role('button', name='Change source').click()
-        expect(page.locator('iframe:visible')).to_have_attribute('src', second_url)
+        expect(frame).to_have_count(1)
+        expect(frame).to_have_attribute('src', second_url)
     print('Source failure persists across reload and revisit, clears on retry or explicit selection, and stays in its session')
 
 

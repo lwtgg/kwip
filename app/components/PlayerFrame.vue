@@ -165,6 +165,7 @@ onBeforeUnmount(() => {
     />
 
     <iframe
+      v-if="src"
       ref="frameRef"
       :key="JSON.stringify([src, sandbox])"
       :src="src"
