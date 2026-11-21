@@ -1,7 +1,7 @@
 import type { H3Event } from 'h3'
 import { getCookie, getRequestURL, getResponseHeaders, getResponseStatus, setResponseHeader } from 'h3'
 import { edgeCacheKey, edgeCacheMaxAge, isEdgeCacheable, renderSearch } from './edge-cache'
-import { getFeedCacheIdentity, getRenderedFeedGeneration } from './feed'
+import { FEED_DEADLINES_MS, getFeedCacheIdentity, getRenderedFeedGeneration, withinFeedDeadline } from './feed'
 
 const cacheRequest = Symbol('edgeCacheRequest')
 type EdgeCacheContext = H3Event['context'] & {
@@ -34,7 +34,16 @@ export async function lookupEdgePage(event: H3Event) {
   if (config.ads === true) cacheQuery.set('ads', '1')
   const key = edgeCacheKey(url, identity, cacheQuery)
   try {
-    const cached = await cache.match(key)
+    const endpoint = url.pathname === '/sitemap.xml' ? 'sitemap' : 'page'
+    const cached = await withinFeedDeadline(endpoint, 'cache-match', FEED_DEADLINES_MS.cacheMatch, async (signal) => {
+      const response = await cache.match(key)
+      // A late hit has no consumer after SSR starts.
+      if (signal.aborted) {
+        await response?.body?.cancel()
+        return
+      }
+      return response
+    })
     // The absolute deadline also excludes entries written before the current TTL rules.
     if (cached && (!timed || Number(cached.headers.get(expiryHeader)) > Date.now() / 1000)) {
       const response = new Response(cached.body, cached)

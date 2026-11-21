@@ -101,21 +101,25 @@ function replaceHostTokens<T>(value: T, host: string): T {
 export const FEED_DEADLINES_MS = {
   upstream: 1_500,
   identity: 300,
+  cacheMatch: 250,
   snapshot: 1_000,
   seed: 500,
 } as const
 
-type FeedStage = 'primary' | 'mirror' | 'identity' | 'snapshot' | 'seed'
+type FeedStage = 'primary' | 'mirror' | 'identity' | 'snapshot' | 'seed' | 'cache-match'
 
 class FeedTimeoutError extends Error {
+  readonly stage: FeedStage
+
   constructor(stage: FeedStage) {
     super(`Feed deadline exceeded at ${stage}`)
     this.name = 'FeedTimeoutError'
+    this.stage = stage
   }
 }
 
-async function withinFeedDeadline<T>(
-  endpoint: FeedEndpoint['kind'],
+export async function withinFeedDeadline<T>(
+  endpoint: FeedEndpoint['kind'] | 'page' | 'sitemap',
   stage: FeedStage,
   duration: number,
   run: (signal: AbortSignal) => Promise<T>,
@@ -205,12 +209,19 @@ export async function fetchFeedSnapshot<T extends { success: boolean }>(
   return { ...cached, fromCache: true }
 }
 
+interface FeedSnapshotFallback {
+  event: H3Event | undefined
+  binding: string
+  onCoverage?: (hasDetail: (path: string) => boolean) => void
+}
+
 export async function fetchFeed<T extends { success: boolean }>(
   fetcher: typeof $fetch,
   config: FeedConfig,
   requestUrl: URL,
   endpoint: FeedEndpoint,
   assets?: FeedAssets,
+  snapshotFallback?: FeedSnapshotFallback,
 ): Promise<T & FeedProvenance> {
   const host = requestUrl.host || config.canonicalHost
   const resolveUrl = (base: string) => resolveEndpointUrl(base, requestUrl, endpoint)
@@ -232,6 +243,28 @@ export async function fetchFeed<T extends { success: boolean }>(
     }
     if (!URL.canParse(config.feedBase) || endpoint.kind === 'ping') {
       throw upstreamError
+    }
+    if (err instanceof FeedTimeoutError &&
+        upstreamError instanceof FeedTimeoutError && upstreamError.stage === 'mirror' &&
+        snapshotFallback?.event) {
+      const pinned = getRequestReader(snapshotFallback.event, snapshotFallback.binding, requestUrl)
+      if (pinned) {
+        const path = snapshotPath(endpoint)
+        const paths = endpoint.kind === 'stream' ? ['streams', path] :
+          endpoint.kind === 'vod' ? ['vods', path] : [path]
+        const manifest = await pinned.reader.open().catch(() => undefined)
+        if (manifest) {
+          if (!manifest.ranges.has(path)) throw new FeedResponseError('Feed endpoint unavailable in snapshot')
+          const snapshot = await withinFeedDeadline(endpoint.kind, 'snapshot', FEED_DEADLINES_MS.snapshot, () => pinned.reader.read(paths))
+            .catch(() => undefined)
+          if (snapshot) {
+            const entry = snapshot.payloads.get(path)
+            if (!entry) throw new FeedResponseError('Feed endpoint unavailable in snapshot')
+            snapshotFallback.onCoverage?.(snapshot.has)
+            return normalizeSnapshotPayload(path, entry, host) as T & FeedProvenance
+          }
+        }
+      }
     }
     let cacheUnreachable = false
     try {
@@ -373,6 +406,19 @@ function createRequestSnapshotReader(bucket: SnapshotBucket, endpoint: FeedEndpo
   }
 }
 
+function normalizeSnapshotPayload(
+  path: string,
+  { payload, hasHostToken }: { payload: SnapshotPayload; hasHostToken: boolean },
+  host: string,
+): SnapshotPayload {
+  const resolved = hasHostToken ? replaceHostTokens(payload, host) : payload
+  const slash = path.indexOf('/')
+  const normalized = slash !== -1
+    ? { ...resolved, data: { ...resolved.data as object, uri_name: path.slice(slash + 1) } }
+    : resolved
+  return { ...normalized, fromCache: true, fromSnapshot: true }
+}
+
 export async function readFeedGeneration(
   bucket: SnapshotBucket,
   fetcher: typeof $fetch,
@@ -396,13 +442,8 @@ export async function readFeedGeneration(
     await withinFeedDeadline(endpoints.at(-1)?.kind ?? 'streams', 'snapshot', FEED_DEADLINES_MS.snapshot, async (signal) => {
       const snapshot = await reader.read(paths)
       signal.throwIfAborted()
-      for (const [path, { payload, hasHostToken }] of snapshot.payloads) {
-        const resolved = hasHostToken ? replaceHostTokens(payload, host) : payload
-        const slash = path.indexOf('/')
-        const normalized = slash !== -1
-          ? { ...resolved, data: { ...resolved.data as object, uri_name: path.slice(slash + 1) } }
-          : resolved
-        payloads.set(path, { ...normalized, fromCache: true, fromSnapshot: true })
+      for (const [path, entry] of snapshot.payloads) {
+        payloads.set(path, normalizeSnapshotPayload(path, entry, host))
       }
       window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined
       const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
@@ -464,8 +505,7 @@ type FeedContext = H3Event['context'] & {
   [requestReader]?: { bucket: SnapshotBucket; reader: ReturnType<typeof createRequestSnapshotReader> }
 }
 
-function getRequestReader(event: H3Event, binding: string, config: FeedConfig, requestUrl: URL) {
-  if (!isExternalFeed(config.feedBase)) return
+function getRequestReader(event: H3Event, binding: string, requestUrl: URL) {
   const context: FeedContext = event.context
   if (context[requestReader]) return context[requestReader]
   const candidate = getCloudflareEnv(event)?.[binding] as Partial<SnapshotBucket> | undefined
@@ -475,7 +515,8 @@ function getRequestReader(event: H3Event, binding: string, config: FeedConfig, r
 }
 
 export async function getFeedCacheIdentity(event: H3Event, binding: string, config: FeedConfig, requestUrl: URL) {
-  const pinned = getRequestReader(event, binding, config, requestUrl)
+  if (!isExternalFeed(config.feedBase)) return
+  const pinned = getRequestReader(event, binding, requestUrl)
   if (!pinned) return
   try {
     return (await pinned.reader.open()).commitId
@@ -499,8 +540,8 @@ export function getFeedGeneration(
   seedDetails?: readonly string[],
   now?: number,
 ) {
-  if (!event) return
-  const pinned = getRequestReader(event, binding, config, requestUrl)
+  if (!event || !isExternalFeed(config.feedBase)) return
+  const pinned = getRequestReader(event, binding, requestUrl)
   if (!pinned) return
 
   const context: FeedContext = event.context

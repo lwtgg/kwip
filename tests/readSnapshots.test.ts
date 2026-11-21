@@ -458,3 +458,81 @@ test('stalled R2 ranges fall through to the seed without caching it under the R2
     event: 'feed_timeout', endpoint: 'stream', stage: 'snapshot', elapsedMs: FEED_DEADLINES_MS.snapshot,
   }])
 })
+
+for (const mode of ['readable', 'omitted', 'stalled'] as const) {
+  test(`double upstream timeout tries R2 before the seed with a ${mode} snapshot`, async (context) => {
+    const warnings = trackTimeouts(context)
+    const { bucket } = fixture(mode !== 'omitted')
+    const calls: string[] = []
+    const event = { context: { cloudflare: { env: { FEED_SNAPSHOTS: {
+      get(key, options) {
+        calls.push(options ? 'range' : 'identity')
+        return options && mode === 'stalled' ? never() : bucket.get(key, options)
+      },
+    } } } } }
+    const result = fetchFeed(async url => {
+      calls.push(new URL(url).hostname)
+      return never()
+    }, deadlineConfig, requestUrl, endpoints[1], {
+      async fetch() {
+        calls.push('seed')
+        return Response.json({ ...detail, data: { ...detail.data, name: 'Bundled' } })
+      },
+    }, { event, binding: 'FEED_SNAPSHOTS' })
+
+    context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+    await nextTurn()
+    assert.deepEqual(calls, ['primary.example', 'mirror.example'])
+    const expected = mode === 'omitted'
+      ? assert.rejects(result, { message: 'Feed endpoint unavailable in snapshot' })
+      : result
+    context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+    await nextTurn()
+
+    if (mode === 'stalled') {
+      assert.deepEqual(calls, ['primary.example', 'mirror.example', 'identity', 'range', 'range'])
+      context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
+    }
+    const payload = await expected
+    assert.deepEqual(calls, [
+      'primary.example', 'mirror.example', 'identity',
+      ...(mode === 'omitted' ? [] : ['range', 'range']),
+      ...(mode === 'stalled' ? ['seed'] : []),
+    ])
+    assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0]).stage), [
+      'primary', 'mirror', ...(mode === 'stalled' ? ['snapshot'] : []),
+    ])
+    if (mode !== 'omitted') {
+      assert.equal(payload?.data.name, mode === 'stalled' ? 'Bundled' : 'Example')
+      assert.equal(payload?.fromCache, true)
+      assert.equal(payload?.fromSnapshot, mode === 'readable' ? true : undefined)
+    }
+  })
+}
+
+test('sitemap direct-feed fallback uses R2 coverage after both upstreams time out', async (context) => {
+  trackTimeouts(context)
+  const { bucket } = fixture()
+  const attempts: string[] = []
+  context.mock.method(globalThis, '$fetch', url => {
+    attempts.push(url)
+    return never()
+  })
+  context.mock.method(globalThis, 'useRuntimeConfig', () => ({
+    feedSnapshotBinding: 'FEED_SNAPSHOTS',
+    seedDetailPaths: ['streams/missing'],
+    // An absolute fixture base uses the direct feed path and still has an R2 binding.
+    public: { ...deadlineConfig, feedBase: deadlineConfig.feedBase + '/fixtures' },
+  }))
+  const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
+  const result = sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } })
+  await nextTurn()
+  context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+  await nextTurn()
+  context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
+
+  const xml = await result
+  assert.equal(attempts.length, 4)
+  assert.match(xml, /\/live\/sport\/example/)
+  assert.doesNotMatch(xml, /\/live\/missing/)
+})

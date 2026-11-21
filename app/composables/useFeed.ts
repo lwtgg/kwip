@@ -183,7 +183,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
           }
         }
         const assets = import.meta.server ? getFeedAssets(event) : undefined
-        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
+        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets, { event, binding: config.feedSnapshotBinding })
       } catch (error) {
         if (signal.aborted || key !== cacheKey.value) throw error
         if (previous) return { ...previous, fromCache: true }
