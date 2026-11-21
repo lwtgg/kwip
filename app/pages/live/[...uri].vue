@@ -627,7 +627,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-inset) sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
     <StateBlock
       v-if="isStale && detail"
       variant="stale"
@@ -636,7 +636,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     />
 
     <!-- Header rendered in every state so loading, error, and empty still expose the page h1 -->
-    <div class="space-y-[calc(var(--section-gap)/2)]">
+    <div class="space-y-(--stack-gap)">
       <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
         <span>/</span>
@@ -651,7 +651,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         <span class="truncate text-fg">{{ pageHeading }}</span>
       </nav>
 
-      <div class="flex flex-col justify-between gap-x-4 gap-y-[calc(var(--section-gap)/2)] lg:flex-row lg:items-end">
+      <div class="flex flex-col justify-between gap-x-4 gap-y-(--stack-gap) lg:flex-row lg:items-end">
         <div class="space-y-2">
           <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
             {{ pageHeading }}
@@ -917,7 +917,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       <AdSlot format="leaderboard" placement="event-banner" />
 
       <!-- Related streams in same category -->
-      <section class="space-y-[calc(var(--page-inset)/2)]">
+      <section class="space-y-[calc(var(--stack-gap)*0.75)]">
         <div class="flex items-baseline justify-between gap-3">
           <h2 class="text-lg font-semibold tracking-tight text-fg">
             Related in {{ detail.category_name }}

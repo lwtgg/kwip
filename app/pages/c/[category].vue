@@ -106,8 +106,8 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-(--page-inset) px-4 py-(--page-inset) sm:px-6">
-    <div class="flex flex-col justify-between gap-x-4 gap-y-[calc(var(--section-gap)/2)] sm:flex-row sm:items-center">
+  <div class="mx-auto max-w-7xl space-y-[calc(var(--section-gap)*0.75)] px-4 py-(--page-padding) sm:px-6">
+    <div class="flex flex-col justify-between gap-x-4 gap-y-(--stack-gap) sm:flex-row sm:items-center">
       <div class="space-y-1">
         <nav aria-label="Breadcrumb" class="text-xs text-muted">
           <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>

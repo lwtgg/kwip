@@ -18,9 +18,36 @@ from click_under_browser import EVENT, worker
 VOD = '/vods/hou-mia-full-replay'
 ROUTES = (
     ('Home', '/', None, 0.01),
-    ('Live event', EVENT, 'Event player', 0.08),
-    ('Replay', VOD, 'Replay player', 0.05),
+    ('Live event', EVENT, 'Event player', 0.10),
+    ('Populated replay', VOD, 'Replay player', 0.10),
 )
+CATEGORY = ('Basketball category', '/c/basketball', None, 0.01)
+SHORT_REPLAY = ('Short replay', VOD, 'Replay player', 0.05)
+
+
+def populate_basketball(path):
+    listing = json.loads(path.read_text())
+    category = next(group for group in listing['streams'] if group['category'] == 'Basketball')
+    template = category['streams'][0]
+    games = [
+        ('BOS', 'NYK', 'Celtics vs. Knicks'),
+        ('LAL', 'GSW', 'Lakers vs. Warriors'),
+        ('MIL', 'CHI', 'Bucks vs. Bulls'),
+        ('DAL', 'SAS', 'Mavericks vs. Spurs'),
+        ('ORL', 'ATL', 'Magic vs. Hawks'),
+        ('POR', 'SAC', 'Trail Blazers vs. Kings'),
+        ('CLE', 'DET', 'Cavaliers vs. Pistons'),
+        ('IND', 'TOR', 'Pacers vs. Raptors'),
+        ('UTA', 'OKC', 'Jazz vs. Thunder'),
+        ('MEM', 'NOP', 'Grizzlies vs. Pelicans'),
+    ]
+    for index, (home, away, name) in enumerate(games):
+        start = template['starts_at'] + (index + 1) * 3600
+        category['streams'].append(dict(
+            template, id=32300 + index, name=name, uri_name=f'basketball/{home.lower()}-{away.lower()}',
+            starts_at=start, ends_at=start + 10800,
+        ))
+    path.write_text(json.dumps(listing))
 
 
 def snapshot(page, player):
@@ -28,7 +55,8 @@ def snapshot(page, player):
       const selectors = ['[data-ad-format]'];
       if (player) selectors.push(`section[aria-label="${player}"] .aspect-video`);
       return {
-        height: document.documentElement.scrollHeight,
+        documentHeight: document.documentElement.scrollHeight,
+        contentHeight: document.querySelector('header + .flex-1 > :first-child').getBoundingClientRect().height,
         boxes: Object.fromEntries(selectors.map(selector => [
           selector, Array.from(document.querySelectorAll(selector), el => {
             const {width, height} = el.getBoundingClientRect();
@@ -54,7 +82,8 @@ def assert_mode(page, compact, baseline=False):
 
 def check_page(browser, origin, width, route, baseline=False, banners=False):
     name, path, player, floor = route
-    with browser.new_context(viewport={'width': width, 'height': 700}) as context:
+    viewport = 1200 if route == SHORT_REPLAY else 700
+    with browser.new_context(viewport={'width': width, 'height': viewport}) as context:
         context.add_init_script("""(() => {
           window.densityModes = [];
           new MutationObserver(changes => {
@@ -94,8 +123,17 @@ def check_page(browser, origin, width, route, baseline=False, banners=False):
             for control in page.get_by_role('group', name='Playback source').get_by_role('button').all():
                 assert control.bounding_box()['height'] >= 44
         if not banners:
-            reduction = (comfortable['height'] - compact['height']) / comfortable['height']
-            print(f'{width}px {name} ({path}): {comfortable["height"]} → {compact["height"]} px ({reduction:.1%})')
+            shorter_than_viewport = compact['documentHeight'] <= viewport
+            if route == SHORT_REPLAY:
+                assert shorter_than_viewport, (width, compact)
+            else:
+                assert not shorter_than_viewport, (path, width, compact)
+            # The flex-1 wrapper grows to fill the viewport. Measure its page child
+            # when the document height hits that floor so the spare space is excluded.
+            metric = 'contentHeight' if shorter_than_viewport else 'documentHeight'
+            before, after = comfortable[metric], compact[metric]
+            reduction = (before - after) / before
+            print(f'{width}px {name} ({path}, {metric}): {before:g} → {after:g} px ({reduction:.1%})')
             if not baseline:
                 assert reduction >= floor, (path, width, reduction, floor)
 
@@ -128,7 +166,8 @@ def main():
         output = directory / 'output'
         shutil.copytree(args.output, output)
         vod_path = output / 'public/fixtures/vod.json'
-        replay = json.loads(vod_path.read_text())['data']
+        original_replay = vod_path.read_text()
+        replay = json.loads(original_replay)['data']
         replay['source'] = {'type': 'link', 'data': '/fixtures/away.html'}
         replay['recommended_vods'] = [
             dict(replay, id=9002, uri_name='another-replay', name='Another replay', recommended_vods=[]),
@@ -154,6 +193,12 @@ def main():
                     check_page(browser, origin, width, ROUTES[1], banners=True)
                     check_page(browser, origin, width, ('Archive', '/vods', None, 0), banners=True)
             print('Player and banner dimensions match in both modes at both widths')
+        vod_path.write_text(original_replay)
+        populate_basketball(output / 'public/fixtures/streams.json')
+        with worker(directory, 'density-category', output, EXTERNAL_DESTINATION, False, player='/fixtures') as origin:
+            for width in (390, 1280):
+                check_page(browser, origin, width, CATEGORY, args.baseline)
+                check_page(browser, origin, width, SHORT_REPLAY, args.baseline)
         browser.close()
 
 

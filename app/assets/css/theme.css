@@ -23,9 +23,10 @@
   --card-gap: 0.5rem;
   --grid-gap: 1rem;
   --rail-gap: 1rem;
-  /* Layout density controls the vertical rhythm between and around sections. */
+  /* Layout density sets page padding, gaps between sections, and gaps within heading stacks. */
+  --page-padding: 1.5rem;
   --section-gap: 2rem;
-  --page-inset: 1.5rem;
+  --stack-gap: 1rem;
   --banner-leaderboard-width: 970px;
   --banner-leaderboard-height: 90px;
   --banner-mobile-width: 320px;
@@ -39,8 +40,9 @@
   --card-gap: 0.25rem;
   --grid-gap: 0.625rem;
   --rail-gap: 0.625rem;
+  --page-padding: 0.5rem;
   --section-gap: 0.5rem;
-  --page-inset: 0.5rem;
+  --stack-gap: 0.25rem;
 }
 
 /* Rule 12: dark default, light must not be broken */

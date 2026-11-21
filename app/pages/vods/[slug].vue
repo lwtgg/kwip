@@ -233,7 +233,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-inset) sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
     <StateBlock
       v-if="isStale && detail"
       variant="stale"
@@ -242,7 +242,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
     />
 
     <!-- Header rendered in all states so loading, error, and empty still expose the page h1 -->
-    <div class="space-y-[calc(var(--page-inset)/2)]">
+    <div class="space-y-[calc(var(--stack-gap)*0.75)]">
       <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
         <span>/</span>
