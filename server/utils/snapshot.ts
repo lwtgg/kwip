@@ -1,6 +1,6 @@
 import { feedDetailPath, isSnapshotPath, type FeedCollection } from './feed-path.ts'
 
-import type { SnapshotHealth } from '../../app/utils/snapshotHealth.ts'
+import { isFreshSnapshotHealth, type SnapshotHealth, type SnapshotSourceHealth } from '../../app/utils/snapshotHealth.ts'
 
 interface ByteRange {
   offset: number
@@ -273,7 +273,7 @@ export function createSnapshotReader(bucket: SnapshotBucket) {
     return { payloads, has: (path: string) => generation.ranges.has(path) }
   }
 
-  async function readHealth(commitId: string): Promise<SnapshotHealth> {
+  async function readHealth(commitId: string, now = Date.now()): Promise<SnapshotHealth> {
     try {
       const generation = await open()
       const range = generation.ranges.get('health.json')
@@ -294,7 +294,7 @@ export function createSnapshotReader(bucket: SnapshotBucket) {
           || (segmentMs !== undefined && (!Number.isSafeInteger(segmentMs) || Number(segmentMs) < 0))
           || (error !== undefined && (typeof error !== 'string' || !/^[a-z][a-z\d-]{1,31}$/.test(error)))) return {}
       }
-      return Object.fromEntries(entries) as SnapshotHealth
+      return Object.fromEntries(entries.filter(([, value]) => isFreshSnapshotHealth(value as SnapshotSourceHealth, now))) as SnapshotHealth
     } catch {
       return {}
     }

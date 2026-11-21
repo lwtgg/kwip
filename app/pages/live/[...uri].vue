@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { SnapshotHealth } from '~/utils/snapshotHealth'
+import { isFreshSnapshotHealth, SNAPSHOT_HEALTH_MAX_AGE_MS, type SnapshotHealth } from '~/utils/snapshotHealth'
 import { NuxtLink } from '#components'
 import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
@@ -20,8 +20,7 @@ const uriName = computed(() => {
   return (Array.isArray(raw) ? raw.join('/') : String(raw || '')).replace(/^\/+|\/+$/g, '')
 })
 
-const { feed, list, detail, matchingListItem, healthCommit } = useStream(uriName)
-const usesInitialPayload = import.meta.server || useNuxtApp().isHydrating
+const { feed, list, detail, matchingListItem } = useStream(uriName)
 
 const {
   data: streamResp,
@@ -92,7 +91,6 @@ const supplement = shallowRef<SupplementState>({ status: 'idle' })
 onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
 
 const snapshotHealth = shallowRef<SnapshotHealth>()
-const generationSourceUrls = new Set<string>()
 const playerInput = computed(() => ({
   locale: detail.value?.locale,
   source_tag: detail.value?.source_tag,
@@ -102,15 +100,41 @@ const playerInput = computed(() => ({
   ],
 }))
 const attemptSources = computed(() => usePlayerSources(playerInput.value))
-const sources = computed(() => {
-  const health = snapshotHealth.value
-  if (!health) return attemptSources.value
-  const matchingHealth = Object.fromEntries(playerInput.value.sources.flatMap(({ data }) => {
-    if (!generationSourceUrls.has(data)) return []
-    const key = sourceKey(data)
-    return health[key] ? [[key, health[key]]] : []
-  }))
-  return usePlayerSources(playerInput.value, matchingHealth)
+const sources = computed(() => snapshotHealth.value
+  ? usePlayerSources(playerInput.value, snapshotHealth.value)
+  : attemptSources.value)
+
+onMounted(() => {
+  watch([
+    () => detail.value?.uri_name,
+    () => streamResp.value?.fromSnapshot ? streamResp.value.healthGeneration : undefined,
+  ], ([uri, generation], _, onCleanup) => {
+    snapshotHealth.value = undefined
+    if (!uri || !generation) return
+    const controller = new AbortController()
+    let expiry: ReturnType<typeof setTimeout> | undefined
+    onCleanup(() => {
+      controller.abort()
+      clearTimeout(expiry)
+    })
+    function apply(health: SnapshotHealth) {
+      if (controller.signal.aborted) return
+      const now = Date.now()
+      const fresh = Object.entries(health).filter(([, entry]) => isFreshSnapshotHealth(entry, now))
+      if (!fresh.length) {
+        snapshotHealth.value = undefined
+        return
+      }
+      const entries = Object.fromEntries(fresh)
+      snapshotHealth.value = entries
+      const nextExpiry = Math.min(...fresh.map(([, entry]) => Date.parse(entry.checkedAt) + SNAPSHOT_HEALTH_MAX_AGE_MS))
+      expiry = setTimeout(() => apply(entries), nextExpiry - now)
+    }
+    void $fetch<SnapshotHealth>('/api/source-health', {
+      query: { generation },
+      signal: controller.signal,
+    }).then(apply).catch(() => {})
+  }, { immediate: true, flush: 'sync' })
 })
 
 async function loadSupplement() {
@@ -577,31 +601,6 @@ useHead({
       : [],
 })
 await Promise.all([feed, list])
-if (import.meta.client && usesInitialPayload && healthCommit.value && streamResp.value?.fromSnapshot) {
-  const commitId = healthCommit.value
-  const initialUri = uriName.value
-  const initialDetail = streamResp.value.data
-  for (const source of detail.value?.sources ?? []) generationSourceUrls.add(source.data)
-  const controller = new AbortController()
-  const clearHealth = () => {
-    controller.abort()
-    snapshotHealth.value = undefined
-  }
-  onBeforeUnmount(clearHealth)
-  watch(uriName, clearHealth, { flush: 'sync' })
-  watch(streamResp, response => {
-    if (response?.fromSnapshot && response.data !== initialDetail) clearHealth()
-  }, { flush: 'sync' })
-  onMounted(() => {
-    if (uriName.value !== initialUri || controller.signal.aborted) return
-    void $fetch<SnapshotHealth>('/api/source-health', {
-      query: { generation: commitId },
-      signal: controller.signal,
-    }).then(health => {
-      if (!controller.signal.aborted && Object.keys(health).length) snapshotHealth.value = health
-    }).catch(() => {})
-  })
-}
 if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnavailable(streamError.value))) {
   throw createError({ statusCode: 404, fatal: true })
 }

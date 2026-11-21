@@ -146,7 +146,6 @@ function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
 function useFeedEndpoint<T extends { success: boolean }>(
   keyPrefix: MaybeRefOrGetter<string>,
   resolveEndpoint: () => FeedEndpoint,
-  onSnapshot?: (commitId: string) => void,
 ) {
   const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
@@ -166,8 +165,23 @@ function useFeedEndpoint<T extends { success: boolean }>(
         ? nuxtApp.payload.data[key] as (T & FeedProvenance) | undefined
         : undefined
       const serverError = import.meta.client ? nuxtApp.payload._errors[key] : undefined
-      if (isSnapshotOmitted(serverError)) throw serverError
+      if (nuxtApp.isHydrating && isSnapshotOmitted(serverError)) throw serverError
       try {
+        if (import.meta.client && endpoint.kind === 'stream' && URL.canParse(config.public.feedBase)) {
+          const snapshot = await fetcher<Partial<T & FeedProvenance> & { snapshotOmitted?: true }>('/api/stream-snapshot', {
+            query: { uri: endpoint.uriName },
+            signal,
+          }).catch(() => undefined)
+          signal.throwIfAborted()
+          if (snapshot?.snapshotOmitted) {
+            throw createError({
+              statusCode: 503,
+              statusMessage: 'Feed endpoint unavailable',
+              data: { snapshotUnavailable: true, snapshotOmitted: true },
+            })
+          }
+          if (snapshot?.success === true) return snapshot as T & FeedProvenance
+        }
         if (browserRefresh) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
         }
@@ -179,12 +193,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
           : undefined
         if (resolved) {
           const payload = resolved.get<T>(endpoint)
-          if (payload) {
-            if ('healthGeneration' in resolved && typeof resolved.healthGeneration === 'string') {
-              onSnapshot?.(resolved.healthGeneration)
-            }
-            return payload
-          }
+          if (payload) return payload
           throw createError({
             statusCode: 503,
             statusMessage: 'Feed endpoint unavailable',
@@ -198,7 +207,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
         const assets = import.meta.server ? getFeedAssets(event) : undefined
         return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
       } catch (error) {
-        if (signal.aborted || key !== cacheKey.value) throw error
+        if (signal.aborted || key !== cacheKey.value || isSnapshotOmitted(error)) throw error
         if (previous) return { ...previous, fromCache: true }
         if (browserRefresh && endpoint.kind !== 'ping') {
           return fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, requestUrl.host).catch(() => {
@@ -230,8 +239,8 @@ function useFeedEndpoint<T extends { success: boolean }>(
   return feed
 }
 
-function isSnapshotOmitted(error: { data?: unknown } | null | undefined): boolean {
-  const data = error?.data
+function isSnapshotOmitted(error: unknown): boolean {
+  const data = error && typeof error === 'object' && 'data' in error ? error.data : undefined
   return !!data && typeof data === 'object' && 'snapshotOmitted' in data && data.snapshotOmitted === true
 }
 
@@ -272,11 +281,9 @@ type RawStreamDetail = Omit<FeedStreamDetail,
 
 export function useStream(uriName: MaybeRefOrGetter<string>) {
   const list = useStreams()
-  const healthCommit = useState<string | undefined>(() => undefined)
   const feed = useFeedEndpoint<{ success: true; data: RawStreamDetail }>(
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
-    commitId => { healthCommit.value = commitId },
   )
   const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
   const matchingListItem = computed(() => {
@@ -329,7 +336,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       substreams: undefined,
     }
   })
-  return { feed, list, detail, matchingListItem, healthCommit }
+  return { feed, list, detail, matchingListItem }
 }
 
 export function useVods() {

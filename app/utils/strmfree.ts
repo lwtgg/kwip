@@ -33,6 +33,12 @@ const variantQualities = new Map([
   ['540p', 'SD'], ['480p', 'SD'], ['360p', 'SD'],
 ])
 
+export function sourceQualityBand(tag: unknown) {
+  if (typeof tag !== 'string') return
+  const label = /^(4k|uhd|fhd|hd|sd|\d{3,4}p)\b/i.exec(tag.trim())?.[1]?.toLowerCase()
+  if (label) return variantQualities.get(label) ?? (label === 'uhd' ? '4K' : label.toUpperCase())
+}
+
 function teams(name: string): string[] {
   return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
     .split(/(?<![\p{L}\p{N}])(?:vs|v|at)(?![\p{L}\p{N}])/u)

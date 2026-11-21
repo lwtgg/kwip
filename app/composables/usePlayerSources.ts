@@ -1,6 +1,6 @@
 import type { SnapshotHealth } from '~/utils/snapshotHealth'
-import { sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
-import type { SupplementSource } from '~/utils/strmfree'
+import { sourceHost, sourceKey, sourceLabel } from '../utils/sourceIdentity.ts'
+import { sourceQualityBand, type SupplementSource } from '../utils/strmfree.ts'
 import type { FeedStreamSource, FeedSourceKind } from './useFeed'
 
 type PlayerSource = (FeedStreamSource | SupplementSource) & {
@@ -58,25 +58,28 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
 
   if (!labelled.some(option => option.degraded)) return labelled
 
-  // Keep the feed's existing slots for each quality and locale, and only reorder peers.
-  const peers = new Map<string, { index: number; option: SourceOption; viewers: number }[]>()
-  for (const [index, option] of labelled.entries()) {
+  // Sort only within contiguous runs of known quality and matching locale.
+  const ranked = labelled.map((option, index) => {
     const source = uniqueSources.get(option.key)!
-    const tag = source.sourceTag ?? source.source_tag ?? ('origin' in source ? '' : stream.source_tag ?? '')
-    const quality = typeof tag === 'string'
-      ? /^(fhd|uhd|hd|sd|\d{3,4}p)\b/i.exec(tag.trim())?.[1]?.toLowerCase() ?? ''
-      : ''
-    const locale = source.locale ?? ('origin' in source ? '' : stream.locale ?? '')
-    const tier = JSON.stringify([quality, typeof locale === 'string' ? locale.toLowerCase() : ''])
-    if (!peers.has(tier)) peers.set(tier, [])
-    peers.get(tier)!.push({ index, option, viewers: Number(source.viewers) || 0 })
-  }
-  const ordered: SourceOption[] = [...labelled]
-  for (const group of peers.values()) {
-    if (!group.some(({ option }) => option.degraded)) continue
-    const ranked = [...group].sort((a, b) => Number(!!a.option.degraded) - Number(!!b.option.degraded)
-      || b.viewers - a.viewers)
-    group.forEach(({ index }, rank) => { ordered[index] = ranked[rank]!.option })
+    const tag = source.sourceTag ?? source.source_tag ?? (source.default && !('origin' in source) ? stream.source_tag : undefined)
+    const quality = sourceQualityBand(tag)
+    const locale = source.locale ?? ('origin' in source ? undefined : stream.locale)
+    return {
+      option,
+      tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
+      viewers: Number(source.viewers) || 0,
+    }
+  })
+  const ordered: SourceOption[] = []
+  for (let start = 0; start < ranked.length;) {
+    let end = start + 1
+    while (end < ranked.length && ranked[end]!.tier === ranked[start]!.tier) end++
+    const group = ranked.slice(start, end)
+    if (group.some(({ option }) => option.degraded)) {
+      group.sort((a, b) => Number(!!a.option.degraded) - Number(!!b.option.degraded) || b.viewers - a.viewers)
+    }
+    ordered.push(...group.map(({ option }) => option))
+    start = end
   }
   return ordered
 }

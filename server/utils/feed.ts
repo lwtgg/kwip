@@ -39,6 +39,7 @@ interface FeedConfig {
 export interface FeedProvenance {
   fromCache?: true
   fromSnapshot?: true
+  healthGeneration?: string
   hasSnapshotReplay?: true
 }
 
@@ -444,7 +445,9 @@ export async function readFeedGeneration(
       const snapshot = await reader.read(paths)
       signal.throwIfAborted()
       for (const [path, entry] of snapshot.payloads) {
-        payloads.set(path, normalizeSnapshotPayload(path, entry, host))
+        const payload = normalizeSnapshotPayload(path, entry, host)
+        if (hasHealth && path === streamPath) payload.healthGeneration = identity
+        payloads.set(path, payload)
       }
       window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined
       const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
@@ -467,7 +470,6 @@ export async function readFeedGeneration(
     : listingBoundary(payloads.get('streams'), requestUrl, now)
   return {
     readable: identity !== undefined,
-    healthGeneration: hasHealth && streamPath && payloads.has(streamPath) ? identity : undefined,
     cacheBoundary,
     cacheIdentity: paths.every(path => payloads.has(path)) ? identity : undefined,
     get<T extends { success: boolean }>(endpoint: FeedEndpoint) {

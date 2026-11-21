@@ -87,12 +87,14 @@ test('reads optional health only for the selected generation', async () => {
     'example.com/player': { embedOk: false, manifestOk: false, sequence: 'unknown', checkedAt: time, error: 'embed-404' },
   }
   const { bucket, manifest, corrupt } = fixture(true, detail, false, 'sport/example', true, channels, health)
-  assert.deepEqual(await createSnapshotReader(bucket).readHealth(commitId), health)
-  assert.deepEqual(await createSnapshotReader(bucket).readHealth('20261119T000000Z-01234568'), {})
-  assert.deepEqual(await createSnapshotReader(fixture().bucket).readHealth(commitId), {})
+  assert.deepEqual(await createSnapshotReader(bucket).readHealth(commitId, Date.parse(time)), health)
+  assert.deepEqual(await createSnapshotReader(bucket).readHealth('20261119T000000Z-01234568', Date.parse(time)), {})
+  assert.deepEqual(await createSnapshotReader(bucket).readHealth(commitId, Date.parse(time) + 30 * 60_000), {})
+  assert.deepEqual(await createSnapshotReader(bucket).readHealth(commitId, Date.parse(time) - 1), {})
+  assert.deepEqual(await createSnapshotReader(fixture().bucket).readHealth(commitId, Date.parse(time)), {})
   corrupt(manifest.endpoints.at(-1)!.offset)
   const reader = createSnapshotReader(bucket)
-  assert.deepEqual(await reader.readHealth(commitId), {})
+  assert.deepEqual(await reader.readHealth(commitId, Date.parse(time)), {})
   const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
   assert.equal(generation.readable, true)
   assert.equal(generation.get(endpoints[1])?.data.name, 'Example')
