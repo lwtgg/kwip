@@ -1,7 +1,8 @@
 import type { H3Event } from 'h3'
-import { getCookie, getRequestURL, getResponseHeaders, getResponseStatus, setResponseHeader } from 'h3'
+import { getCookie, getResponseHeaders, getResponseStatus, setResponseHeader } from 'h3'
 import { edgeCacheKey, edgeCacheMaxAge, isEdgeCacheable, renderSearch } from './edge-cache'
 import { FEED_DEADLINES_MS, getFeedCacheIdentity, getRenderedFeedGeneration, withinFeedDeadline } from './feed'
+import { getPageRequest, logPageBoundary } from './page-request'
 
 const cacheRequest = Symbol('edgeCacheRequest')
 type EdgeCacheContext = H3Event['context'] & {
@@ -10,22 +11,29 @@ type EdgeCacheContext = H3Event['context'] & {
 const expiryHeader = 'x-kwip-cache-until'
 const feedPage = /^\/(?:c\/[^/]+\/?|live\/.+|vods(?:\/.*)?|sitemap\.xml)?$/i
 
-export async function lookupEdgePage(event: H3Event) {
+export function edgePageCandidate(event: H3Event, url: URL) {
   const cache = (globalThis.caches as (CacheStorage & { default?: Cache }) | undefined)?.default
   const request: Request | undefined = event.context.cloudflare?.request
   // Wrangler can emulate caches.default. Only use the edge cache for Cloudflare ingress.
   if (!cache || request?.method !== 'GET' || !request.headers.has('cf-ray') || !event.context.waitUntil) return
-  const url = new URL(request.url)
-  if (!feedPage.test(url.pathname)) return
+  const ingressUrl = new URL(request.url)
+  if (!feedPage.test(ingressUrl.pathname)) return
 
-  setResponseHeader(event, 'cache-control', 'no-store')
   // Layout SSR writes appearance preferences into HTML and the hydration state.
-  if (url.pathname !== '/sitemap.xml' &&
-      (getCookie(event, 'theme') !== undefined || getCookie(event, 'density') !== undefined)) return
-  if (getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin !== url.origin) return
+  const personalized = ingressUrl.pathname !== '/sitemap.xml' &&
+    (getCookie(event, 'theme') !== undefined || getCookie(event, 'density') !== undefined)
+  return { cache, url: ingressUrl, eligible: !personalized && url.origin === ingressUrl.origin }
+}
+
+export async function lookupEdgePage(event: H3Event, candidate: ReturnType<typeof edgePageCandidate>) {
+  if (!candidate) return
+  setResponseHeader(event, 'cache-control', 'no-store')
+  if (!candidate.eligible) return
+  const { cache, url } = candidate
 
   const { feedSnapshotBinding, public: config } = useRuntimeConfig(event)
   const identity = await getFeedCacheIdentity(event, feedSnapshotBinding, config, url)
+  logPageBoundary(event, 'edge_cache_identity', { found: !!identity })
   if (!identity) return
   const query = renderSearch(url)
   const timed = /^(?:\/$|\/(?:live|c)\/)/i.test(url.pathname)
@@ -33,33 +41,62 @@ export async function lookupEdgePage(event: H3Event) {
   const cacheQuery = new URLSearchParams(query)
   if (config.ads === true) cacheQuery.set('ads', '1')
   const key = edgeCacheKey(url, identity, cacheQuery)
+  const page = getPageRequest(event)
+  const isFresh = (cached: Response) => !timed || Number(cached.headers.get(expiryHeader)) > Date.now() / 1000
   try {
     const endpoint = url.pathname === '/sitemap.xml' ? 'sitemap' : 'page'
     const cached = await withinFeedDeadline(endpoint, 'cache-match', FEED_DEADLINES_MS.cacheMatch, async (signal) => {
       const response = await cache.match(key)
-      // A late hit has no consumer after SSR starts.
+      // Let SSR proceed after the cache-match deadline. Keep a late, valid hit
+      // available until the HTML render finishes or reaches its total deadline.
       if (signal.aborted) {
-        await response?.body?.cancel()
+        if (response && page && !page.renderFinished && endpoint === 'page' && isFresh(response)) {
+          page.cachedFallback = response
+        } else {
+          await response?.body?.cancel()
+        }
         return
       }
       return response
     })
+    logPageBoundary(event, 'edge_cache_match', { found: !!cached })
     // The absolute deadline also excludes entries written before the current TTL rules.
-    if (cached && (!timed || Number(cached.headers.get(expiryHeader)) > Date.now() / 1000)) {
-      const response = new Response(cached.body, cached)
-      response.headers.delete(expiryHeader)
-      response.headers.set('x-kwip-cache', 'hit')
-      response.headers.set('cache-control', 'no-store')
-      return response
+    if (cached && isFresh(cached) && !page?.renderFinished) {
+      // The total deadline can reject this result even before either timer callback runs.
+      if (page && endpoint === 'page') page.cachedFallback = cached
+      return edgeHit(cached)
     }
     if (cached?.body) event.waitUntil(cached.body.cancel().catch(() => {}))
   } catch {
+    logPageBoundary(event, 'edge_cache_match', { failed: true })
     // A cache failure must leave the normal render available.
   }
 
   const context: EdgeCacheContext = event.context
   context[cacheRequest] = { cache, key, identity, search: query.toString(), timed }
+  if (page?.cancelled) return
   setResponseHeader(event, 'x-kwip-cache', 'miss')
+  logPageBoundary(event, 'edge_cache_after_miss')
+}
+
+function edgeHit(cached: Response) {
+  const response = new Response(cached.body, cached)
+  response.headers.delete(expiryHeader)
+  response.headers.set('x-kwip-cache', 'hit')
+  response.headers.set('cache-control', 'no-store')
+  return response
+}
+
+export function finishEdgeLookup(event: H3Event, allowFallback: boolean) {
+  const page = getPageRequest(event)
+  if (!page) return
+  page.renderFinished = true
+  const cached = page.cachedFallback
+  delete page.cachedFallback
+  if (!cached) return
+  const expires = cached.headers.get(expiryHeader)
+  if (allowFallback && (!expires || Number(expires) > Date.now() / 1000)) return edgeHit(cached)
+  if (cached.body) event.waitUntil(cached.body.cancel().catch(() => {}))
 }
 
 export function normalizeEdgeRenderPath(event: H3Event) {
@@ -74,8 +111,9 @@ export function normalizeEdgeRenderPath(event: H3Event) {
 export async function storeEdgePage(event: H3Event, body: unknown) {
   const context: EdgeCacheContext = event.context
   const pending = context[cacheRequest]
-  if (!pending || typeof body !== 'string') return
+  let scheduled = false
   try {
+    if (!pending || typeof body !== 'string' || getPageRequest(event)?.cancelled) return
     const status = getResponseStatus(event)
     const headers = new Headers()
     for (const [name, value] of Object.entries(getResponseHeaders(event))) {
@@ -83,7 +121,7 @@ export async function storeEdgePage(event: H3Event, body: unknown) {
     }
     if (!isEdgeCacheable(status, headers)) return
     const generation = await getRenderedFeedGeneration(event)
-    if (generation?.cacheIdentity !== pending.identity) return
+    if (generation?.cacheIdentity !== pending.identity || getPageRequest(event)?.cancelled) return
 
     const now = Date.now() / 1000
     const maxAge = edgeCacheMaxAge(generation.cacheBoundary, now)
@@ -93,7 +131,10 @@ export async function storeEdgePage(event: H3Event, body: unknown) {
     if (pending.timed) headers.set(expiryHeader, String(now + maxAge))
     const response = new Response(body, { status, headers })
     event.waitUntil(pending.cache.put(pending.key, response).catch(() => {}))
+    scheduled = true
   } catch {
     // Cache construction and scheduling are best-effort, just like the write.
+  } finally {
+    logPageBoundary(event, 'edge_cache_store', { scheduled })
   }
 }
