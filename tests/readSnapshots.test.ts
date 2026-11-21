@@ -26,7 +26,7 @@ const replayList = { success: true, vods: [{ category: 'Archive', vods: [
   { id: 4, uri_name: 'omitted', name: 'Omitted' },
 ] }] }
 
-function fixture(includeDetail = true, detailPayload: object = detail, includeReplay = false, liveUri = 'sport/example', includeVodList = true, streams: object = channels) {
+function fixture(includeDetail = true, detailPayload: object = detail, includeReplay = false, liveUri = 'sport/example', includeVodList = true, streams: object = channels, health?: object) {
   const data = [
     ['streams', liveUri === 'sport/example' ? streams : { ...channels, streams: [{
       category: 'Sports', always_live: 0, streams: [{ id: 1, name: 'Example', uri: liveUri }],
@@ -34,6 +34,7 @@ function fixture(includeDetail = true, detailPayload: object = detail, includeRe
     ...(includeVodList ? [['vods', replayList]] as const : []),
     ...(includeReplay ? [['vods/replay', { success: true, data: { id: 3, slug: 'replay', uri_name: 'different', name: 'Replay' } }]] : []),
     ...(includeDetail ? [['streams/' + liveUri, detailPayload]] : []),
+    ...(health ? [['health.json', health]] : []),
   ] as const
   const packed = Buffer.concat(data.map(([, value]) => Buffer.from(JSON.stringify(value))))
   let size = 0
@@ -79,6 +80,22 @@ test('shares a single manifest and resolves the validated byte ranges', async ()
   assert.equal(first, second)
   assert.deepEqual(result.payloads.get('streams/sport/example')?.payload, detail)
   assert.deepEqual(calls, ['current.json', first.payloadKey, first.payloadKey])
+})
+
+test('reads optional health only for the selected generation', async () => {
+  const health = {
+    'example.com/player': { embedOk: false, manifestOk: false, sequence: 'unknown', checkedAt: time, error: 'embed-404' },
+  }
+  const { bucket, manifest, corrupt } = fixture(true, detail, false, 'sport/example', true, channels, health)
+  assert.deepEqual(await createSnapshotReader(bucket).readHealth(commitId), health)
+  assert.deepEqual(await createSnapshotReader(bucket).readHealth('20261119T000000Z-01234568'), {})
+  assert.deepEqual(await createSnapshotReader(fixture().bucket).readHealth(commitId), {})
+  corrupt(manifest.endpoints.at(-1)!.offset)
+  const reader = createSnapshotReader(bucket)
+  assert.deepEqual(await reader.readHealth(commitId), {})
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
+  assert.equal(generation.readable, true)
+  assert.equal(generation.get(endpoints[1])?.data.name, 'Example')
 })
 
 test('request consumers share the whole batch and keep origin and cache provenance', async () => {

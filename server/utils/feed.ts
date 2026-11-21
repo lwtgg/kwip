@@ -404,6 +404,7 @@ function createRequestSnapshotReader(bucket: SnapshotBucket, endpoint: FeedEndpo
   return {
     open: () => identity ??= withinFeedDeadline(endpoint, 'identity', FEED_DEADLINES_MS.identity, reader.open),
     read: reader.read,
+    readHealth: reader.readHealth,
   }
 }
 
@@ -434,8 +435,11 @@ export async function readFeedGeneration(
   let window: ReturnType<typeof liveDetailWindow>
   let hasDetail: (path: string) => boolean = () => false
   let identity: string | undefined
+  let hasHealth = false
   try {
-    identity = (await reader.open()).commitId
+    const manifest = await reader.open()
+    identity = manifest.commitId
+    hasHealth = manifest.ranges.has('health.json')
     await withinFeedDeadline(endpoints.at(-1)?.kind ?? 'streams', 'snapshot', FEED_DEADLINES_MS.snapshot, async (signal) => {
       const snapshot = await reader.read(paths)
       signal.throwIfAborted()
@@ -463,6 +467,7 @@ export async function readFeedGeneration(
     : listingBoundary(payloads.get('streams'), requestUrl, now)
   return {
     readable: identity !== undefined,
+    healthGeneration: hasHealth && streamPath && payloads.has(streamPath) ? identity : undefined,
     cacheBoundary,
     cacheIdentity: paths.every(path => payloads.has(path)) ? identity : undefined,
     get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
@@ -625,4 +630,16 @@ export function getFeedGeneration(
     context[resolvedGeneration] = generation
     return generation
   })
+}
+
+export async function getSnapshotHealth(event: H3Event, binding: string, requestUrl: URL, commitId: string) {
+  if (!/^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$/.test(commitId)) return {}
+  const pinned = getRequestReader(event, binding, requestUrl)
+  if (!pinned) return {}
+  try {
+    return await withinFeedDeadline('stream', 'snapshot', FEED_DEADLINES_MS.snapshot,
+      () => pinned.reader.readHealth(commitId))
+  } catch {
+    return {}
+  }
 }

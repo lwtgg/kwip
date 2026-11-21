@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { SnapshotHealth } from '~/utils/snapshotHealth'
 import { NuxtLink } from '#components'
 import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
@@ -19,7 +20,8 @@ const uriName = computed(() => {
   return (Array.isArray(raw) ? raw.join('/') : String(raw || '')).replace(/^\/+|\/+$/g, '')
 })
 
-const { feed, list, detail, matchingListItem } = useStream(uriName)
+const { feed, list, detail, matchingListItem, healthCommit } = useStream(uriName)
+const usesInitialPayload = import.meta.server || useNuxtApp().isHydrating
 
 const {
   data: streamResp,
@@ -89,12 +91,27 @@ type SupplementState =
 const supplement = shallowRef<SupplementState>({ status: 'idle' })
 onBeforeUnmount(() => { supplement.value = { status: 'idle' } })
 
-const sources = computed(() => usePlayerSources({
+const snapshotHealth = shallowRef<SnapshotHealth>()
+const generationSourceUrls = new Set<string>()
+const playerInput = computed(() => ({
+  locale: detail.value?.locale,
+  source_tag: detail.value?.source_tag,
   sources: [
     ...(detail.value?.sources ?? []),
     ...(supplement.value.status === 'merged' ? supplement.value.sources : []),
   ],
 }))
+const attemptSources = computed(() => usePlayerSources(playerInput.value))
+const sources = computed(() => {
+  const health = snapshotHealth.value
+  if (!health) return attemptSources.value
+  const matchingHealth = Object.fromEntries(playerInput.value.sources.flatMap(({ data }) => {
+    if (!generationSourceUrls.has(data)) return []
+    const key = sourceKey(data)
+    return health[key] ? [[key, health[key]]] : []
+  }))
+  return usePlayerSources(playerInput.value, matchingHealth)
+})
 
 async function loadSupplement() {
   const event = detail.value
@@ -377,10 +394,10 @@ const firstRemainingLink = computed<SelectableSourceOption | null>(() =>
 function setAttemptAnchor(key: string | null) {
   anchorKey.value = key
   beforeKeys.clear()
-  const anchorAt = sources.value.findIndex((source) => source.key === anchorKey.value)
+  const anchorAt = attemptSources.value.findIndex((source) => source.key === anchorKey.value)
   if (anchorAt < 0) return
 
-  for (const source of sources.value.slice(0, anchorAt)) beforeKeys.add(source.key)
+  for (const source of attemptSources.value.slice(0, anchorAt)) beforeKeys.add(source.key)
 }
 
 function resetAttempt(key: string | null) {
@@ -391,7 +408,8 @@ function resetAttempt(key: string | null) {
   for (const source of sources.value) seenKeys.add(source.key)
 }
 
-function nextPlayableKey(options: SourceOption[], activeKey: string | null): string | null {
+function nextPlayableKey(activeKey: string | null): string | null {
+  const options = attemptSources.value
   expireRememberedHealth()
   const activeAt = options.findIndex((source) => source.key === activeKey)
   return options.find((source, index) =>
@@ -407,7 +425,7 @@ function handleFrameError() {
   expireRememberedHealth()
   rememberedHealth.value = eventHealth().record(key, rememberedHealth.value)
   attemptFailures.add(key)
-  selectedSourceKey.value = nextPlayableKey(sources.value, key)
+  selectedSourceKey.value = nextPlayableKey(key)
   chainExhausted = selectedSourceKey.value === null
   if (selectedSourceKey.value !== null) void writeSourceQuery(selectedSourceKey.value, true)
 }
@@ -559,6 +577,31 @@ useHead({
       : [],
 })
 await Promise.all([feed, list])
+if (import.meta.client && usesInitialPayload && healthCommit.value && streamResp.value?.fromSnapshot) {
+  const commitId = healthCommit.value
+  const initialUri = uriName.value
+  const initialDetail = streamResp.value.data
+  for (const source of detail.value?.sources ?? []) generationSourceUrls.add(source.data)
+  const controller = new AbortController()
+  const clearHealth = () => {
+    controller.abort()
+    snapshotHealth.value = undefined
+  }
+  onBeforeUnmount(clearHealth)
+  watch(uriName, clearHealth, { flush: 'sync' })
+  watch(streamResp, response => {
+    if (response?.fromSnapshot && response.data !== initialDetail) clearHealth()
+  }, { flush: 'sync' })
+  onMounted(() => {
+    if (uriName.value !== initialUri || controller.signal.aborted) return
+    void $fetch<SnapshotHealth>('/api/source-health', {
+      query: { generation: commitId },
+      signal: controller.signal,
+    }).then(health => {
+      if (!controller.signal.aborted && Object.keys(health).length) snapshotHealth.value = health
+    }).catch(() => {})
+  })
+}
 if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnavailable(streamError.value))) {
   throw createError({ statusCode: 404, fatal: true })
 }
@@ -598,7 +641,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     expireRememberedHealth()
     const preferred = defaultSourceKey.value
     selectedSourceKey.value = requestedSourceKey.value
-      ?? (preferred !== null && !failedKeys.value.has(preferred) ? preferred : nextPlayableKey(options, null))
+      ?? (preferred !== null && !failedKeys.value.has(preferred) ? preferred : nextPlayableKey(null))
     setAttemptAnchor(selectedSourceKey.value)
     chainExhausted = selectedSourceKey.value === null
     pendingSourceQuery = false
@@ -615,7 +658,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
       chainExhausted = false
     }
   } else if (!chainExhausted && !options.some((source) => source.key === selectedSourceKey.value)) {
-    const nextKey = nextPlayableKey(options, selectedSourceKey.value)
+    const nextKey = nextPlayableKey(selectedSourceKey.value)
     selectedSourceKey.value = nextKey
     if (anchorKey.value === null) setAttemptAnchor(nextKey)
     if (nextKey !== null) void writeSourceQuery(nextKey, true)

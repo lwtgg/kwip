@@ -146,6 +146,7 @@ function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
 function useFeedEndpoint<T extends { success: boolean }>(
   keyPrefix: MaybeRefOrGetter<string>,
   resolveEndpoint: () => FeedEndpoint,
+  onSnapshot?: (commitId: string) => void,
 ) {
   const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
@@ -178,7 +179,12 @@ function useFeedEndpoint<T extends { success: boolean }>(
           : undefined
         if (resolved) {
           const payload = resolved.get<T>(endpoint)
-          if (payload) return payload
+          if (payload) {
+            if ('healthGeneration' in resolved && typeof resolved.healthGeneration === 'string') {
+              onSnapshot?.(resolved.healthGeneration)
+            }
+            return payload
+          }
           throw createError({
             statusCode: 503,
             statusMessage: 'Feed endpoint unavailable',
@@ -257,6 +263,7 @@ type RawStreamDetail = Omit<FeedStreamDetail,
   colors?: string[]
   blurhash?: string
   substreams?: (Pick<FeedSubstream, 'name'> & {
+    locale?: string
     iframe?: string
     source_tag?: string
     sources?: FeedStreamSource[]
@@ -265,9 +272,11 @@ type RawStreamDetail = Omit<FeedStreamDetail,
 
 export function useStream(uriName: MaybeRefOrGetter<string>) {
   const list = useStreams()
+  const healthCommit = useState<string | undefined>(() => undefined)
   const feed = useFeedEndpoint<{ success: true; data: RawStreamDetail }>(
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
+    commitId => { healthCommit.value = commitId },
   )
   const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
   const matchingListItem = computed(() => {
@@ -295,7 +304,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       ? fixtureItem.substreams : raw.substreams
     const alternatives = (substreams ?? []).flatMap((substream) => {
       const name = [substream.name, substream.source_tag].filter(Boolean).join(' · ')
-      const identity = { name, substreamName: substream.name ?? '', sourceTag: substream.source_tag }
+      const identity = { name, substreamName: substream.name ?? '', sourceTag: substream.source_tag, ...(substream.locale ? { locale: substream.locale } : {}) }
       if (substream.sources?.length) {
         return substream.sources.map((source) => ({ ...source, ...identity, default: false }))
       }
@@ -320,7 +329,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       substreams: undefined,
     }
   })
-  return { feed, list, detail, matchingListItem }
+  return { feed, list, detail, matchingListItem, healthCommit }
 }
 
 export function useVods() {

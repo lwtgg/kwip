@@ -13,6 +13,7 @@ export function feedDetailPath(collection: FeedCollection, value: unknown): stri
 }
 
 export function isSnapshotPath(path: string): boolean {
+  if (path === 'health.json') return true
   const slash = path.indexOf('/')
   if (slash === -1) return path === 'streams' || path === 'vods'
   const collection = path.slice(0, slash)

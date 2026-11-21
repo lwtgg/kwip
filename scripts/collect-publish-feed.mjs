@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { loadEnvFile } from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
+import { candidates, collectSourceHealth, nearbyEvent } from './probe-source-health.mjs'
 import { AwsClient } from 'aws4fetch'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
@@ -104,12 +105,12 @@ async function collectFeed(base, directory, current, result, deadline) {
   const hashes = {}
   const details = new Map()
   let size = 0
+  const eventTimes = new Map()
+  const probeItems = []
+  const now = Date.now()
 
-  async function read(path) {
-    const bytes = await fetchProvider(base, path, run, deadline, snapshotLimit - size)
-    const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-    if (payload?.success !== true) throw new Error(`Unsuccessful payload for ${path}`)
-    validateSources(payload)
+  async function append(path, bytes) {
+    if (size + bytes.length >= snapshotLimit) throw new Error('Snapshot reached 40 MiB')
     const endpoint = { path, offset: size, length: bytes.length }
     size += bytes.length
     let stored = bytes
@@ -118,6 +119,14 @@ async function collectFeed(base, directory, current, result, deadline) {
       await writeFile(stored, bytes, { flag: 'wx' })
     }
     entries.push({ endpoint, stored })
+  }
+
+  async function read(path) {
+    const bytes = await fetchProvider(base, path, run, deadline, snapshotLimit - size)
+    const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    if (payload?.success !== true) throw new Error(`Unsuccessful payload for ${path}`)
+    validateSources(payload)
+    await append(path, bytes)
     return { payload, bytes }
   }
 
@@ -138,12 +147,15 @@ async function collectFeed(base, directory, current, result, deadline) {
         const id = String(item.id)
         if (details.has(path) && details.get(path) !== id) throw new Error(`Conflicting list IDs for ${path}`)
         details.set(path, id)
+        if (collection === 'streams') {
+          eventTimes.set(path, { starts_at: item.starts_at ?? item.start_timestamp, always_live: item.always_live ?? category.always_live })
+        }
       }
     }
     if (details.size === count) throw new Error(`Empty ${collection} list`)
   }
 
-  if (current && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
+  if (current && ![...eventTimes.values()].some(item => nearbyEvent(item, now)) && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
     return { unchanged: true }
@@ -157,8 +169,25 @@ async function collectFeed(base, directory, current, result, deadline) {
     const { payload, bytes } = await read(path)
     if (String(payload.data?.id) !== details.get(path)) throw new Error(`Mismatched detail ID for ${path}`)
     detailHashes.push([path, sha256(bytes)])
+    const timing = eventTimes.get(path)
+    if (timing) {
+      const item = payload.data
+      probeItems.push({
+        starts_at: item.starts_at ?? item.start_timestamp ?? timing.starts_at,
+        always_live: Number(timing.always_live) === 1 ? 1 : item.always_live,
+        iframe: item.iframe,
+        sources: item.sources,
+        substreams: item.substreams,
+      })
+    }
   }
   hashes.details = sha256(json(detailHashes))
+  const probes = candidates(probeItems, now)
+  if (probes.size) {
+    // Keep the existing publication deadline and leave room to write the payload.
+    const health = json(await collectSourceHealth(probes, Math.min(30_000, deadline - performance.now() - 10_000)))
+    if (size + health.length < snapshotLimit) await append('health.json', health)
+  }
   const bytes = Buffer.alloc(size)
   for (const { endpoint, stored } of entries) {
     timeLeft(deadline, 'Collection deadline exceeded')
