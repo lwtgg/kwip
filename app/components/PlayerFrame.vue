@@ -1,8 +1,9 @@
 <script setup lang="ts">
 const props = withDefaults(
   defineProps<{
-    src: string
+    src?: string
     title: string
+    poster?: string | null
     sandbox?: string
     timeoutMs?: number
   }>(),
@@ -50,11 +51,7 @@ function startTimer() {
   clearTimer()
   settled = false
   loaded.value = false
-  if (!import.meta.client) return
-  if (!props.src) {
-    failOnce()
-    return
-  }
+  if (!import.meta.client || !props.src) return
   if (frameHasDocument()) {
     succeedOnce()
     return
@@ -86,16 +83,17 @@ function frameHasDocument(allowLoading = false): boolean {
 }
 
 function handleLoad() {
-  if (frameHasDocument()) succeedOnce()
+  if (props.src && frameHasDocument()) succeedOnce()
 }
 
 function handleError() {
+  if (!props.src) return
   if (frameHasDocument(true)) succeedOnce()
   else failOnce()
 }
 
 function handleWindowMessage(event: MessageEvent) {
-  if (settled || !frameRef.value?.contentWindow) return
+  if (!props.src || settled || !frameRef.value?.contentWindow) return
   if (event.source === frameRef.value.contentWindow) {
     succeedOnce()
   }
@@ -140,13 +138,24 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface">
+  <div class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
+    :class="{ '[@media(scripting:none)]:hidden': !src }"
+  >
     <div
       v-if="!loaded"
       aria-live="polite"
-      class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface-2 text-xs text-muted motion-safe:animate-pulse [@media(scripting:none)]:hidden"
+      class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-surface-2 text-xs text-muted [@media(scripting:none)]:hidden"
     >
-      <span>Loading player embed…</span>
+      <img
+        v-if="poster"
+        :src="poster"
+        alt=""
+        width="1280"
+        height="720"
+        decoding="async"
+        class="absolute inset-0 h-full w-full object-cover"
+      >
+      <span class="relative rounded-full bg-surface-2 px-3 py-1.5">Loading player embed…</span>
     </div>
 
     <div
