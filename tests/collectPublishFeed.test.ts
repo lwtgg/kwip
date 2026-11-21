@@ -24,10 +24,14 @@ const mock = String.raw`
   const startsAt = Math.floor(Date.now() / 1000)
   const primary = { name: 'Primary', type: 'iframe', default: true, data: 'https://strmfree.st/embed/soccer/away-home?primary' }
   const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(450) : '') + '720p'
-  const shortcut = ['shortcut-baseline', 'unmatched', 'out-of-window', 'plausible'].includes(mode)
+  const disagreement = ['detail-baseline', 'detail-match', 'list-only-match'].includes(mode)
+  const shortcut = disagreement || ['shortcut-baseline', 'unmatched', 'out-of-window', 'plausible'].includes(mode)
   const start = shortcut ? 2_000_000_000 : startsAt + (['capacity', 'fixture'].includes(mode) ? 0 : 4 * 3600)
   const acceptedAlternate = 'https://streamfree.top/embed/soccer/east-west-720p'
-  if (shortcut) Object.assign(fixture.streams.streams[0].streams[0], { name: 'Home FC vs. Away FC', starts_at: start })
+  if (shortcut) Object.assign(fixture.streams.streams[0].streams[0], {
+    name: disagreement ? 'Other FC vs. Away FC' : 'Home FC vs. Away FC',
+    starts_at: disagreement ? start + 4 * 3600 : start,
+  })
   if (mode !== 'baseline') {
     Object.assign(fixture['streams/foo'].data, {
       name: 'Home FC vs. Away FC', starts_at: start, sources: [primary],
@@ -73,12 +77,13 @@ const mock = String.raw`
       const url = new URL(request)
       if (url.href === 'https://strmfree.pk/api/v1/streams') {
         listingRequests++
-        if (!['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible'].includes(mode)) {
+        if (!['duplicates', 'capacity', 'unmatched', 'out-of-window', 'plausible', 'detail-match', 'list-only-match'].includes(mode)) {
           return new Response(null, { status: 503 })
         }
         const streams = [{
-          name: mode === 'unmatched' ? 'Away at Other' : 'Away at Home', category: 'soccer',
-          match_timestamp: mode === 'out-of-window' ? start + 3 * 3600 + 1 : start,
+          name: ['unmatched', 'list-only-match'].includes(mode) ? 'Away at Other' : 'Away at Home', category: 'soccer',
+          match_timestamp: mode === 'list-only-match' ? start + 4 * 3600
+            : mode === 'out-of-window' ? start + 3 * 3600 + 1 : start,
           additional_sources: [
             { url: 'https://strmfree.st/embed/soccer/AWAY-HOME/?supplement', quality: 'FHD' },
             { url: alternate, quality: 'HD' },
@@ -135,7 +140,7 @@ const mock = String.raw`
           } else if (mode === 'capacity' && path === 'streams/foo.json/bar') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.map(source => source.data), [acceptedAlternate])
-          } else if (['duplicates', 'plausible'].includes(mode) && path === 'streams/foo') {
+          } else if (['duplicates', 'plausible', 'detail-match'].includes(mode) && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
             assert.equal(sources.length, 2)
             assert.deepEqual(sources[0], primary)
@@ -233,4 +238,19 @@ test('unchanged listings crawl only for a plausible supplement match', async () 
     ['unchanged', 2],
     ['published', 5],
   ])
+})
+
+test('unchanged lists use the same detail name and kickoff as a fresh supplement merge', async () => {
+  const { manifest } = await publish(['--dry-run'], null, 'detail-baseline')
+  const [fresh, refreshed, listedOnly] = await Promise.all([
+    publish([], null, 'detail-match'),
+    publish([], manifest, 'detail-match'),
+    publish([], manifest, 'list-only-match'),
+  ])
+  assert.equal(fresh.outcome, 'published')
+  assert.equal(refreshed.outcome, 'published')
+  assert.equal(refreshed.providerRequests, 5)
+  assert.deepEqual(refreshed.bytes, fresh.bytes)
+  assert.equal(listedOnly.outcome, 'unchanged')
+  assert.equal(listedOnly.providerRequests, 2)
 })

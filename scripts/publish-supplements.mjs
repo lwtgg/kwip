@@ -42,14 +42,20 @@ export async function fetchSupplementListing(deadline) {
   return payload
 }
 
-export function matchPublishedSupplement(item, timing, listing) {
-  if (!listing || Number(timing.always_live) === 1) return
+export function supplementEvent(item, timing) {
   const category = item.category_name || timing.category
-  return findSupplement(
-    { name: item.name, starts_at: Number(timing.starts_at) },
-    typeof category === 'string' ? slugifyCategory(category) : '',
-    listing,
-  )
+  const start = Number(item.starts_at ?? item.start_timestamp ?? timing.starts_at)
+  return {
+    name: typeof item.name === 'string' ? item.name : '',
+    starts_at: Number.isFinite(start) ? start : 0,
+    always_live: Number(timing.always_live) === 1 || Number(item.always_live) === 1 ? 1 : 0,
+    categorySlug: typeof category === 'string' ? slugifyCategory(category) : '',
+  }
+}
+
+export function matchPublishedSupplement(event, listing) {
+  if (!listing || event.always_live === 1) return
+  return findSupplement(event, event.categorySlug, listing)
 }
 
 export function publishedSupplementSources(item, match) {

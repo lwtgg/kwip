@@ -7,10 +7,9 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { parseArgs } from 'node:util'
 import { candidates, collectSourceHealth, nearbyEvent } from './probe-source-health.mjs'
 import {
-  fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources,
+  fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources, supplementEvent,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
-import { hasSupplementCandidate } from '../app/utils/supplementMatch.ts'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
 // Collection starts after the publisher pins the manifest ETag.
@@ -110,6 +109,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   const details = new Map()
   let size = 0
   const eventTimes = new Map()
+  const supplementEvents = []
   const probeItems = []
   const matches = []
   const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
@@ -155,7 +155,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
         details.set(path, id)
         if (collection === 'streams') {
           eventTimes.set(path, {
-            name: item.name, category: item.category_name || category.category,
+            category: item.category_name || category.category,
             starts_at: item.starts_at ?? item.start_timestamp, always_live: item.always_live ?? category.always_live,
           })
         }
@@ -165,10 +165,11 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   }
 
   const listing = await supplementListing
-  const needsDetails = [...eventTimes.values()].some(item => nearbyEvent(item, now) || (
-    listing && Number(item.always_live) !== 1 && typeof item.name === 'string'
-    && hasSupplementCandidate({ name: item.name, starts_at: Number(item.starts_at) }, listing)
-  ))
+  // Older manifests lack detail metadata. A nonempty listing requires one full refresh to populate it.
+  const publishedEvents = current?.supplementEvents
+  const needsDetails = [...eventTimes.values()].some(item => nearbyEvent(item, now))
+    || publishedEvents?.some(event => nearbyEvent(event, now) || matchPublishedSupplement(event, listing))
+    || (!publishedEvents && !!listing?.streams.length)
   if (current && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
@@ -187,16 +188,11 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     const timing = eventTimes.get(path)
     if (timing) {
       const item = payload.data
-      const probeItem = {
-        starts_at: item.starts_at ?? item.start_timestamp ?? timing.starts_at,
-        always_live: Number(timing.always_live) === 1 ? 1 : item.always_live,
-        category: timing.category,
-        iframe: item.iframe,
-        sources: item.sources,
-        substreams: item.substreams,
-      }
+      const event = supplementEvent(item, timing)
+      supplementEvents.push(event)
+      const probeItem = { ...event, iframe: item.iframe, sources: item.sources, substreams: item.substreams }
       if (!fixture) probeItems.push(probeItem)
-      const match = typeof item.name === 'string' && matchPublishedSupplement(item, probeItem, listing)
+      const match = matchPublishedSupplement(event, listing)
       if (match) {
         const sources = publishedSupplementSources(item, match)
         if (sources.length) matches.push({ match, sources, timing: probeItem, payload, entry: entries.at(-1), hash })
@@ -251,7 +247,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   timeLeft(deadline, 'Collection deadline exceeded')
   return { snapshot: {
     bytes, size, endpoints: entries.map(({ endpoint }) => endpoint), hashes,
-    hasSupplements: accepted.length > 0,
+    hasSupplements: accepted.length > 0, supplementEvents,
   } }
 }
 
@@ -382,6 +378,11 @@ function validateManifest(manifest) {
   }
   if (end !== manifest.size || !paths.has('streams') || !paths.has('vods')) {
     throw new Error('Invalid endpoint coverage in current snapshot manifest')
+  }
+  if (manifest.supplementEvents !== undefined && (!Array.isArray(manifest.supplementEvents)
+    || !manifest.supplementEvents.every(event => typeof event?.name === 'string' && Number.isFinite(event.starts_at)
+      && (event.always_live === 0 || event.always_live === 1) && typeof event.categorySlug === 'string'))) {
+    throw new Error('Invalid supplement events in current snapshot manifest')
   }
   return payloadId
 }
@@ -521,10 +522,16 @@ async function publish(result, deadline) {
         schema: 1, commitId: result.commitId, payloadId: result.commitId, payloadKey: `snapshots/${result.commitId}.bin`,
         size: snapshot.size, hashes: snapshot.hashes, publishedAt: now,
         ...(snapshot.hasSupplements ? { hasSupplements: true } : {}),
+        supplementEvents: snapshot.supplementEvents,
         listsVerifiedAt: now, detailsVerifiedAt: now, endpoints: snapshot.endpoints,
       }
 
-  const body = json(manifest)
+  let body = json(manifest)
+  if (!unchanged && body.length > fileLimit) {
+    // Readers limit the manifest to 2 MiB. Oversized detail metadata is optional.
+    delete manifest.supplementEvents
+    body = json(manifest)
+  }
   result.bytes = { snapshot: manifest.size, manifest: body.length, payloadPut: 0 }
   if (dryRun) {
     result.dryRun = true
