@@ -34,15 +34,19 @@ function allowedUrl(url: string): boolean {
   }
 }
 
+export const SUPPLEMENT_CACHE_TTL_MS = 10 * 60_000
+
 export function isCachedSupplement(value: unknown, now: number): value is {
   status: 'merged'
   fetchedAt: number
+  eventId?: string
   sources: SupplementSource[]
 } {
   if (typeof value !== 'object' || value === null) return false
-  const { status, fetchedAt, sources } = value as Record<string, unknown>
+  const { status, fetchedAt, eventId, sources } = value as Record<string, unknown>
   return status === 'merged' && typeof fetchedAt === 'number' && Number.isSafeInteger(fetchedAt)
-    && fetchedAt > 0 && fetchedAt <= now && now - fetchedAt < 600_000
+    && fetchedAt > 0 && fetchedAt <= now && now - fetchedAt < SUPPLEMENT_CACHE_TTL_MS
+    && (eventId === undefined || typeof eventId === 'string')
     && Array.isArray(sources) && sources.every((source) =>
       source !== null && typeof source === 'object' && !Array.isArray(source)
       && typeof source.data === 'string' && allowedUrl(source.data)

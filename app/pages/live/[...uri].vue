@@ -140,7 +140,7 @@ onMounted(() => {
   }, { immediate: true, flush: 'sync' })
 })
 
-async function loadSupplement() {
+async function loadSupplement(skipCache = false) {
   const event = detail.value
   const now = Date.now()
   if (hasPublishedSupplement.value || supplement.value.status !== 'idle'
@@ -151,7 +151,7 @@ async function loadSupplement() {
   const storageKey = `supplement:v6:${uriName.value}`
   try {
     const cached = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null')
-    if (isCachedSupplement(cached, now)) {
+    if (!skipCache && isCachedSupplement(cached, now) && (cached.eventId === undefined || cached.eventId === String(event.id))) {
       supplement.value = cached
       return
     }
@@ -184,7 +184,7 @@ async function loadSupplement() {
       return
     }
 
-    const merged = { status: 'merged', fetchedAt: Date.now(), sources: matched } as const
+    const merged = { status: 'merged', fetchedAt: Date.now(), eventId: String(event.id), sources: matched } as const
     supplement.value = merged
     try {
       sessionStorage.setItem(storageKey, JSON.stringify(merged))
@@ -615,6 +615,18 @@ if (!detail.value && !(validFeedPath('streams', uriName.value) && isSnapshotUnav
 }
 
 let pendingSourceQuery = true
+let observedEvent: { uri: string; id: string } | undefined
+watch([uriName, () => detail.value?.id, hasPublishedSupplement], ([uri, id, published], previous) => {
+  if (observedEvent?.uri !== uri) observedEvent = undefined
+  if (id === undefined) return
+  const changed = !!observedEvent && observedEvent.id !== String(id)
+  observedEvent = { uri, id: String(id) }
+  if (changed) supplement.value = { status: 'idle' }
+  if (mounted.value && !published && (changed || previous?.[2])) {
+    if (changed || !sources.value.some(source => source.key === selectedSourceKey.value)) pendingSourceQuery = true
+    void loadSupplement(changed)
+  }
+}, { immediate: true })
 watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, query, options, ready], [previousUri, previousQuery, , wasReady]) => {
   if (!ready) {
     selectedSourceKey.value = initialFeedSource.value?.key ?? null

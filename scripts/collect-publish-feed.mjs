@@ -10,7 +10,6 @@ import {
   fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement, publishedSupplementSources, supplementEvent,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
-import { sourceKey } from '../app/utils/sourceIdentity.ts'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
 
 // Collection starts after the publisher pins the manifest ETag.
@@ -207,6 +206,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     Math.min(performance.now() + 5_000, supplementDeadline)) : undefined
   const primaryProbes = candidates(probeItems, now)
   const supplementProbes = new Map()
+  const eligibleSupplementKeys = new Set()
   // Reserve the largest serialized record for each queued key before admitting sources.
   const maxHealthRecordBytes = json({
     embedOk: false, manifestOk: false, sequence: 'advancing',
@@ -232,13 +232,8 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       if (pending.size === available) break
       if (!supplementProbes.has(key)) pending.set(key, source)
     }
-    const admitted = supplements.filter(source => {
-      const key = sourceKey(source.data)
-      return !eligible.has(key) || supplementProbes.has(key) || pending.has(key)
-    })
-    if (!admitted.length) continue
     const nextReserve = [...pending.keys()].reduce((size, key) => size + recordReserve(key), healthReserve)
-    const sources = [...(payload.data.sources ?? []), ...admitted]
+    const sources = [...(payload.data.sources ?? []), ...supplements]
     const bytes = json({ ...payload, data: { ...payload.data, sources } })
     const delta = bytes.length - entry.endpoint.length
     if (performance.now() >= supplementDeadline) {
@@ -251,6 +246,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     entry.endpoint.length = bytes.length
     size += delta
     hash[1] = sha256(bytes)
+    for (const key of eligible.keys()) eligibleSupplementKeys.add(key)
     for (const [key, source] of pending) supplementProbes.set(key, source)
     healthReserve = nextReserve
     hasSupplements = true
@@ -263,7 +259,11 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     const completed = key => Object.hasOwn(health, key)
     result.probes = {
       primary: { queued: primaryProbes.size, deadlineDropped: primaryProbes.size - [...primaryProbes.keys()].filter(completed).length },
-      supplement: { queued: supplementProbes.size, deadlineDropped: supplementProbes.size - [...supplementProbes.keys()].filter(completed).length },
+      supplement: {
+        queued: supplementProbes.size,
+        capExcluded: eligibleSupplementKeys.size - supplementProbes.size,
+        deadlineDropped: supplementProbes.size - [...supplementProbes.keys()].filter(completed).length,
+      },
     }
     const healthBytes = json(health)
     if (size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)

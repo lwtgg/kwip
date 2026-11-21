@@ -3,6 +3,7 @@
     python tests/sourceHealth_browser.py .output
 """
 import argparse
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import re
@@ -393,7 +394,12 @@ export default {
             )])
             packed = b''
             endpoints = []
-            for path, item in [('streams', upstream), (f'streams/{uri}', {'success': True, 'data': published})]:
+            health = {first_url.removeprefix('https://'): dict(
+                embedOk=False, manifestOk=False, sequence='unknown',
+                checkedAt=datetime.now(UTC).isoformat(), error='embed-503',
+            )}
+            for path, item in [('streams', upstream), (f'streams/{uri}', {'success': True, 'data': published}),
+                               ('health.json', health)]:
                 payload = json.dumps(item).encode()
                 endpoints.append(dict(path=path, offset=len(packed), length=len(payload)))
                 packed += payload
@@ -406,9 +412,11 @@ export default {
                             'NUXT_PUBLIC_FEED_BASE': f'{base}/healthy',
                             'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
                         }) as origin:
-                for duplicate in (False, True):
+                for mode in ('unchanged', 'duplicate', 'new-id', 'expiry'):
                     updated = dict(detail, name='Refreshed upstream event')
-                    if duplicate:
+                    if mode == 'new-id':
+                        updated['id'] += 1
+                    if mode == 'duplicate':
                         updated['sources'] = [*detail['sources'], dict(
                             name='Upstream duplicate', data=supplement_url + '?duplicate=1',
                             default=False, type='iframe',
@@ -427,26 +435,47 @@ export default {
                             route.fulfill(body='<h1>Playback fixture</h1>', content_type='text/html')
                         elif url.startswith(origin + '/'):
                             route.continue_()
+                        elif url == 'https://strmfree.pk/api/v1/streams':
+                            browser_requests.append('provider')
+                            route.fulfill(json={'streams': []}, headers={'Access-Control-Allow-Origin': '*'})
                         else:
-                            if url.startswith('https://strmfree.pk/api/'):
-                                browser_requests.append('provider')
                             route.abort()
 
                     with browser.new_context(viewport={'width': 1280, 'height': 900}) as context:
                         context.route('**/*', intercept)
                         page = context.new_page()
+                        if mode == 'expiry':
+                            page.clock.install()
+                        if mode == 'new-id':
+                            page.add_init_script(f'''sessionStorage.setItem('supplement:v6:{uri}', JSON.stringify({{
+                                status: 'merged', fetchedAt: Date.now(), eventId: '{detail["id"]}', sources: [{{
+                                    data: '{supplement_url}', origin: 'supplement', name: '', substreamName: '',
+                                    type: 'iframe', default: false,
+                                }}],
+                            }}))''')
                         response = page.goto(origin + EVENT + '?source=' + quote(supplement_key))
                         assert response.ok
                         expect(page.get_by_role('heading', name=updated['name'], exact=True)).to_be_visible()
                         picker = page.get_by_role('group', name='Playback source')
                         chip = picker.locator(f'button[value="{supplement_key}"]')
-                        expect(chip).to_have_count(1)
-                        expect(chip).to_contain_text('Strmfree · FHD')
-                        expect(chip).to_contain_text('Not live')
-                        expect(chip).to_have_attribute('aria-pressed', 'true')
-                        expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
-                        assert browser_requests == ['detail'], browser_requests
-                    print(f'Supplement selection survives cross-origin detail refresh (duplicate={duplicate})')
+                        primary = picker.locator(f'button[value="{first_url.removeprefix("https://")}"]')
+                        if mode != 'new-id':
+                            expect(chip).to_have_count(1)
+                            expect(chip).to_contain_text('Strmfree · FHD')
+                            expect(chip).to_contain_text('Not live')
+                            expect(chip).to_have_attribute('aria-pressed', 'true')
+                            expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
+                            expect(primary).to_contain_text('Degraded')
+                            assert browser_requests == ['detail'], browser_requests
+                        if mode == 'expiry':
+                            with page.expect_response('https://strmfree.pk/api/v1/streams'):
+                                page.clock.fast_forward(10 * 60_000)
+                        if mode in ('new-id', 'expiry'):
+                            expect(chip).to_have_count(0)
+                            expect(primary).not_to_contain_text('Degraded')
+                            expect(page.locator('iframe')).to_have_attribute('src', first_url)
+                            assert browser_requests.count('provider') == 1, browser_requests
+                    print(f'Published supplement refresh and expiry check passed ({mode})')
         finally:
             release.set()
             provider.shutdown()

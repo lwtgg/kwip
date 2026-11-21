@@ -1,5 +1,6 @@
-import { shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { sourceKey } from '../utils/sourceIdentity.ts'
+import { SUPPLEMENT_CACHE_TTL_MS } from '../utils/strmfree.ts'
 import {
   fetchBrowserFeed,
   fetchFeed,
@@ -273,16 +274,37 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
   )
-  const publishedDetail = shallowRef<{ uri: string; sources: FeedStreamSource[]; healthGeneration?: string }>()
+  let adopted: { uri: string; id: string; generation: string } | undefined
+  const publishedDetail = shallowRef<{
+    generation: string
+    sources: FeedStreamSource[]
+    healthGeneration?: string
+  }>()
+  let expiry: ReturnType<typeof setTimeout> | undefined
+  function clearPublishedDetail() {
+    clearTimeout(expiry)
+    publishedDetail.value = undefined
+  }
+  onScopeDispose(clearPublishedDetail)
   watch([() => toValue(uriName), feed.data], ([uri, payload]) => {
-    if (publishedDetail.value?.uri !== uri) publishedDetail.value = undefined
     const item = payload?.data
-    if (!payload?.detailGeneration || (item?.uri_name ?? item?.uri) !== uri) return
+    const currentItem = item && (item.uri_name ?? item.uri) === uri ? item : undefined
+    const id = currentItem && String(currentItem.id)
+    if (adopted && (adopted.uri !== uri || (id !== undefined && adopted.id !== id))) {
+      adopted = undefined
+      clearPublishedDetail()
+    }
+    const generation = payload?.detailGeneration
+    if (!generation || !currentItem || id === undefined || adopted?.generation === generation) return
+
+    adopted = { uri, id, generation }
+    clearTimeout(expiry)
     publishedDetail.value = {
-      uri,
-      sources: item?.sources?.filter(source => source.origin === 'supplement') ?? [],
+      generation,
+      sources: currentItem.sources?.filter(source => source.origin === 'supplement') ?? [],
       healthGeneration: payload.healthGeneration,
     }
+    if (import.meta.client) expiry = setTimeout(clearPublishedDetail, SUPPLEMENT_CACHE_TTL_MS)
   }, { immediate: true, flush: 'sync' })
 
   const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
@@ -326,7 +348,7 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     const ordered = [
       ...sources.filter(source => source.origin !== 'supplement'),
       ...alternatives,
-      ...sources.filter(source => source.origin === 'supplement'),
+      ...(feed.data.value?.detailGeneration ? [] : sources.filter(source => source.origin === 'supplement')),
     ]
     return {
       ...raw,

@@ -167,7 +167,7 @@ const mock = String.raw`
           } else if (split && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.slice(0, primarySources.length), primarySources)
-            assert.deepEqual(sources.slice(primarySources.length).map(source => source.data), splitAlternates.slice(0, 24))
+            assert.deepEqual(sources.slice(primarySources.length).map(source => source.data), splitAlternates)
           } else if (mode === 'capacity' && path === 'streams/foo.json/bar') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.map(source => source.data), [acceptedAlternate])
@@ -291,7 +291,7 @@ test('publisher packs 40 primary records and 24 supplement records under separat
   assert.equal(result.outcome, 'published')
   assert.deepEqual(result.probes, {
     primary: { queued: 40, deadlineDropped: 0 },
-    supplement: { queued: 24, deadlineDropped: 0 },
+    supplement: { queued: 24, capExcluded: 2, deadlineDropped: 0 },
   })
 })
 
@@ -300,6 +300,6 @@ test('publisher reports probe deadline drops by side and still publishes', async
   assert.equal(result.outcome, 'published')
   assert.deepEqual(result.probes, {
     primary: { queued: 40, deadlineDropped: 40 },
-    supplement: { queued: 24, deadlineDropped: 24 },
+    supplement: { queued: 24, capExcluded: 2, deadlineDropped: 24 },
   })
 })
