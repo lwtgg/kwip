@@ -8,11 +8,11 @@ confidence label. Where a claim could not be verified it says so.
 Skills read: `writing-plans` (shape), `verification-before-completion` (claims vs. checks),
 `agent-browser` (measurement method).
 
-One finding reframes the brief, so it goes first: **v1 is not ad-free in practice.** Three of the
+One finding reframes the brief, so it goes first: **v1 was never ad-free in practice.** Three of the
 three embed-fed sites tested fire a popunder when the visitor clicks the player, and we frame one of
 those same embeds. Our page already carries a third-party ad library (`aclib`) and hands a new tab to
-whoever wins the auction. We just do not bill for it. The page that "currently has none" has none of
-its own.
+whoever wins the auction. Since the flip the page also carries our own few ads, one banner and one
+click-under, while the embed's popunder still fires underneath and is not ours.
 
 ## 1. The traffic model
 
@@ -189,7 +189,7 @@ does not clear about $1.00, pull the display and keep only the underlay.
   owing uptime. Only alongside something real (playlist, no-popup).
 - **Header bidding.** No one here runs `ads.txt`; at 50k the auction overhead exceeds the yield.
 - **Donations.** Nothing in the category sustains one; a footer link, not a model.
-- **An ad-free promise.** Make it before we know RPM and it becomes a liability the first bad month.
+- **An ad-free promise.** The flip claims "ad-supported", never "ad-free", so a bad RPM month is a credibility problem rather than a broken promise.
 
 ## Sources
 
