@@ -5,6 +5,7 @@ import {
   fetchFeedSnapshot,
   getFeedAssets,
   getFeedGeneration,
+  getFeedFallback,
   isCrossOriginFeed,
   type FeedEndpoint,
   type FeedProvenance,
@@ -31,7 +32,6 @@ export interface FeedSubstream {
 }
 
 export interface FeedStreamItem {
-  uri?: string
   id: number
   name: string
   tag: string
@@ -164,6 +164,8 @@ function useFeedEndpoint<T extends { success: boolean }>(
       const previous = import.meta.client
         ? nuxtApp.payload.data[key] as (T & FeedProvenance) | undefined
         : undefined
+      const serverError = import.meta.client ? nuxtApp.payload._errors[key] : undefined
+      if (isSnapshotOmitted(serverError)) throw serverError
       try {
         if (browserRefresh) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
@@ -171,22 +173,21 @@ function useFeedEndpoint<T extends { success: boolean }>(
         const generation = import.meta.server && endpoint.kind !== 'ping'
           ? await getFeedGeneration(event, config.feedSnapshotBinding, config.public, requestUrl, undefined, now?.value)
           : undefined
-        const payload = generation?.get<T>(endpoint)
-        if (payload) return payload
-
-        const assets = import.meta.server ? getFeedAssets(event) : undefined
-        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets, {
-          event,
-          binding: config.feedSnapshotBinding,
-          generation: generation && (generation.readable ? 'omitted' : 'unreadable'),
-        }).catch(error => {
-          if (!generation) throw error
+        const resolved = generation?.readable ? generation : import.meta.server && endpoint.kind !== 'ping'
+          ? await getFeedFallback(event, config.feedSnapshotBinding, fetcher, config.public, requestUrl, config.seedDetailPaths, now?.value)
+          : undefined
+        if (resolved) {
+          const payload = resolved.get<T>(endpoint)
+          if (payload) return payload
           throw createError({
             statusCode: 503,
             statusMessage: 'Feed endpoint unavailable',
-            data: { snapshotUnavailable: true },
+            data: { snapshotUnavailable: true, snapshotOmitted: 'readable' in resolved && resolved.readable },
           })
-        })
+        }
+
+        const assets = import.meta.server ? getFeedAssets(event) : undefined
+        return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
       } catch (error) {
         if (signal.aborted || key !== cacheKey.value) throw error
         if (previous) return { ...previous, fromCache: true }
@@ -211,13 +212,18 @@ function useFeedEndpoint<T extends { success: boolean }>(
   if (browserRefresh && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
     // Keep the SSR payload in place until Nuxt has finished hydrating.
     onNuxtReady(() => {
-      if (!feed.data.value || feed.data.value.fromCache) {
+      if (!isSnapshotOmitted(feed.error.value) && (!feed.data.value || feed.data.value.fromCache)) {
         void feed.refresh({ dedupe: 'defer' })
       }
     })
   }
 
   return feed
+}
+
+function isSnapshotOmitted(error: { data?: unknown } | null | undefined): boolean {
+  const data = error?.data
+  return !!data && typeof data === 'object' && 'snapshotOmitted' in data && data.snapshotOmitted === true
 }
 
 export function isSnapshotUnavailable(error: { data?: unknown } | null | undefined): boolean {

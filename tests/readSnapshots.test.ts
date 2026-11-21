@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 import { createSnapshotReader, type SnapshotBucket } from '../server/utils/snapshot.ts'
-import { FEED_DEADLINES_MS, fetchFeed, getFeedCacheIdentity, getFeedGeneration, readFeedGeneration } from '../server/utils/feed.ts'
+import { FEED_DEADLINES_MS, fetchFeed, getFeedCacheIdentity, getFeedFallback, getFeedGeneration, readFeedGeneration } from '../server/utils/feed.ts'
 
 const commitId = '20261119T000000Z-01234567'
 const time = '2026-11-19T00:00:00.000Z'
@@ -488,18 +488,21 @@ test('sitemap direct-feed fallback uses R2 coverage after both upstreams time ou
   assert.doesNotMatch(xml, /\/live\/missing/)
 })
 
-test('a failed R2 retry discards the whole sitemap batch before serving the seed', async (context) => {
+test('one healthy upstream endpoint cannot mix with seed data in the sitemap', async (context) => {
   trackTimeouts(context)
   const { bucket, manifest } = fixture()
   let opens = 0
   const calls: string[] = []
   context.mock.method(globalThis, '$fetch', url => {
     calls.push(new URL(url).hostname)
+    if (new URL(url).pathname === '/streams') return { success: true, streams: [{
+      category: 'Sports', streams: [{ id: 9, uri_name: 'upstream-only', name: 'Upstream' }],
+    }] }
     return never()
   })
   context.mock.method(globalThis, 'useRuntimeConfig', () => ({
     feedSnapshotBinding: 'FEED_SNAPSHOTS',
-    seedDetailPaths: ['streams/missing'],
+    seedDetailPaths: ['streams/missing', 'vods/seed-replay'],
     public: deadlineConfig,
   }))
   const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
@@ -519,7 +522,9 @@ test('a failed R2 retry discards the whole sitemap batch before serving the seed
       async fetch(request: Request) {
         const path = new URL(request.url).pathname
         calls.push(path)
-        return Response.json(path.endsWith('/streams.json') ? channels : { success: true, vods: [] })
+        return Response.json(path.endsWith('/streams.json') ? channels : {
+          success: true, vods: [{ category: 'Replays', vods: [{ id: 11, uri_name: 'seed-replay', name: 'Seed replay' }] }],
+        })
       },
     },
   } } } })
@@ -529,11 +534,48 @@ test('a failed R2 retry discards the whole sitemap batch before serving the seed
     await nextTurn()
   }
   assert.deepEqual(calls, [
-    'manifest', 'primary.example', 'primary.example', 'mirror.example', 'mirror.example', 'manifest',
+    'manifest', 'primary.example', 'primary.example', 'mirror.example', 'manifest',
   ])
   context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
   const xml = await result
   assert.match(xml, /\/live\/missing/)
-  assert.doesNotMatch(xml, /\/live\/sport\/example/)
+  assert.match(xml, /\/vods\/seed-replay/)
+  assert.doesNotMatch(xml, /\/live\/(?:sport\/example|upstream-only)/)
   assert.deepEqual(calls.slice(-2), ['/feed-cache/streams.json', '/feed-cache/vods.json'])
+})
+
+test('sitemap respects an omitted listing in a readable generation', async (context) => {
+  const { bucket } = fixture(false, detail, false, 'sport/example', false)
+  const upstream = context.mock.method(globalThis, '$fetch', unreachable)
+  const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
+  const xml = await sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } })
+  assert.doesNotMatch(xml, /\/vods\//)
+  assert.equal(upstream.mock.callCount(), 0)
+})
+
+test('healthy sitemap ignores upstream listings without uri_name', async (context) => {
+  context.mock.method(globalThis, '$fetch', async url =>
+    new URL(url).pathname.endsWith('/streams') ? channels : { success: true, vods: [] },
+  )
+  const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
+  const xml = await sitemap({ context: { cloudflare: { env: {} } } })
+  assert.doesNotMatch(xml, /\/live\/sport\/example/)
+  assert.match(xml, /\/live\/missing/)
+})
+
+test('seed fallback keeps its listing when the requested live detail is absent from the seed', async () => {
+  const calls: string[] = []
+  const event = { context: { cloudflare: { env: {
+    ASSETS: {
+      async fetch(request: Request) {
+        const path = new URL(request.url).pathname
+        calls.push(path)
+        return path.endsWith('/streams.json') ? Response.json(channels) : new Response(null, { status: 404 })
+      },
+    },
+  } } } }
+  const seed = await getFeedFallback(event, 'FEED_SNAPSHOTS', unreachable, deadlineConfig, requestUrl, [])
+  assert.equal(seed?.get(endpoints[0])?.fromCache, true)
+  assert.equal(seed?.get(endpoints[1]), undefined)
+  assert.deepEqual(calls, ['/feed-cache/streams.json'])
 })

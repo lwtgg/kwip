@@ -1,5 +1,5 @@
 import type { H3Event } from 'h3'
-import { containsHostToken, createSnapshotReader, type SnapshotBucket } from './snapshot.ts'
+import { compactSnapshotPayload, containsHostToken, createSnapshotReader, type SnapshotBucket } from './snapshot.ts'
 import { feedDetailPath, validFeedPath } from './feed-path.ts'
 
 interface FeedAssets {
@@ -212,7 +212,7 @@ export async function fetchFeedSnapshot<T extends { success: boolean }>(
 interface FeedSnapshotFallback {
   event: H3Event | undefined
   binding: string
-  generation?: 'unreadable' | 'omitted'
+  upstreamOnly?: boolean
   onCoverage?: (hasDetail: (path: string) => boolean) => void
 }
 
@@ -242,20 +242,12 @@ export async function fetchFeed<T extends { success: boolean }>(
         upstreamError = error
       }
     }
-    if (!URL.canParse(config.feedBase) || endpoint.kind === 'ping' || snapshotFallback?.generation === 'omitted') {
+    if (!URL.canParse(config.feedBase) || endpoint.kind === 'ping' || snapshotFallback?.upstreamOnly) {
       throw upstreamError
     }
     const doubleTimeout = err instanceof FeedTimeoutError &&
       upstreamError instanceof FeedTimeoutError && upstreamError.stage === 'mirror'
-    if (snapshotFallback?.event && snapshotFallback.generation === 'unreadable') {
-      const generation = await getRetryFeedGeneration(snapshotFallback.event, snapshotFallback.binding, requestUrl, host)
-      if (generation?.readable) {
-        const entry = generation.get<T>(endpoint)
-        if (!entry) throw new FeedResponseError('Feed endpoint unavailable in snapshot')
-        snapshotFallback.onCoverage?.(generation.hasDetail)
-        return entry
-      }
-    } else if (snapshotFallback?.event && doubleTimeout) {
+    if (snapshotFallback?.event && doubleTimeout) {
       const pinned = getRequestReader(snapshotFallback.event, snapshotFallback.binding, requestUrl, retryReader)
       if (pinned) {
         const path = snapshotPath(endpoint)
@@ -483,12 +475,12 @@ export async function readFeedGeneration(
 // Nitro and the Nuxt SSR bundle each compile this module.
 const requestGeneration = Symbol.for('kwip.feedGeneration')
 const requestReader = Symbol.for('kwip.snapshotReader')
-const requestRetryGeneration = Symbol.for('kwip.feedRetryGeneration')
+const requestFallback = Symbol.for('kwip.feedFallback')
 const retryReader = Symbol.for('kwip.snapshotRetryReader')
 
 type FeedContext = H3Event['context'] & {
   [requestGeneration]?: ReturnType<typeof readFeedGeneration>
-  [requestRetryGeneration]?: ReturnType<typeof readFeedGeneration>
+  [requestFallback]?: ReturnType<typeof readFeedFallback>
   [requestReader]?: { bucket: SnapshotBucket; reader: ReturnType<typeof createRequestSnapshotReader> }
   [retryReader]?: FeedContext[typeof requestReader]
 }
@@ -502,13 +494,91 @@ function getRequestReader(event: H3Event, binding: string, requestUrl: URL, slot
   return context[slot] = { bucket, reader: createRequestSnapshotReader(bucket, pageRequirements(requestUrl).at(-1)!.kind) }
 }
 
-function getRetryFeedGeneration(event: H3Event, binding: string, requestUrl: URL, host: string) {
+async function readFeedFallback(
+  event: H3Event,
+  binding: string,
+  fetcher: typeof $fetch,
+  config: FeedConfig,
+  requestUrl: URL,
+  endpoints: FeedEndpoint[],
+  seedDetails: readonly string[],
+  now: number,
+) {
+  const assets = getFeedAssets(event)
+  const paths = endpoints.map(snapshotPath)
+  const host = requestUrl.host || config.canonicalHost
+  const batch = await Promise.allSettled(endpoints.map(endpoint =>
+    fetchFeed<SnapshotPayload>(fetcher, config, requestUrl, endpoint, assets, { event, binding, upstreamOnly: true }),
+  ))
+  if (batch.every(result => result.status === 'fulfilled')) {
+    const payloads = new Map(paths.map((path, index) => [path, batch[index]!.value]))
+    return {
+      hasDetail: (_path: string) => true,
+      get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
+        return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
+      },
+    }
+  }
+
   const pinned = getRequestReader(event, binding, requestUrl, retryReader)
-  if (!pinned) return
+  if (pinned) {
+    const retry = await readFeedGeneration(pinned.bucket, requestUrl, host, endpoints, now, pinned.reader)
+    if (retry.readable) return retry
+  }
+
+  // Once any required endpoint needs the seed, all consumers use this seed batch.
+  const coverage = new Set(seedDetails)
+  const payloads = new Map<string, SnapshotPayload>()
+  try {
+    const seedEndpoints = endpoints.filter(endpoint => {
+      const path = snapshotPath(endpoint)
+      return !path.includes('/') || coverage.has(path)
+    })
+    const seed = await Promise.all(seedEndpoints.map(async endpoint => {
+      const path = snapshotPath(endpoint)
+      const payload = await fetchFeedSnapshot<SnapshotPayload>(fetcher, requestUrl, endpoint, host, assets)
+      return [path, compactSnapshotPayload(path, payload)] as const
+    }))
+    for (const [path, payload] of seed) {
+      payloads.set(path, { ...payload, fromCache: true, fromSnapshot: true })
+    }
+    const streamPath = paths.find(path => path.startsWith('streams/'))
+    if (streamPath) {
+      const replayPath = endedReplayPath(liveDetailWindow(payloads, streamPath), streamPath, now)
+      if (replayPath && coverage.has(replayPath)) {
+        const vods = await fetchFeedSnapshot<SnapshotPayload>(fetcher, requestUrl, { kind: 'vods' }, host, assets)
+          .then(payload => compactSnapshotPayload('vods', payload))
+          .catch(() => undefined)
+        if (listsReplay(vods, replayPath)) {
+          payloads.get(streamPath)!.hasSnapshotReplay = true
+        }
+      }
+    }
+  } catch {
+    payloads.clear()
+    coverage.clear()
+  }
+  return {
+    hasDetail: (path: string) => coverage.has(path),
+    get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
+      return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
+    },
+  }
+}
+
+export function getFeedFallback(
+  event: H3Event | undefined,
+  binding: string,
+  fetcher: typeof $fetch,
+  config: FeedConfig,
+  requestUrl: URL,
+  seedDetails: readonly string[],
+  now = Math.floor(Date.now() / 1000),
+) {
+  if (!event || !URL.canParse(config.feedBase)) return
   const context: FeedContext = event.context
-  // Revalidate the whole page batch before any consumer uses a fresh R2 payload.
-  return context[requestRetryGeneration] ??= readFeedGeneration(
-    pinned.bucket, requestUrl, host, pageRequirements(requestUrl), undefined, pinned.reader,
+  return context[requestFallback] ??= readFeedFallback(
+    event, binding, fetcher, config, requestUrl, pageRequirements(requestUrl), seedDetails, now,
   )
 }
 
