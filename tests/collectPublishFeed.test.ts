@@ -122,18 +122,18 @@ const mock = String.raw`
           programId, slug, subtitle, sessionStart, footer: 'Serie A', hasVideo: true,
           playHref: '/programs/' + programId + '/play',
         })
-        const portuguese = program(102, 'away-vs-home-portuguese', 'UHD | Portuguese')
+        const portuguese = program(102, 'away-vs-home-portuguese', '   ')
         return Response.json({ ok: true, data: {
           live: [
             program(100, 'away-vs-home', 'HD | English'),
-            program(101, 'away-vs-home-hd-spanish', 'HD | Spanish'),
+            program(101, 'away-vs-home-hd-spanish', 'HD'),
             portuguese,
             { ...program(104, 'away-vs-home-fhd-invalid', 'FHD'), playHref: '/programs/999/play' },
             program(106, 'away-vs-home-hd-italian', 'HD | Italian'),
             program(107, 'away-vs-home-hd-italian', 'HD | Italian'),
             program(105, 'away-vs-home', 'FHD', start + 10_801),
           ],
-          upcoming: [portuguese, program(103, 'away-vs-home-hd-multiview', 'HD | Multiview')],
+          upcoming: [portuguese, program(103, 'away-vs-home-hd-multiview', 'HD | ')],
         } })
       }
       if (url.href === 'https://strmfree.pk/api/v1/streams') {
@@ -235,9 +235,9 @@ const mock = String.raw`
             }
             assert.deepEqual(sources.slice(originals + (nearbyPitSport ? 2 : 0)), [
               ...(nearbyPitSport ? [[100, 'English', 'HD']] : [[101, 'Spanish', 'HD']]),
-              [102, 'Portuguese', '4K'], [103, 'Multiview', 'HD'],
+              [102, 'Portuguese', undefined], [103, 'Multiview', 'HD'],
             ].map(([id, variant, sourceTag]) => ({
-              name: 'PitSport · ' + variant, sourceTag, origin: 'pitsport', type: 'iframe',
+              name: 'PitSport · ' + variant, ...(sourceTag ? { sourceTag } : {}), origin: 'pitsport', type: 'iframe',
               default: false, data: pitSportUrl(id),
             })))
           } else if (['duplicates', 'plausible', 'detail-match'].includes(mode) && path === 'streams/foo') {

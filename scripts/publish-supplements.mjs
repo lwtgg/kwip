@@ -47,6 +47,9 @@ const pitSportCategories = new Map([
   ['nba', 'basketball'], ['nfl', 'football'], ['nhl', 'hockey'], ['tennis', 'tennis'],
   ['ufc', 'combat'], ['wrestling', 'combat'],
 ])
+const pitSportVariantNames = new Map([
+  ['spanish', 'Spanish'], ['portuguese', 'Portuguese'], ['multiview', 'Multiview'],
+])
 const pitSportVariants = /-(?:(?:uhd|fhd|hd|sd)-.+|spanish|portuguese|multiview)$/
 
 export async function fetchPitSportListing(deadline) {
@@ -86,7 +89,8 @@ export async function fetchPitSportListing(deadline) {
     }
     const label = typeof program.subtitle === 'string' ? program.subtitle.trim() : ''
     const band = sourceQualityBand(label)
-    const variant = band ? label.split('|').slice(1).join('|').trim() : label
+    const subtitleName = band ? label.split('|').slice(1).join('|').trim() : label
+    const variant = subtitleName || pitSportVariantNames.get(program.slug.split('-').at(-1))
     events.get(key).sources.push({
       name: variant ? `PitSport · ${variant}` : 'PitSport',
       sourceTag: band,
