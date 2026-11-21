@@ -474,12 +474,14 @@ export async function readFeedGeneration(
 
 // Nitro and the Nuxt SSR bundle each compile this module.
 const requestGeneration = Symbol.for('kwip.feedGeneration')
+const resolvedGeneration = Symbol.for('kwip.resolvedFeedGeneration')
 const requestReader = Symbol.for('kwip.snapshotReader')
 const requestFallback = Symbol.for('kwip.feedFallback')
 const retryReader = Symbol.for('kwip.snapshotRetryReader')
 
 type FeedContext = H3Event['context'] & {
   [requestGeneration]?: ReturnType<typeof readFeedGeneration>
+  [resolvedGeneration]?: Awaited<ReturnType<typeof readFeedGeneration>>
   [requestFallback]?: ReturnType<typeof readFeedFallback>
   [requestReader]?: { bucket: SnapshotBucket; reader: ReturnType<typeof createRequestSnapshotReader> }
   [retryReader]?: FeedContext[typeof requestReader]
@@ -599,6 +601,10 @@ export function getRenderedFeedGeneration(event: H3Event) {
   return context[requestGeneration]
 }
 
+export function getResolvedFeedGeneration(event: H3Event) {
+  return (event.context as FeedContext)[resolvedGeneration]
+}
+
 export function getFeedGeneration(
   event: H3Event | undefined,
   binding: string,
@@ -615,5 +621,8 @@ export function getFeedGeneration(
   return context[requestGeneration] ??= readFeedGeneration(
     pinned.bucket, requestUrl, requestUrl.host || config.canonicalHost,
     endpoints ?? pageRequirements(requestUrl), now, pinned.reader,
-  )
+  ).then(generation => {
+    context[resolvedGeneration] = generation
+    return generation
+  })
 }

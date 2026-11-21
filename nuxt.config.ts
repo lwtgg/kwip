@@ -28,6 +28,13 @@ export default defineNuxtConfig({
   devtools: { enabled: false },
   css: ['~/assets/css/theme.css'],
   vite: { plugins: [tailwindcss()] },
+  hooks: {
+    'nitro:config'(config) {
+      if (!config.renderer) return
+      config.alias = { ...config.alias, '#kwip-nuxt-renderer': config.renderer }
+      config.renderer = fileURLToPath(new URL('./server/handlers/page-renderer.ts', import.meta.url))
+    },
+  },
   nitro: {
     // Rule 7: node-server stays usable via NITRO_PRESET=node-server
     preset: process.env.NITRO_PRESET || 'cloudflare_module',
