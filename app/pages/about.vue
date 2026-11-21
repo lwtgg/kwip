@@ -21,5 +21,10 @@ useSeoMeta({
       A source is either an outbound link or a third-party player embedded by iframe;
       {{ siteName }} does not host any media.
     </p>
+    <p id="ads" class="opacity-80">
+      The ads are ours and few: one banner below the player and one advertiser tab on the first
+      source you pick on a scheduled event. 24/7 channels do not open one. They are plain links and
+      images, so an ad blocker takes nothing from playback, and there is no account or consent wall.
+    </p>
   </section>
 </template>

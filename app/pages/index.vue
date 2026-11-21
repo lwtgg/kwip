@@ -175,7 +175,7 @@ const filterOptions = [
 ]
 
 const pageDescription = computed(
-  () => `Browse live sports events, 24/7 channels, and upcoming fixtures in the ${siteName} live event directory.`,
+  () => `Browse live sports events, 24/7 channels, and upcoming fixtures in the ${siteName} live event directory, kept running by a few of our own ads.`,
 )
 
 useSeoMeta({
