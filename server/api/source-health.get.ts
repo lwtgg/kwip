@@ -1,9 +1,14 @@
-import { getSnapshotHealth } from '../utils/feed'
+import { getFeedCacheIdentity, getSnapshotHealth } from '../utils/feed'
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   setResponseHeader(event, 'cache-control', 'no-store')
-  const { generation } = getQuery(event)
+  const { current, generation } = getQuery(event)
+  const { feedSnapshotBinding, public: config } = useRuntimeConfig(event)
+  const url = getRequestURL(event)
+  if (current === '1') {
+    const commitId = await getFeedCacheIdentity(event, feedSnapshotBinding, config, url)
+    return { commitId }
+  }
   if (typeof generation !== 'string') return {}
-  const { feedSnapshotBinding } = useRuntimeConfig(event)
-  return getSnapshotHealth(event, feedSnapshotBinding, getRequestURL(event), generation)
+  return getSnapshotHealth(event, feedSnapshotBinding, url, generation)
 })

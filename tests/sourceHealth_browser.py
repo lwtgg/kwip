@@ -261,7 +261,7 @@ export default {
             : '/r2/range')
           : '/r2/manifest'
         const response = await fetch(env.TEST_PROVIDER + path)
-        return { size: Number(response.headers.get('x-object-size')), etag: key,
+        return { size: Number(response.headers.get('x-object-size')), etag: response.headers.get('etag') ?? key,
           body: response.body, arrayBuffer: () => response.arrayBuffer() }
       },
     }
@@ -312,6 +312,8 @@ export default {
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
             self.send_header('X-Object-Size', str(len(packed) if isinstance(data, bytes) else len(body)))
+            if self.path == '/r2/manifest':
+                self.send_header('ETag', manifest['commitId'])
             self.end_headers()
             self.wfile.write(body)
 
@@ -404,6 +406,18 @@ export default {
                 endpoints.append(dict(path=path, offset=len(packed), length=len(payload)))
                 packed += payload
             manifest.update(size=len(packed), endpoints=endpoints)
+            original_manifest, original_packed = manifest, packed
+            refreshed_commit = '20261119T001500Z-01234567'
+            refreshed_packed = b''
+            refreshed_endpoints = []
+            for path, item in [('streams', upstream), (f'streams/{uri}', {'success': True, 'data': detail})]:
+                payload = json.dumps(item).encode()
+                refreshed_endpoints.append(dict(path=path, offset=len(refreshed_packed), length=len(payload)))
+                refreshed_packed += payload
+            refreshed_manifest = dict(
+                manifest, commitId=refreshed_commit, payloadId=refreshed_commit,
+                payloadKey=f'snapshots/{refreshed_commit}.bin', endpoints=refreshed_endpoints, size=len(refreshed_packed),
+            )
 
             with worker(directory, 'generation-refresh', wrapped, 'https://advertiser.example',
                         False, variables=lambda _: {
@@ -412,7 +426,8 @@ export default {
                             'NUXT_PUBLIC_FEED_BASE': f'{base}/healthy',
                             'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
                         }) as origin:
-                for mode in ('unchanged', 'duplicate', 'new-id', 'expiry'):
+                for mode in ('unchanged', 'duplicate', 'new-id', 'new-generation', 'expiry', 'active-snapshot'):
+                    manifest, packed = original_manifest, original_packed
                     updated = dict(detail, name='Refreshed upstream event')
                     if mode == 'new-id':
                         updated['id'] += 1
@@ -424,15 +439,24 @@ export default {
                     browser_requests = []
 
                     def intercept(route):
+                        nonlocal manifest, packed
                         url = route.request.url
                         if url == f'{base}/healthy/streams/{uri}':
                             browser_requests.append('detail')
+                            if mode == 'active-snapshot':
+                                route.abort()
+                                return
+                            if mode == 'new-generation':
+                                manifest, packed = refreshed_manifest, refreshed_packed
                             route.fulfill(json={'success': True, 'data': updated},
                                           headers={'Access-Control-Allow-Origin': '*'})
                         elif url == f'{base}/healthy/streams':
                             route.fulfill(json=upstream, headers={'Access-Control-Allow-Origin': '*'})
                         elif url in (first_url, supplement_url):
                             route.fulfill(body='<h1>Playback fixture</h1>', content_type='text/html')
+                        elif url == origin + '/api/source-health?current=1':
+                            browser_requests.append('generation')
+                            route.continue_()
                         elif url.startswith(origin + '/'):
                             route.continue_()
                         elif url == 'https://strmfree.pk/api/v1/streams':
@@ -444,7 +468,7 @@ export default {
                     with browser.new_context(viewport={'width': 1280, 'height': 900}) as context:
                         context.route('**/*', intercept)
                         page = context.new_page()
-                        if mode == 'expiry':
+                        if mode in ('expiry', 'active-snapshot'):
                             page.clock.install()
                         if mode == 'new-id':
                             page.add_init_script(f'''sessionStorage.setItem('supplement:v6:{uri}', JSON.stringify({{
@@ -453,28 +477,54 @@ export default {
                                     type: 'iframe', default: false,
                                 }}],
                             }}))''')
-                        response = page.goto(origin + EVENT + '?source=' + quote(supplement_key))
+                        url = origin + EVENT + '?source=' + quote(supplement_key)
+                        generation_url = origin + '/api/source-health?current=1'
+                        checks_generation = mode not in ('new-id', 'active-snapshot')
+                        if checks_generation:
+                            with page.expect_response(generation_url) as generation_check:
+                                response = page.goto(url)
+                            checked = generation_check.value
+                            assert checked.headers['cache-control'] == 'no-store'
+                            assert checked.json() == {'commitId': refreshed_commit if mode == 'new-generation' else commit}
+                        else:
+                            response = page.goto(url, wait_until='domcontentloaded')
                         assert response.ok
-                        expect(page.get_by_role('heading', name=updated['name'], exact=True)).to_be_visible()
                         picker = page.get_by_role('group', name='Playback source')
                         chip = picker.locator(f'button[value="{supplement_key}"]')
                         primary = picker.locator(f'button[value="{first_url.removeprefix("https://")}"]')
-                        if mode != 'new-id':
+                        if mode == 'active-snapshot':
+                            expect(chip).to_have_attribute('aria-pressed', 'true')
+                            playback = page.frame_locator('iframe').get_by_role('heading', name='Playback fixture')
+                            expect(playback).to_be_visible()
+                            # Routed cross-origin frames do not always expose resource timing to the parent.
+                            playback.evaluate("() => parent.postMessage('fixture ready', '*')")
+                            expect(page.get_by_text('Loading player embed…', exact=True)).to_have_count(0)
+                            page.clock.fast_forward(10 * 60_000)
+                            expect(chip).to_have_attribute('aria-pressed', 'true')
+                            expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
+                            expect(primary).to_contain_text('Degraded')
+                            assert browser_requests == ['detail'], browser_requests
+                            expect(page.get_by_role('heading', name=detail['name'], exact=True)).to_be_visible()
+                            print('Active snapshot keeps its supplements after ten minutes')
+                            continue
+                        expect(page.get_by_role('heading', name=updated['name'], exact=True)).to_be_visible()
+                        if mode not in ('new-id', 'new-generation'):
                             expect(chip).to_have_count(1)
                             expect(chip).to_contain_text('Strmfree · FHD')
                             expect(chip).to_contain_text('Not live')
                             expect(chip).to_have_attribute('aria-pressed', 'true')
                             expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
                             expect(primary).to_contain_text('Degraded')
-                            assert browser_requests == ['detail'], browser_requests
+                            assert browser_requests == ['detail', 'generation'], browser_requests
                         if mode == 'expiry':
                             with page.expect_response('https://strmfree.pk/api/v1/streams'):
                                 page.clock.fast_forward(10 * 60_000)
-                        if mode in ('new-id', 'expiry'):
+                        if mode in ('new-id', 'new-generation', 'expiry'):
                             expect(chip).to_have_count(0)
                             expect(primary).not_to_contain_text('Degraded')
                             expect(page.locator('iframe')).to_have_attribute('src', first_url)
                             assert browser_requests.count('provider') == 1, browser_requests
+                            assert browser_requests.count('generation') == (0 if mode == 'new-id' else 1), browser_requests
                     print(f'Published supplement refresh and expiry check passed ({mode})')
         finally:
             release.set()

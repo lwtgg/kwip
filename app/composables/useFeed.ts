@@ -1,4 +1,4 @@
-import { onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
+import { onMounted, onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { sourceKey } from '../utils/sourceIdentity.ts'
 import { SUPPLEMENT_CACHE_TTL_MS } from '../utils/strmfree.ts'
 import {
@@ -280,13 +280,22 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
     sources: FeedStreamSource[]
     healthGeneration?: string
   }>()
+  const rendered = shallowRef(false)
+  onMounted(() => { rendered.value = true })
   let expiry: ReturnType<typeof setTimeout> | undefined
-  function clearPublishedDetail() {
+  let revalidation: AbortController | undefined
+  function stopCarryOver() {
     clearTimeout(expiry)
+    expiry = undefined
+    revalidation?.abort()
+    revalidation = undefined
+  }
+  function clearPublishedDetail() {
+    stopCarryOver()
     publishedDetail.value = undefined
   }
-  onScopeDispose(clearPublishedDetail)
-  watch([() => toValue(uriName), feed.data], ([uri, payload]) => {
+  onScopeDispose(stopCarryOver)
+  watch([() => toValue(uriName), feed.data, rendered], ([uri, payload, ready]) => {
     const item = payload?.data
     const currentItem = item && (item.uri_name ?? item.uri) === uri ? item : undefined
     const id = currentItem && String(currentItem.id)
@@ -294,17 +303,33 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       adopted = undefined
       clearPublishedDetail()
     }
+    if (!currentItem || id === undefined) return
     const generation = payload?.detailGeneration
-    if (!generation || !currentItem || id === undefined || adopted?.generation === generation) return
-
-    adopted = { uri, id, generation }
-    clearTimeout(expiry)
-    publishedDetail.value = {
-      generation,
-      sources: currentItem.sources?.filter(source => source.origin === 'supplement') ?? [],
-      healthGeneration: payload.healthGeneration,
+    if (generation) {
+      stopCarryOver()
+      if (adopted?.generation === generation) return
+      adopted = { uri, id, generation }
+      publishedDetail.value = {
+        generation,
+        sources: currentItem.sources?.filter(source => source.origin === 'supplement') ?? [],
+        healthGeneration: payload.healthGeneration,
+      }
+      return
     }
-    if (import.meta.client) expiry = setTimeout(clearPublishedDetail, SUPPLEMENT_CACHE_TTL_MS)
+
+    const retained = publishedDetail.value
+    if (!ready || !retained || (!retained.sources.length && !retained.healthGeneration)) return
+    expiry ??= setTimeout(clearPublishedDetail, SUPPLEMENT_CACHE_TTL_MS)
+    revalidation?.abort()
+    const controller = new AbortController()
+    revalidation = controller
+    void $fetch<{ commitId?: string }>('/api/source-health', {
+      query: { current: '1' },
+      retry: 0,
+      signal: controller.signal,
+    }).then(({ commitId }) => {
+      if (!controller.signal.aborted && commitId && retained.generation !== commitId) clearPublishedDetail()
+    }).catch(() => {})
   }, { immediate: true, flush: 'sync' })
 
   const isFixture = /(?:^|\/)fixtures\/?$/.test(useRuntimeConfig().public.feedBase)
