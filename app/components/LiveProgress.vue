@@ -31,7 +31,7 @@ const progress = computed(() => {
       aria-valuemax="100"
       :aria-valuenow="Math.round(progress.percentage)"
       :aria-label="progress.aria"
-      class="h-1 min-w-0 flex-1 overflow-hidden bg-border"
+      class="h-1 min-w-0 flex-1 overflow-hidden border border-muted bg-border"
       data-allow-mismatch="attribute"
     >
       <div
