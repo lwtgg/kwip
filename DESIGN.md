@@ -1,3 +1,13 @@
+# Design
+
+**Current system: fixture list (2026-11-22).** The product facts are in `PRODUCT.md`; the audit and the
+chosen direction are in `docs/redesign-45a.md`. System face only (SF stack), Touchline tokens in
+`app/assets/css/theme.css`, fixed time/status column, sentence-case matchups, one mint action, selected
+source at the frame edge, reserved banner below the player. The P0/P1 lists below are historical: they
+describe the pre-redesign surfaces and are kept for the reasoning, not as a backlog.
+
+---
+
 # Design pass (offline, OSS-sourced)
 
 v1 works and is plain. This pass raises perceived quality using patterns from public repos, and nothing else — no new dependency (rule 9), no component library (rule 2), no media proxy (rule 4). Every item below is implementable with the existing tokens, components and Tailwind.

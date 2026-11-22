@@ -41,6 +41,10 @@ hairline rules over card boxes, the radius cut to a listing value, accent reserv
 and focus, CSS-only texture in the shell, designed state glyphs, the hero Next up strip, and an opt-in
 per-source player shield scoped to the event. Tokens only, CLS 0, both themes and widths, all suites green.
 
+**Superseded 2026-11-22.** The broadcast treatment was replaced by a fixture list on the Touchline ramp:
+sentence-case SF rows with a fixed time/status column, one mint action, selected source at the frame edge,
+stale/empty/error states qualifying themselves. See `PRODUCT.md` and `docs/redesign-45a.md` §Direction A.
+
 ## 6. Long tail
 
 Dead-stream health signal, per-event poster quality, 390 px sweep, archive search, per-category OG art.
