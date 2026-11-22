@@ -36,6 +36,11 @@ Score, clock, period, lineups, per-player numbers, driven from the match rather 
 
 The design pass fixed the mechanics; the look is still generic. Target the things that read as generated: default type scale, evenly rounded cards, one accent doing every job, no editorial hierarchy, no texture. Budget a real art direction pass with reference sets, not another item list.
 
+**Shipped 2026-11-21.** Direction chosen: broadcast listings. Condensed display and mono numeric tokens,
+hairline rules over card boxes, the radius cut to a listing value, accent reserved for action, live rule
+and focus, CSS-only texture in the shell, designed state glyphs, the hero Next up strip, and an opt-in
+per-source player shield scoped to the event. Tokens only, CLS 0, both themes and widths, all suites green.
+
 ## 6. Long tail
 
 Dead-stream health signal, per-event poster quality, 390 px sweep, archive search, per-category OG art.
