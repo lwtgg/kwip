@@ -19,7 +19,15 @@ Read `CONTRACT.md` (who may edit what), `DECISIONS.md` (binding rules), and `DES
 | user-facing copy, meta, canonical, robots, sitemap | `nuxt-seo`, `kwip-conventions` |
 | verifying in a browser | `webapp-testing` |
 | performance, CWV or bundle work | `web-perf`, `kwip-budgets` |
-| new or changed UI direction | `frontend-design` |
+| new or changed UI direction | `frontend-design`, `impeccable` |
+| de-vibecoding a screen, or a screen reads AI-made | `unslop`, `taste-skill`, `unslop-ui` |
+| copy and decorative chrome on a finished screen | `unslop-ui` |
+| Linear-precision reference, token audits | `unslop-engine` |
+
+`impeccable` owns direction, critique and polish; `taste-skill` carries its own browser gate and is the
+heaviest — use one of them per task, not both at once. `unslop-engine` mandates its own palette and
+radius, so treat it as a reference under our tokens rather than an override. Each of these ships a
+house style; the brief and `DECISIONS.md` still win.
 
 Two or more rows apply: read all of them. Say which you read at the top of your reply.
 
