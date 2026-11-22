@@ -47,6 +47,9 @@ const groups = computed(() => [
   { label: 'Change source', sources: alternatives.value, selected: false },
 ].filter(group => group.sources.length))
 const orderedSources = computed(() => groups.value.flatMap(group => group.sources))
+const focusedKey = ref<string>()
+const tabStop = computed(() => orderedSources.value.find(source => source.key === focusedKey.value)?.key
+  ?? orderedSources.value[0]?.key)
 
 function chipStatus(source: SelectableSourceOption) {
   if (props.failedKeys?.includes(source.key)) return 'Failed'
@@ -73,7 +76,10 @@ function onChipClick(event: MouseEvent, key: string) {
   const hadFocus = document.activeElement === event.currentTarget
   emit('source-click', event, key)
   emit('update:modelValue', key)
-  if (hadFocus) void nextTick(() => findChip(key)?.focus({ preventScroll: event.detail > 0 }))
+  if (hadFocus) {
+    void nextTick(() => findChip(key)?.focus({ preventScroll: event.detail > 0 }))
+    if (event.detail === 0 && key !== props.modelValue) holdFocus(key)
+  }
 }
 
 function findChip(key: string) {
@@ -82,7 +88,7 @@ function findChip(key: string) {
 }
 
 function onChipKeydown(event: KeyboardEvent, key: string) {
-  const sources = props.sources
+  const sources = orderedSources.value
   const index = sources.findIndex(source => source.key === key)
   const count = sources.length
   let next: number
@@ -98,9 +104,7 @@ function onChipKeydown(event: KeyboardEvent, key: string) {
   if (!source) return
 
   event.preventDefault()
-  emit('update:modelValue', source.key)
-  void nextTick(() => findChip(source.key)?.focus())
-  holdFocus(source.key)
+  findChip(source.key)?.focus()
 }
 </script>
 
@@ -131,12 +135,13 @@ function onChipKeydown(event: KeyboardEvent, key: string) {
           :aria-describedby="distinctHost(source) ? `${id}-host-${section.selected}-${index}` : undefined"
           :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
-          :tabindex="(orderedSources[0]?.key === source.key) ? 0 : -1"
+          :tabindex="tabStop === source.key ? 0 : -1"
           class="inline-flex min-h-target min-w-0 max-w-full items-center gap-2 rounded-control border px-3 py-2 text-start text-metadata font-medium hover:bg-surface-2"
           :class="[
-            section.selected ? 'border-transparent bg-surface-2 font-semibold' : 'border-control bg-surface',
+            section.selected ? 'border-transparent bg-surface-2 font-semibold' : 'border-control-surface bg-surface hover:border-control',
             chipStatus(source) ? 'text-muted' : 'text-fg',
           ]"
+          @focus="focusedKey = source.key"
           @click="onChipClick($event, source.key)"
           @keydown="onChipKeydown($event, source.key)"
         >
@@ -178,6 +183,7 @@ function onChipKeydown(event: KeyboardEvent, key: string) {
         <select
           :id="id"
           name="source"
+          required
           class="min-h-target min-w-0 max-w-full rounded-control border border-control bg-surface-2 px-3 py-2 text-sm text-fg"
         >
           <option value="" disabled selected>Change source</option>

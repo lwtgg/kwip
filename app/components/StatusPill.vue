@@ -18,7 +18,10 @@ const status = computed(() => {
   if (alwaysLive === 1) return { ...label, state: 'always-live' }
   if (startsAt === 0) return { ...label, state: 'event' }
   if (now < startsAt) return { ...label, state: 'upcoming', timestamp: startsAt }
-  if (now < endsAt) return { ...label, state: 'live', text: props.stale ? 'Listed live' : 'Live', timestamp: endsAt }
+  if (now < endsAt) {
+    if (props.stale) return { text: 'Listed live', aria: 'Listed live', state: 'live' }
+    return { ...label, state: 'live', text: 'Live', timestamp: endsAt }
+  }
   return { ...endedLabel(endsAt, now), state: 'ended', timestamp: endsAt }
 })
 

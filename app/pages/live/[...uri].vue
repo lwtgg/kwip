@@ -435,7 +435,7 @@ function toggleCurrentShield() {
   if (identity) toggleShield(uriName.value, identity.group, identity.member, shieldRoster.value)
 }
 
-const playerControlClass = 'inline-flex min-h-target min-w-target items-center justify-center rounded-control border text-metadata font-medium hover:bg-surface-2'
+const playerControlClass = 'inline-flex min-h-target min-w-target items-center justify-center rounded-control border text-metadata font-medium hover:border-control hover:bg-surface-2'
 
 async function enterFullscreen() {
   const wrapper = playerWrapper.value
@@ -751,12 +751,13 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :ends-at="detail.ends_at || 0"
             :always-live="detail.always_live"
             :now="nowSeconds"
+            :stale="isStale"
           />
           <span v-if="detail.tag">{{ detail.tag }}</span>
           <span class="tabular-nums">{{ formatViewersExact(detail.viewers) }} viewers</span>
         </div>
         <LiveProgress
-          v-if="detail"
+          v-if="detail && !isStale"
           :starts-at="detail.starts_at"
           :ends-at="detail.ends_at"
           :always-live="detail.always_live"
@@ -914,7 +915,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             <button
               type="button"
               class="min-h-target rounded-control px-4 text-sm font-semibold hover:underline"
-              :class="firstRemainingLink ? 'border border-control text-fg' : 'bg-accent text-accent-fg'"
+              :class="firstRemainingLink ? 'border border-control-surface text-fg' : 'bg-accent text-accent-fg'"
               @click="handleRetryChain"
             >
               Retry sources
@@ -936,8 +937,8 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               type="button"
               :aria-pressed="shieldEnabled"
               aria-describedby="player-shield-description"
-              class="inline-flex min-h-target min-w-target items-center gap-2 rounded-control border border-control px-3 text-metadata font-medium text-fg hover:bg-surface-2"
-              :class="{ 'bg-surface-2 underline underline-offset-4': shieldEnabled }"
+              class="inline-flex min-h-target min-w-target items-center gap-2 rounded-control border px-3 text-metadata font-medium text-fg hover:border-control hover:bg-surface-2"
+              :class="shieldEnabled ? 'border-control bg-surface-2 underline underline-offset-4' : 'border-control-surface'"
               @click="toggleCurrentShield"
             >
               <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
@@ -950,7 +951,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
                 type="button"
                 aria-label="Fullscreen"
                 title="Fullscreen"
-                :class="[playerControlClass, 'border-control text-fg']"
+                :class="[playerControlClass, 'border-control-surface text-fg']"
                 @click="enterFullscreen"
               >
                 <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -962,7 +963,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
                 aria-label="Player help"
                 :aria-pressed="playerHelpOpen"
                 title="Not playing?"
-                :class="[playerControlClass, playerHelpOpen ? 'border-control bg-surface-2 text-fg' : 'border-control text-fg']"
+                :class="[playerControlClass, playerHelpOpen ? 'border-control bg-surface-2 text-fg' : 'border-control-surface text-fg']"
                 @click="playerHelpOpen = !playerHelpOpen"
                 class="px-3"
               >
@@ -1002,6 +1003,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
           :title="`Related in ${detail.category_name}`"
           :category="detail.category_name"
           :streams="relatedStreams"
+          :stale="isStale"
           :now="nowSeconds"
         />
         <StateBlock

@@ -73,7 +73,7 @@ function revealSportLink(event: FocusEvent) {
             to="/mirrors"
             aria-label="Mirror domains"
             title="Mirror domains"
-            class="inline-flex size-target items-center justify-center rounded-control border border-control text-muted hover:bg-surface-2 hover:text-fg"
+            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
           >
             <svg
               aria-hidden="true"
@@ -95,7 +95,7 @@ function revealSportLink(event: FocusEvent) {
             type="button"
             :aria-label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
             :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-            class="inline-flex size-target items-center justify-center rounded-control border border-control text-muted hover:bg-surface-2 hover:text-fg"
+            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
             @click="toggleTheme"
           >
             <svg
@@ -132,7 +132,7 @@ function revealSportLink(event: FocusEvent) {
             :aria-pressed="isCompact"
             :aria-label="isCompact ? 'Compact layout' : 'Comfortable layout'"
             :title="densityAction"
-            class="inline-flex size-target items-center justify-center rounded-control border border-control text-muted hover:bg-surface-2 hover:text-fg"
+            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
             @click="toggleDensity"
           >
             <svg

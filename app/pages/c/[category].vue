@@ -175,6 +175,7 @@ useSeoMeta({
           :key="stream.id"
           :stream="stream"
           heading-level="h2"
+          :stale="isStale"
           :now="nowSeconds"
         />
       </div>

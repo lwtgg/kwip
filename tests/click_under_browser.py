@@ -17,6 +17,7 @@ import tempfile
 from threading import Thread
 import time
 from urllib.error import URLError
+from urllib.parse import urlencode, urlsplit
 from urllib.request import urlopen
 
 from playwright.sync_api import expect, sync_playwright
@@ -121,7 +122,7 @@ not_found_handling = "none"
 
 
 @contextmanager
-def event_page(browser, origin, width, *, block_redirect=False, block_first_open=False):
+def event_page(browser, origin, width, *, block_redirect=False, block_first_open=False, external=False):
     context = browser.new_context(viewport={'width': width, 'height': 850})
     try:
         context.add_init_script(CLS_OBSERVER)
@@ -138,9 +139,11 @@ def event_page(browser, origin, width, *, block_redirect=False, block_first_open
         third_party = []
         page.on('request', lambda req: third_party.append(req.url)
                 if not req.url.startswith(origin + '/') else None)
-        assert page.goto(origin + EVENT, wait_until='networkidle').ok
+        source_query = '?' + urlencode({'source': f'{urlsplit(PLAYER).netloc}/external'}) if external else ''
+        assert page.goto(origin + EVENT + source_query, wait_until='networkidle').ok
         expect(chip(page, 'First embed')).to_be_visible()
-        expect_player(page, 'one')
+        if not external:
+            expect_player(page, 'one')
         yield context, page, third_party
     finally:
         context.close()
@@ -224,8 +227,7 @@ def check_blocking(browser, origin, width):
 
 
 def check_play(browser, origin, width):
-    with event_page(browser, origin, width, block_redirect=True) as (context, page, _):
-        chip(page, 'First embed').press('End')
+    with event_page(browser, origin, width, block_redirect=True, external=True) as (context, page, _):
         play = page.get_by_role('link', name='Open at source')
         expect(play).to_have_accessible_name(
             'Open at source. Standard activation may open the source in this tab and an advertiser in a new tab')
@@ -241,8 +243,7 @@ def check_play(browser, origin, width):
         assert page.url == f'{PLAYER}/external'
         assert len(context.pages) == 2
 
-    with event_page(browser, origin, width, block_first_open=True) as (context, page, _):
-        chip(page, 'First embed').press('End')
+    with event_page(browser, origin, width, block_first_open=True, external=True) as (context, page, _):
         with context.expect_page() as source:
             page.get_by_role('link', name='Open at source').click()
         expect(source.value.get_by_text('Playable fixture')).to_be_visible()

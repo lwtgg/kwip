@@ -294,6 +294,25 @@ def check_source_health(browser, origin, width):
         page.goto(origin + EVENT, wait_until='networkidle')
         expect(page.get_by_role('button', name='First embed', exact=True)).to_have_attribute('aria-pressed', 'true')
         expect(page.get_by_text(' · Failed')).to_have_count(0)
+        page.goto(origin + EVENT + '?source=' + quote(second_key), wait_until='networkidle')
+        picker = page.get_by_role('group', name='Playback source', exact=True)
+        edge = picker.get_by_role('group', name='Selected source', exact=True)
+        first = picker.get_by_role('button', name='First embed', exact=True)
+        second = picker.get_by_role('button', name='Second embed', exact=True)
+        external = picker.get_by_role('button', name='External fixture', exact=True)
+        second.focus()
+        page.keyboard.press('ArrowRight')
+        expect(first).to_be_focused()
+        page.keyboard.press('ArrowRight')
+        expect(external).to_be_focused()
+        expect(edge.get_by_role('button')).to_have_attribute('value', second_key)
+        page.keyboard.press('ArrowLeft')
+        expect(first).to_be_focused()
+        page.keyboard.press('Enter')
+        expect(edge.get_by_role('button', name='First embed', exact=True)).to_be_focused()
+        expect(page.locator('iframe')).to_have_attribute('src', first_url)
+        page.keyboard.press('ArrowRight')
+        expect(second).to_be_focused()
     with browser.new_context(viewport={'width': width, 'height': 900}) as remembered:
         remembered.route('**/*', intercept)
         remembered.add_init_script(f"""(() => {{
@@ -338,6 +357,12 @@ def check_source_health(browser, origin, width):
         page.get_by_role('button', name='Change source').click()
         expect(frame).to_have_count(1)
         expect(frame).to_have_attribute('src', second_url)
+        selected_url = page.url
+        expect(picker).to_have_value('')
+        page.get_by_role('button', name='Change source').click()
+        expect(page).to_have_url(selected_url)
+        expect(frame).to_have_attribute('src', second_url)
+        assert picker.evaluate('select => select.validity.valueMissing')
     print('Source failure persists across reload and revisit, clears on retry or explicit selection, and stays in its session')
 
 
@@ -708,13 +733,13 @@ export default {
                         if mode == 'unchanged':
                             selected = page.get_by_role('group', name='Selected source', exact=True)
                             expect(selected).to_contain_text('Strmfree · FHD')
-                            expect(primary).to_have_css('background-color', 'rgb(25, 33, 30)')
+                            expect(primary).to_have_css('background-color', 'rgb(27, 32, 30)')
                             primary.click()
                             page.mouse.move(0, 0)
                             expect(primary).to_contain_text('Degraded')
                             expect(primary).to_have_attribute('aria-pressed', 'true')
                             expect(selected).to_contain_text(primary.inner_text().split(' · Degraded')[0].strip())
-                            expect(primary).to_have_css('background-color', 'rgb(35, 46, 42)')
+                            expect(primary).to_have_css('background-color', 'rgb(44, 52, 48)')
                         if mode == 'expiry':
                             with page.expect_response('https://strmfree.pk/api/v1/streams'):
                                 page.clock.fast_forward(10 * 60_000)

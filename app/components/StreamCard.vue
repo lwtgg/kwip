@@ -83,7 +83,7 @@ const exact = computed(() => formatViewersExact(props.stream.viewers))
     <span
       v-if="featured"
       class="fixture-action inline-flex min-h-target items-center justify-self-start gap-1 rounded-control px-2 text-metadata font-semibold group-hover:underline"
-      :class="stale ? 'border border-control text-fg' : 'bg-accent text-accent-fg'"
+      :class="stale ? 'border border-control-surface text-fg group-hover:border-control' : 'bg-accent text-accent-fg'"
     >
       <span>{{ stale ? 'Open event' : 'Watch' }}</span><span aria-hidden="true">→</span>
     </span>
