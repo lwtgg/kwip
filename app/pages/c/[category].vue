@@ -106,15 +106,15 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-(--category-section-gap) px-4 py-(--page-padding) sm:px-6">
+  <div class="mx-auto max-w-fixtures space-y-(--category-section-gap) px-4 py-(--page-padding) sm:px-6">
     <div class="flex flex-col justify-between gap-x-4 gap-y-(--stack-gap) sm:flex-row sm:items-center">
       <div class="space-y-1">
         <nav aria-label="Breadcrumb" class="text-xs text-muted">
-          <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
+          <NuxtLink to="/" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Home</NuxtLink>
           <span class="mx-1.5">/</span>
           <span class="text-fg">{{ categoryTitle }}</span>
         </nav>
-        <h1 class="listing-display text-2xl text-fg sm:text-3xl">
+        <h1 class="text-event font-semibold text-fg">
           {{ categoryTitle }}
         </h1>
       </div>
@@ -125,7 +125,7 @@ useSeoMeta({
           :key="opt.value"
           :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
           :aria-current="activeFilter === opt.value ? 'page' : undefined"
-          class="rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
+          class="inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1.5 text-xs font-medium"
           :class="
             activeFilter === opt.value
               ? 'bg-surface-2 text-fg underline underline-offset-4'
@@ -146,7 +146,6 @@ useSeoMeta({
     <StateBlock
       v-else-if="error && !data"
       variant="error"
-      :message="error.message"
       @retry="handleRefresh"
     />
 
@@ -154,13 +153,13 @@ useSeoMeta({
       <StateBlock
         v-if="isStale"
         variant="stale"
-        message="Directory data is older than 5 minutes."
         @retry="handleRefresh"
       />
 
       <StateBlock
         v-if="filteredStreams.length === 0"
         variant="empty"
+        show-current-events
         :message="
           !matchedCategory
             ? `No events found for category &quot;${categoryTitle}&quot;.`
@@ -170,7 +169,7 @@ useSeoMeta({
         "
       />
 
-      <div v-else class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">
+      <div v-else class="fixture-list">
         <StreamCard
           v-for="stream in filteredStreams"
           :key="stream.id"

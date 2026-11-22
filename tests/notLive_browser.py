@@ -110,10 +110,13 @@ def check_status(browser, origin, stream, width, case, live_flags):
         for index in (first_pick, 1 - first_pick):
             chip, url = chips[index], urls[index]
             chip.click()
+            page.mouse.move(0, 0)
             expect(chip).to_have_attribute('aria-pressed', 'true')
             expect(chips[1 - index]).to_have_attribute('aria-pressed', 'false')
-            expect(chip).to_have_css('text-decoration-line', 'underline')
-            expect(chips[1 - index]).to_have_css('text-decoration-line', 'none')
+            selected = page.get_by_role('group', name='Selected source', exact=True)
+            expect(selected).to_contain_text(VARIANTS[index][0])
+            expect(chip).to_have_css('background-color', 'rgb(35, 46, 42)')
+            expect(chips[1 - index]).to_have_css('background-color', 'rgb(25, 33, 30)')
             expect(frame).to_have_attribute('src', url)
             expect(chip.get_by_text('· Not live', exact=True)).to_have_count(1 if expected_live[index] is False else 0)
             key = chip.get_attribute('value')

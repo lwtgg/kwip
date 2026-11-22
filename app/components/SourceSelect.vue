@@ -49,6 +49,11 @@ function chipStatus(source: SelectableSourceOption) {
   if (source.degraded) return 'Degraded'
 }
 
+function distinctHost(source: SelectableSourceOption) {
+  const hint = source.label.split(' · ')[0]?.toLowerCase()
+  return hint === source.host?.toLowerCase() ? undefined : source.host
+}
+
 function chipLabel(source: SelectableSourceOption) {
   const opensAd = props.clickUnder && source.key !== props.modelValue
   const status = chipStatus(source)
@@ -93,10 +98,10 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
 <template>
   <div class="min-w-0">
     <div
-      class="flex flex-wrap items-center gap-2 [@media(scripting:none)]:hidden"
+      class="flex flex-wrap items-center gap-x-3 gap-y-2 [@media(scripting:none)]:hidden"
       :class="{ invisible: !mounted }"
     >
-      <span :id="`${id}-label`" class="text-xs font-medium text-muted">Change source</span>
+      <span :id="`${id}-label`" class="text-metadata font-medium text-muted">Change source</span>
       <div
         ref="group"
         role="group"
@@ -110,13 +115,13 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           type="button"
           :value="source.key"
           data-allow-mismatch="class,attribute"
-          :aria-describedby="source.host ? `${id}-host-${index}` : undefined"
+          :aria-describedby="distinctHost(source) ? `${id}-host-${index}` : undefined"
           :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
-          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-listing border border-muted px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
+          class="inline-flex min-h-target min-w-0 max-w-full items-center gap-2 rounded-control border border-control px-3 py-2 text-start text-metadata font-medium hover:bg-surface-2"
           :class="[
-            source.key === modelValue ? 'bg-surface underline underline-offset-4' : 'bg-surface-2',
+            source.key === modelValue ? 'bg-surface-2 font-semibold' : 'bg-surface',
             chipStatus(source) ? 'text-muted' : 'text-fg',
           ]"
           @click="onChipClick($event, source.key)"
@@ -125,10 +130,10 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           <span class="min-w-0 wrap-anywhere" data-allow-mismatch="children">
             {{ source.label }}
             <span v-if="chipStatus(source)"> · {{ chipStatus(source) }}</span>
-            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs text-muted no-underline">
+            <span v-if="sources.length > 1 && distinctHost(source)" :id="`${id}-host-${index}`" aria-hidden="true" class="block text-xs text-muted no-underline">
               {{ source.host }}
             </span>
-            <span v-if="source.host" :id="`${id}-host-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
+            <span v-if="sources.length === 1 && distinctHost(source)" :id="`${id}-host-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
           </span>
           <span v-if="source.origin === 'supplement'" aria-hidden="true" class="shrink-0 text-xs">2nd</span>
           <span v-if="source.origin === 'pitsport'" aria-hidden="true" class="shrink-0 text-xs">3rd</span>
@@ -140,7 +145,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
             stroke-width="2"
             stroke-linecap="round"
             stroke-linejoin="round"
-            class="size-3.5 shrink-0"
+            class="size-4 shrink-0"
           >
             <path v-if="source.kind === 'link'" d="M7 17 17 7M7 7h10v10" />
             <rect v-else x="3" y="5" width="18" height="14" rx="2" />
@@ -152,12 +157,12 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
     <!-- The browser parses noscript contents as text when scripting is enabled. -->
     <noscript v-once data-allow-mismatch="children">
       <form method="get" class="flex flex-wrap items-center gap-2">
-        <label :for="id" class="text-xs font-medium text-muted">Change source</label>
+        <label :for="id" class="text-metadata font-medium text-muted">Change source</label>
         <select
           :id="id"
           name="source"
           :disabled="sources.length === 0"
-          class="rounded-listing border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11 disabled:cursor-not-allowed disabled:opacity-50"
+          class="min-h-target min-w-0 max-w-full rounded-control border border-control bg-surface-2 px-3 py-2 text-sm text-fg disabled:cursor-not-allowed"
         >
           <option value="" disabled :selected="!noscriptSourceKey">Change source</option>
           <option
@@ -172,7 +177,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
         <button
           type="submit"
           :disabled="sources.length === 0"
-          class="rounded-listing border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11"
+          class="rounded-control border border-control bg-surface-2 px-3 py-2 text-sm text-fg min-h-target"
         >
           Change source
         </button>

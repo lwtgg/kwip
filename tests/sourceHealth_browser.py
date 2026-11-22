@@ -20,7 +20,7 @@ from playwright.sync_api import expect, sync_playwright
 from click_under_browser import EVENT, worker
 
 
-def check_late_supplement_shield(browser, directory, output):
+def check_late_supplement_shield(browser, directory, output, width):
     former_url = 'https://strmfree.st/one'
     first_url = 'https://strmfree.st/moved'
     peer_url = 'https://strmfree.st/peer'
@@ -50,7 +50,7 @@ def check_late_supplement_shield(browser, directory, output):
 
         former_origin = start('former-shield', former_url)
         sandbox = 'allow-scripts allow-same-origin allow-presentation'
-        with browser.new_context() as former:
+        with browser.new_context(viewport={'width': width, 'height': 900}) as former:
             former.route('https://strmfree.st/**', lambda route: route.fulfill(
                 body='<h1>Playable fixture</h1>', content_type='text/html',
             ))
@@ -75,7 +75,7 @@ def check_late_supplement_shield(browser, directory, output):
             for entry in saved['origins']:
                 if entry['origin'] == from_origin:
                     entry['origin'] = to_origin
-            return stack.enter_context(browser.new_context(storage_state=saved))
+            return stack.enter_context(browser.new_context(viewport={'width': width, 'height': 900}, storage_state=saved))
 
         context = restore(saved, former_origin, origin)
         pending = []
@@ -172,8 +172,8 @@ def check_late_supplement_shield(browser, directory, output):
         print('Other event starts fresh and returning restores the original Shield settings')
 
 
-def check_source_health(browser, origin):
-    with browser.new_context() as context:
+def check_source_health(browser, origin, width):
+    with browser.new_context(viewport={'width': width, 'height': 900}) as context:
         hold_first = True
         first_requests = []
         frame_requests = []
@@ -282,13 +282,13 @@ def check_source_health(browser, origin):
         assert frame_requests.count(first_url) == 1, frame_requests
         assert not errors, errors
 
-    with browser.new_context() as fresh:
+    with browser.new_context(viewport={'width': width, 'height': 900}) as fresh:
         fresh.route('**/*', intercept)
         page = fresh.new_page()
         page.goto(origin + EVENT, wait_until='networkidle')
         expect(page.get_by_role('button', name='First embed', exact=True)).to_have_attribute('aria-pressed', 'true')
         expect(page.get_by_text(' · Failed')).to_have_count(0)
-    with browser.new_context() as remembered:
+    with browser.new_context(viewport={'width': width, 'height': 900}) as remembered:
         remembered.route('**/*', intercept)
         remembered.add_init_script(f"""(() => {{
             if (location.pathname !== {EVENT!r}) return;
@@ -319,7 +319,7 @@ def check_source_health(browser, origin):
         page.clock.fast_forward(60_000)
         expect(failed).to_have_count(0)
         expect(page.get_by_role('button', name='Second embed', exact=True)).to_have_attribute('aria-pressed', 'true')
-    with browser.new_context(java_script_enabled=False) as no_js:
+    with browser.new_context(viewport={'width': width, 'height': 900}, java_script_enabled=False) as no_js:
         no_js.route('**/*', intercept)
         page = no_js.new_page()
         page.goto(origin + EVENT, wait_until='networkidle')
@@ -333,7 +333,7 @@ def check_source_health(browser, origin):
     print('Source failure persists across reload and revisit, clears on retry or explicit selection, and stays in its session')
 
 
-def check_stalled_feed(browser, directory, output):
+def check_stalled_feed(browser, directory, output, width):
     missing_uri = 'task34-missing-event'
     release = Event()
     requests = []
@@ -356,14 +356,14 @@ def check_stalled_feed(browser, directory, output):
                         variables=lambda _: {
                             'NUXT_PUBLIC_FEED_BASE': base + '/primary',
                             'NUXT_PUBLIC_FEED_MIRROR_BASE': base + '/mirror',
-                        }, log_path=log_path) as origin, browser.new_context() as context:
+                        }, log_path=log_path) as origin, browser.new_context(viewport={'width': width, 'height': 900}) as context:
                 context.route('**/*', lambda route: route.continue_()
                               if route.request.url.startswith(origin + '/') else route.abort())
                 page = context.new_page()
                 for path, marker in {
                     '/': '"fromCache"',
                     '/live/247-cows': '24/7 COWS',
-                    '/vods': 'Event Archive',
+                    '/vods': 'Event archive',
                     '/sitemap.xml': 'https://kwip.fyi/live/247-cows',
                 }.items():
                     start = monotonic()
@@ -373,7 +373,7 @@ def check_stalled_feed(browser, directory, output):
                     assert marker in response.text(), path
                     if path == '/':
                         expect(page.get_by_role('status').filter(
-                            has_text='Directory data is older than 5 minutes.',
+                            has_text='The last update was more than 20 minutes ago.',
                         )).to_be_visible()
                     print(f'Stalled upstream {path} -> HTTP 200 in {elapsed:.2f}s')
                 missing = page.goto(origin + f'/live/{missing_uri}', wait_until='domcontentloaded', timeout=9000)
@@ -397,7 +397,7 @@ def check_stalled_feed(browser, directory, output):
             thread.join()
 
 
-def check_snapshot_generation(browser, directory, output):
+def check_snapshot_generation(browser, directory, output, width):
     wrapped = directory / 'snapshot-worker'
     shutil.copytree(output, wrapped)
     entry = wrapped / 'server/index.mjs'
@@ -485,7 +485,7 @@ export default {
                             'TEST_READABLE': '1',
                             'NUXT_PUBLIC_FEED_BASE': f'{base}/stalled',
                             'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
-                        }) as origin, browser.new_context(java_script_enabled=False) as context:
+                        }) as origin, browser.new_context(viewport={'width': width, 'height': 900}, java_script_enabled=False) as context:
                 page = context.new_page()
                 for path in missing_paths:
                     requests.clear()
@@ -503,7 +503,7 @@ export default {
                                 'TEST_PROVIDER': base,
                                 'NUXT_PUBLIC_FEED_BASE': f'{base}/{primary}',
                                 'NUXT_PUBLIC_FEED_MIRROR_BASE': f'{base}/mirror',
-                            }, log_path=log) as origin, browser.new_context(java_script_enabled=False) as context:
+                            }, log_path=log) as origin, browser.new_context(viewport={'width': width, 'height': 900}, java_script_enabled=False) as context:
                     page = context.new_page()
                     for path in ('/', '/sitemap.xml'):
                         requests.clear()
@@ -638,7 +638,7 @@ export default {
                         else:
                             route.abort()
 
-                    with browser.new_context(viewport={'width': 1280, 'height': 900}) as context:
+                    with browser.new_context(viewport={'width': width, 'height': 900}) as context:
                         context.route('**/*', intercept)
                         page = context.new_page()
                         if mode in ('expiry', 'active-snapshot'):
@@ -698,11 +698,14 @@ export default {
                             expect(primary).to_contain_text('Degraded')
                             assert browser_requests == ['detail', 'generation'], browser_requests
                         if mode == 'unchanged':
-                            expect(primary).to_have_css('text-decoration-line', 'none')
+                            selected = page.get_by_role('group', name='Selected source', exact=True)
+                            expect(selected).to_contain_text('Strmfree · FHD')
+                            expect(primary).to_have_css('background-color', 'rgb(25, 33, 30)')
                             primary.click()
                             expect(primary).to_contain_text('Degraded')
                             expect(primary).to_have_attribute('aria-pressed', 'true')
-                            expect(primary).to_have_css('text-decoration-line', 'underline')
+                            expect(selected).to_contain_text(primary.inner_text().split(' · Degraded')[0].strip())
+                            expect(primary).to_have_css('background-color', 'rgb(35, 46, 42)')
                         if mode == 'expiry':
                             with page.expect_response('https://strmfree.pk/api/v1/streams'):
                                 page.clock.fast_forward(10 * 60_000)
@@ -724,12 +727,16 @@ def main():
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as pw:
-        with worker(Path(temp), 'source-health', args.output.resolve(), 'https://advertiser.example', False, player='/fixtures') as origin:
-            browser = pw.chromium.launch()
-            check_source_health(browser, origin)
-        check_late_supplement_shield(browser, Path(temp), args.output.resolve())
-        check_stalled_feed(browser, Path(temp), args.output.resolve())
-        check_snapshot_generation(browser, Path(temp), args.output.resolve())
+        browser = pw.chromium.launch()
+        for width in (390, 1280):
+            print(f'Source health at {width}px', flush=True)
+            with tempfile.TemporaryDirectory(dir=temp) as run:
+                directory = Path(run)
+                with worker(directory, 'source-health', args.output.resolve(), 'https://advertiser.example', False, player='/fixtures') as origin:
+                    check_source_health(browser, origin, width)
+                check_late_supplement_shield(browser, directory, args.output.resolve(), width)
+                check_stalled_feed(browser, directory, args.output.resolve(), width)
+                check_snapshot_generation(browser, directory, args.output.resolve(), width)
         browser.close()
 
 

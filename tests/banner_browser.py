@@ -135,8 +135,8 @@ def check_page(browser, origin, placement, width, has_creative, *, failure=False
         context.close()
 
 
-def check_without_javascript(browser, origin, *, failure=False):
-    context = browser.new_context(java_script_enabled=False, viewport={'width': 390, 'height': 850})
+def check_without_javascript(browser, origin, width, *, failure=False):
+    context = browser.new_context(java_script_enabled=False, viewport={'width': width, 'height': 850})
     try:
         def intercept(route):
             if not route.request.url.startswith(origin + '/'):
@@ -156,7 +156,7 @@ def check_without_javascript(browser, origin, *, failure=False):
         expect(image).to_have_accessible_name(f'House {placement}')
         expect_keyboard_link(page, slot, link)
         box = slot.bounding_box()
-        assert (box['width'], box['height']) == (320, 100)
+        assert (box['width'], box['height']) == ((320, 100) if width == 390 else (970, 90))
         redirect = context.request.get(origin + link.get_attribute('href'), max_redirects=0)
         assert redirect.status == 302 and redirect.headers['location'] == f'{origin}/fixtures/away'
         image.evaluate('image => image.decode().catch(() => {})')
@@ -204,14 +204,14 @@ def main():
             check_page(browser, partial, 'home-banner', width, False)
             check_page(browser, partial, 'event-banner', width, True, failure=True)
             check_page(browser, partial, 'vods-banner', width, True, missing=True)
+            check_without_javascript(browser, on, width)
+            check_without_javascript(browser, partial, width, failure=True)
         api = pw.request.new_context()
         stack.callback(api.dispose)
         redirect = api.get(f'{partial}/go/source', max_redirects=0)
         assert redirect.status == 302 and redirect.headers['location'] == EXTERNAL_DESTINATION
         stale = api.get(f'{replacement}{home_click_url}', max_redirects=0)
         assert stale.status == 410 and 'location' not in stale.headers
-        check_without_javascript(browser, on)
-        check_without_javascript(browser, partial, failure=True)
         asset = api.get(on + IMAGE, max_redirects=0)
         assert asset.status == 200 and asset.headers['content-type'] == 'image/jpeg'
         assert 'location' not in asset.headers and asset.body() == (output / 'public/og-default.jpg').read_bytes()

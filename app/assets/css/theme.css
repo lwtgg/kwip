@@ -1,39 +1,48 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #0b0d12;
-  --color-surface: #141821;
-  --color-surface-2: #1c2130;
-  --color-border: #2a3142;
-  --color-fg: #e8ebf2;
-  --color-muted: #9aa3b5;
-  --color-accent: #4f8cff;
-  --color-accent-fg: #0b0d12;
-  --color-live: #b52637;
-  --color-live-fg: #ffffff;
-  --font-display: "Arial Narrow", "Aptos Narrow", "Roboto Condensed", system-ui, sans-serif;
-  --font-numeric: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  --radius: 0.75rem;
-  --radius-listing: 0.1875rem;
-  --tracking-display: -0.045em;
-  --text-metadata: 0.6875rem;
-  --text-feature: clamp(2rem, 5vw, 4.5rem);
-  --text-feature--line-height: 0.98;
-  --spacing-feature-art: 20rem;
-  --spacing-listing-thumb: 4.5rem;
-  --spacing-state-small: 1.75rem;
-  --spacing-state-large: 2.25rem;
-  --spacing-state-gap: 0.75rem;
-  --radius-card: var(--radius-listing);
+  --color-bg: #11161a;
+  --color-surface: #19211e;
+  --color-surface-2: #232e2a;
+  --color-border: #36483f;
+  --color-control: #647b70;
+  --color-fg: #edf5f0;
+  --color-muted: #a9b8b1;
+  --color-accent: #73e4b0;
+  --color-accent-fg: #11161a;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --default-font-family: var(--font-sans);
+  --radius: var(--radius-card);
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-target: 2.75rem;
+  --spacing-fixture: 4.75rem;
+  --spacing-fixture-time: 5rem;
+  --spacing-fixture-poster: 3rem;
+  --container-fixtures: 64rem;
+  --text-section: 1.375rem;
+  --text-section--line-height: 1.75rem;
+  --text-event: 1.75rem;
+  --text-event--line-height: 2.125rem;
+  --text-fixture: 1.0625rem;
+  --text-fixture--line-height: 1.5rem;
+  --text-metadata: 0.8125rem;
+  --text-metadata--line-height: 1.125rem;
+  --shadow-overlay: 0 6px 20px rgb(0 0 0 / 0.14);
 }
 
 :root {
   --focus-ring: var(--color-accent);
-  --focus-ring-inset: -2px;
-  --card-pad: 0.875rem;
+  --focus-ring-width: 0.125rem;
+  --divider-width: 1px;
+  --focus-ring-inset: calc(-1 * var(--focus-ring-width));
   --card-gap: 0.5rem;
-  --grid-gap: 1rem;
-  --rail-gap: 1rem;
   /* Layout density sets the shell minimum, page padding, section gaps, and heading stacks. */
   --page-padding: 1.5rem;
   --section-gap: 2rem;
@@ -52,10 +61,8 @@
 }
 
 [data-density='compact'] {
-  --card-pad: 0.625rem;
+  --spacing-fixture: 3.75rem;
   --card-gap: 0.25rem;
-  --grid-gap: 0.625rem;
-  --rail-gap: 0.625rem;
   --page-padding: 0.5rem;
   --section-gap: 0.5rem;
   --stack-gap: 0.25rem;
@@ -69,22 +76,26 @@
 /* Rule 12: dark default, light must not be broken */
 :root.light,
 :root[data-theme="light"] {
-  --color-bg: #f7f8fb;
+  --color-bg: #f5f8f5;
   --color-surface: #ffffff;
-  --color-surface-2: #eef1f6;
-  --color-border: #d5dae5;
-  --color-fg: #10131a;
-  --color-muted: #4a5266;
-  --color-accent: #1f5fd6;
+  --color-surface-2: #e4ede7;
+  --color-border: #cedbd2;
+  --color-control: #71877b;
+  --color-fg: #15251e;
+  --color-muted: #4c6056;
+  --color-accent: #086347;
   --color-accent-fg: #ffffff;
-  --color-live: #c81e1e;
-  --focus-ring: var(--color-accent);
 }
 
 @layer base {
   :root {
     color-scheme: dark;
-    scroll-padding-top: 5rem;
+    --header-clearance: calc(var(--spacing-4) + var(--divider-width) + 2 * var(--focus-ring-width));
+    scroll-padding-top: calc(2 * var(--spacing-target) + var(--spacing-1) + var(--header-clearance));
+
+    @media (width >= 48rem) {
+      scroll-padding-top: calc(var(--spacing-target) + var(--header-clearance));
+    }
   }
   :root.light,
   :root[data-theme="light"] { color-scheme: light; }
@@ -94,19 +105,28 @@
     color: var(--color-fg);
   }
 
+  body {
+    font-optical-sizing: auto;
+    letter-spacing: normal;
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-accent-fg);
+  }
+
   :focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-    border-radius: var(--radius-listing);
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-width);
   }
 
   nav.overflow-x-auto {
-    scroll-padding-inline: 0.5rem;
+    scroll-padding-inline: var(--spacing-2);
+    scrollbar-color: var(--color-control) var(--color-bg);
   }
 
   nav.overflow-x-auto a:focus-visible {
     outline-offset: var(--focus-ring-inset);
-    box-shadow: inset 0 0 0 4px var(--color-bg);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -118,84 +138,46 @@
   }
 }
 
-@utility listing-display {
-  font-family: var(--font-display);
-  font-stretch: condensed;
-  font-weight: 850;
-  letter-spacing: var(--tracking-display);
-  text-transform: uppercase;
-}
+@utility fixture-row {
+  display: grid;
+  grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) var(--spacing-fixture-poster);
+  align-items: center;
+  min-block-size: var(--spacing-fixture);
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
 
-@utility listing-numeric {
-  font-family: var(--font-numeric);
-  font-variant-numeric: tabular-nums;
-}
+  &[data-featured] {
+    grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) auto;
 
-@utility listing-rule {
-  border-block-end: thin solid var(--color-border);
-  padding-block-end: var(--card-gap);
-}
-
-@utility listing-hero {
-  border-block-start: thin solid var(--listing-hero-rule, var(--color-border));
-}
-
-@utility listing-live {
-  --listing-hero-rule: var(--color-accent);
-}
-
-@utility listing-hero-art {
-  isolation: isolate;
-  contain: size;
-
-  @media screen and (prefers-reduced-motion: no-preference) {
-    &::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-      background-image: repeating-linear-gradient(
-        transparent 0 3px,
-        color-mix(in srgb, var(--color-bg) 20%, transparent) 3px 4px
-      );
+    @media (width >= 40rem) {
+      grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) auto var(--spacing-fixture-poster);
     }
   }
 }
 
-@layer components {
-  .state-glyph {
-    display: grid;
-    place-items: center;
-    color: var(--color-muted);
-    margin-block-end: var(--spacing-state-gap);
-    inline-size: var(--spacing-state-small);
-    aspect-ratio: 1;
+@utility fixture-list {
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+
+  & > * + * {
+    border-block-start: thin solid var(--color-border);
   }
 
-  .state-glyph::before {
-    content: "";
-    inline-size: 82%;
-    border-block-start: thin solid currentColor;
-    transform: rotate(-45deg);
+  & > :first-child {
+    border-start-start-radius: inherit;
+    border-start-end-radius: inherit;
   }
 
-  .state-glyph--unavailable {
-    border: thin solid currentColor;
-    border-radius: 50%;
+  & > :last-child {
+    border-end-start-radius: inherit;
+    border-end-end-radius: inherit;
   }
+}
 
-  .state-glyph--empty {
-    inline-size: var(--spacing-state-large);
-    margin-inline: auto;
-    border-block: thin solid currentColor;
-  }
-
-  .state-glyph--empty::before {
-    inline-size: 68%;
-    aspect-ratio: 1;
-    border: thin solid currentColor;
-    clip-path: polygon(0 0, 100% 0, 55% 50%, 100% 100%, 0 100%, 45% 50%);
-    background: currentColor;
-    transform: none;
-  }
+@utility sport-scroll {
+  background:
+    linear-gradient(var(--color-bg), var(--color-bg)) left / var(--spacing-3) 100% local no-repeat,
+    linear-gradient(var(--color-bg), var(--color-bg)) right / var(--spacing-3) 100% local no-repeat,
+    linear-gradient(to right, var(--color-border), transparent) left / var(--spacing-3) 100% scroll no-repeat,
+    linear-gradient(to left, var(--color-border), transparent) right / var(--spacing-3) 100% scroll no-repeat;
 }
