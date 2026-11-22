@@ -3,6 +3,7 @@
     python tests/sourceHealth_browser.py .output
 """
 import argparse
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -17,6 +18,158 @@ from urllib.parse import quote, urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 from click_under_browser import EVENT, worker
+
+
+def check_late_supplement_shield(browser, directory, output):
+    former_url = 'https://strmfree.st/one'
+    first_url = 'https://strmfree.st/moved'
+    peer_url = 'https://strmfree.st/peer'
+    supplement_url = 'https://strmfree.st/embed/hou-mia'
+    other_url = 'https://strmfree.st/other-event'
+    other_event = '/live/basketball/den-phx'
+
+    def fixture(name, url, event):
+        def configure(_):
+            path = directory / f'{name}-assets/fixtures/stream.json'
+            detail = json.loads(path.read_text())
+            detail['data']['sources'][0].update(name='strmfree', data=url)
+            detail['data']['sources'][1].update(name='strmfree', data=peer_url)
+            if event != EVENT:
+                detail['data']['uri_name'] = event.removeprefix('/live/')
+                detail['data']['sources'][2].update(name='strmfree', data=supplement_url, type='iframe')
+            path.write_text(json.dumps(detail))
+            return {}
+        return configure
+
+    with ExitStack() as stack:
+        def start(name, url, event=EVENT):
+            return stack.enter_context(worker(
+                directory, name, output, 'https://advertiser.example',
+                False, player='/fixtures', variables=fixture(name, url, event),
+            ))
+
+        former_origin = start('former-shield', former_url)
+        sandbox = 'allow-scripts allow-same-origin allow-presentation'
+        with browser.new_context() as former:
+            former.route('https://strmfree.st/**', lambda route: route.fulfill(
+                body='<h1>Playable fixture</h1>', content_type='text/html',
+            ))
+            former.route(former_origin + '/fixtures/strmfree.json',
+                         lambda route: route.fulfill(json={'streams': []}))
+            page = former.new_page()
+            assert page.goto(former_origin + EVENT, wait_until='networkidle').ok
+            shield = page.get_by_role('button', name='Shield', exact=True)
+            expect(shield).to_have_attribute('aria-pressed', 'false')
+            shield.click()
+            expect(page.locator('iframe')).to_have_attribute('sandbox', sandbox)
+            peer = page.locator('button[value="strmfree.st/peer"]')
+            peer.click()
+            expect(page.locator('iframe')).to_have_attribute('src', peer_url)
+            expect(shield).to_have_attribute('aria-pressed', 'false')
+            assert page.locator('iframe').get_attribute('sandbox') is None
+            saved = former.storage_state()
+
+        origin = start('late-shield', first_url)
+        def restore(saved, from_origin, to_origin):
+            # Each fixture Worker uses a separate port. Carry the same browser storage between them.
+            for entry in saved['origins']:
+                if entry['origin'] == from_origin:
+                    entry['origin'] = to_origin
+            return stack.enter_context(browser.new_context(storage_state=saved))
+
+        context = restore(saved, former_origin, origin)
+        pending = []
+        requests = []
+
+        def intercept(route):
+            url = route.request.url
+            if url in (first_url, peer_url, supplement_url):
+                requests.append(url)
+                route.fulfill(body='<h1>Playable fixture</h1>', content_type='text/html')
+            elif url == origin + '/fixtures/strmfree.json':
+                pending.append(route)
+            elif url.startswith(origin + '/'):
+                route.continue_()
+            else:
+                route.abort()
+
+        context.route('**/*', intercept)
+        page = context.new_page()
+        with page.expect_request(origin + '/fixtures/strmfree.json'):
+            assert page.goto(origin + EVENT, wait_until='domcontentloaded').ok
+        frame = page.locator('iframe')
+        shield = page.get_by_role('button', name='Shield', exact=True)
+        expect(shield).to_have_attribute('aria-pressed', 'true')
+        expect(frame).to_have_attribute('sandbox', sandbox)
+        original_frame = frame.element_handle()
+        expect(page.frame_locator('iframe').get_by_text('Playable fixture')).to_be_visible()
+
+        assert len(pending) == 1
+        pending.pop().fulfill(json={'streams': [{
+            'name': 'Miami Heat at Houston Rockets', 'category': 'basketball',
+            'stream_key': 'hou-mia', 'match_timestamp': int(time()) - 60,
+            'iframe': supplement_url,
+        }]})
+        picker = page.get_by_role('group', name='Playback source')
+        supplement = picker.get_by_role('button', name=re.compile(r'^strmfree · [0-9]+, second provider$'))
+        expect(supplement).to_be_visible()
+        expect(shield).to_have_attribute('aria-pressed', 'true')
+        expect(frame).to_have_attribute('sandbox', sandbox)
+        assert original_frame.evaluate('element => element.isConnected')
+        assert requests == [first_url], requests
+
+        picker.locator('button[value="strmfree.st/peer"]').click()
+        expect(frame).to_have_attribute('src', peer_url)
+        expect(shield).to_have_attribute('aria-pressed', 'false')
+        assert frame.get_attribute('sandbox') is None
+
+        supplement.click()
+        expect(frame).to_have_attribute('src', supplement_url)
+        expect(shield).to_have_attribute('aria-pressed', 'false')
+        picker.get_by_role('button', name='strmfree', exact=True).click()
+        expect(frame).to_have_attribute('src', first_url)
+        expect(frame).to_have_attribute('sandbox', sandbox)
+        print('Same-name, same-host sources stay isolated through a path change and late supplement')
+
+
+        other_origin = start('other-shield', other_url, other_event)
+        other = restore(context.storage_state(), origin, other_origin)
+        other.route('https://strmfree.st/**', lambda route: route.fulfill(
+            body='<h1>Playable fixture</h1>', content_type='text/html',
+        ))
+        other.route(other_origin + '/fixtures/strmfree.json', lambda route: route.fulfill(json={'streams': []}))
+        other_page = other.new_page()
+        assert other_page.goto(other_origin + other_event, wait_until='networkidle').ok
+        other_frame = other_page.locator('iframe')
+        other_shield = other_page.get_by_role('button', name='Shield', exact=True)
+        expect(other_frame).to_have_attribute('src', other_url)
+        expect(other_shield).to_have_attribute('aria-pressed', 'false')
+        assert other_frame.get_attribute('sandbox') is None
+        storage_key = 'kwip:shielded-sources'
+        saved_preference = "key => localStorage.getItem(key)"
+        assert other_page.evaluate(saved_preference, storage_key) == page.evaluate(saved_preference, storage_key)
+
+        # Save a different setting on the other event before returning to the first.
+        other_page.locator('button[value="strmfree.st/peer"]').click()
+        expect(other_frame).to_have_attribute('src', peer_url)
+        other_shield.click()
+        expect(other_frame).to_have_attribute('sandbox', sandbox)
+        returned = restore(other.storage_state(), other_origin, origin)
+        returned.route('https://strmfree.st/**', lambda route: route.fulfill(
+            body='<h1>Playable fixture</h1>', content_type='text/html',
+        ))
+        returned.route(origin + '/fixtures/strmfree.json', lambda route: route.fulfill(json={'streams': []}))
+        returned_page = returned.new_page()
+        assert returned_page.goto(origin + EVENT, wait_until='networkidle').ok
+        returned_frame = returned_page.locator('iframe')
+        returned_shield = returned_page.get_by_role('button', name='Shield', exact=True)
+        expect(returned_frame).to_have_attribute('src', first_url)
+        expect(returned_frame).to_have_attribute('sandbox', sandbox)
+        returned_page.locator('button[value="strmfree.st/peer"]').click()
+        expect(returned_frame).to_have_attribute('src', peer_url)
+        expect(returned_shield).to_have_attribute('aria-pressed', 'false')
+        assert returned_frame.get_attribute('sandbox') is None
+        print('Other event starts fresh and returning restores the original Shield settings')
 
 
 def check_source_health(browser, origin):
@@ -544,6 +697,12 @@ export default {
                             expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
                             expect(primary).to_contain_text('Degraded')
                             assert browser_requests == ['detail', 'generation'], browser_requests
+                        if mode == 'unchanged':
+                            expect(primary).to_have_css('text-decoration-line', 'none')
+                            primary.click()
+                            expect(primary).to_contain_text('Degraded')
+                            expect(primary).to_have_attribute('aria-pressed', 'true')
+                            expect(primary).to_have_css('text-decoration-line', 'underline')
                         if mode == 'expiry':
                             with page.expect_response('https://strmfree.pk/api/v1/streams'):
                                 page.clock.fast_forward(10 * 60_000)
@@ -568,6 +727,7 @@ def main():
         with worker(Path(temp), 'source-health', args.output.resolve(), 'https://advertiser.example', False, player='/fixtures') as origin:
             browser = pw.chromium.launch()
             check_source_health(browser, origin)
+        check_late_supplement_shield(browser, Path(temp), args.output.resolve())
         check_stalled_feed(browser, Path(temp), args.output.resolve())
         check_snapshot_generation(browser, Path(temp), args.output.resolve())
         browser.close()

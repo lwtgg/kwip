@@ -114,21 +114,21 @@ useSeoMeta({
           <span class="mx-1.5">/</span>
           <span class="text-fg">{{ categoryTitle }}</span>
         </nav>
-        <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+        <h1 class="listing-display text-2xl text-fg sm:text-3xl">
           {{ categoryTitle }}
         </h1>
       </div>
 
-      <nav aria-label="Event status filter" class="inline-flex items-center gap-1 rounded-[var(--radius)] border border-border bg-surface p-1">
+      <nav aria-label="Event status filter" class="inline-flex items-center gap-1 border-b border-border">
         <NuxtLink
           v-for="opt in filterOptions"
           :key="opt.value"
           :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
           :aria-current="activeFilter === opt.value ? 'page' : undefined"
-          class="rounded-[calc(var(--radius)-4px)] max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium motion-safe:transition-colors"
+          class="rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
           :class="
             activeFilter === opt.value
-              ? 'bg-accent text-accent-fg'
+              ? 'bg-surface-2 text-fg underline underline-offset-4'
               : 'text-muted hover:text-fg'
           "
         >
@@ -175,6 +175,7 @@ useSeoMeta({
           v-for="stream in filteredStreams"
           :key="stream.id"
           :stream="stream"
+          heading-level="h2"
           :now="nowSeconds"
         />
       </div>

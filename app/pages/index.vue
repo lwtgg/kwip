@@ -118,10 +118,8 @@ const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
 const nextUpStreams = computed(() => {
   if (activeFilter.value !== 'all') return []
 
-  const liveByViewers = [...liveNowStreams.value, ...alwaysLiveStreams.value]
-    .sort((a, b) => viewerCount(b) - viewerCount(a))
   const seen = new Set([heroStream.value?.uri_name])
-  return [...upcomingStreams.value, ...liveByViewers].filter((stream) => {
+  return upcomingStreams.value.filter((stream) => {
     if (seen.has(stream.uri_name)) return false
     seen.add(stream.uri_name)
     return true
@@ -134,9 +132,7 @@ function withoutNextUp(streams: FeedStreamItem[]) {
   return streams.filter((stream) => !nextUpUris.value.has(stream.uri_name))
 }
 
-// Rails lose whatever the strip promoted, so a rail emptied by the hand-off is dropped entirely.
-const liveRailStreams = computed(() => withoutNextUp(liveNowStreams.value))
-const alwaysLiveRailStreams = computed(() => withoutNextUp(alwaysLiveStreams.value))
+// Category rails omit events promoted to the strip and drop any emptied rail.
 const categoryRails = computed(() =>
   categories.value
     .map((cat) => ({ cat, streams: withoutNextUp(cat.streams) }))
@@ -147,7 +143,6 @@ const categoryRails = computed(() =>
 const upcomingBelowHero = computed(() =>
   withoutNextUp(upcomingStreams.value).filter((stream) => stream.uri_name !== heroStream.value?.uri_name),
 )
-const failedNextUpPosters = reactive(new Set<string>())
 
 const heroImgRef = ref<HTMLImageElement | null>(null)
 const heroImgError = ref(false)
@@ -188,17 +183,17 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-8 px-4 py-6 sm:px-6">
-    <nav aria-label="Event status filter" class="inline-flex items-center gap-1 rounded-[var(--radius)] border border-border bg-surface p-1">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+    <nav aria-label="Event status filter" class="inline-flex items-center gap-1 border-b border-border">
       <NuxtLink
         v-for="opt in filterOptions"
         :key="opt.value"
         :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
         :aria-current="activeFilter === opt.value ? 'page' : undefined"
-        class="rounded-[calc(var(--radius)-4px)] max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium motion-safe:transition-colors"
+        class="rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
         :class="
           activeFilter === opt.value
-            ? 'bg-accent text-accent-fg'
+            ? 'bg-surface-2 text-fg underline underline-offset-4'
             : 'text-muted hover:text-fg'
         "
       >
@@ -207,14 +202,14 @@ useSeoMeta({
     </nav>
 
     <template v-if="status === 'pending' && !data">
-      <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+      <h1 class="listing-display text-2xl text-fg sm:text-3xl">
         Live Sports Event Directory
       </h1>
       <StateBlock variant="skeleton" :rows="8" />
     </template>
 
     <template v-else-if="error && !data">
-      <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+      <h1 class="listing-display text-2xl text-fg sm:text-3xl">
         Live Sports Event Directory
       </h1>
       <StateBlock
@@ -233,7 +228,7 @@ useSeoMeta({
       />
 
       <template v-if="!hasVisibleStreams">
-        <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+        <h1 class="listing-display text-2xl text-fg sm:text-3xl">
           Live Sports Event Directory
         </h1>
         <StateBlock
@@ -247,11 +242,12 @@ useSeoMeta({
         <section
           v-if="heroStream"
           aria-label="Featured event"
-          class="relative overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
+          class="listing-hero relative bg-surface"
+          :class="{ 'listing-live': heroMode === 'live' }"
         >
           <div class="grid grid-cols-1 lg:grid-cols-12">
             <div
-              class="relative aspect-video overflow-hidden lg:col-span-7 lg:aspect-auto lg:min-h-[320px]"
+              class="listing-hero-art relative aspect-video overflow-hidden lg:col-span-7 lg:aspect-auto lg:min-h-feature-art"
               :style="{ backgroundColor: heroStream.colors?.[0] || 'var(--color-surface-2)' }"
             >
               <span
@@ -269,7 +265,7 @@ useSeoMeta({
                 height="540"
                 loading="eager"
                 decoding="async"
-                class="relative h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-300"
+                class="absolute inset-0 h-full w-full object-cover"
                 :class="heroImgLoaded ? 'opacity-100' : 'opacity-0'"
                 @load="heroImgLoaded = true"
                 @error="heroImgError = true"
@@ -278,7 +274,7 @@ useSeoMeta({
               <div v-if="heroStream.poster && !heroImgError" class="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/80 via-transparent to-transparent lg:bg-gradient-to-r lg:from-transparent lg:to-surface/90" />
             </div>
 
-            <div class="flex flex-col justify-center gap-4 p-6 sm:p-8 lg:col-span-5">
+            <div class="flex min-w-0 flex-col justify-center gap-(--stack-gap) p-(--page-padding) lg:col-span-5">
               <div class="flex flex-wrap items-center gap-2 text-xs">
                 <StatusPill
                   :starts-at="heroStream.starts_at"
@@ -289,13 +285,13 @@ useSeoMeta({
 
                 <NuxtLink
                   :to="`/c/${slugifyCategory(heroStream.category_name)}`"
-                  class="rounded bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-muted hover:text-fg"
+                  class="rounded-listing bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-muted hover:text-fg"
                 >
                   {{ heroStream.category_name }}
                 </NuxtLink>
                 <span v-if="heroStream.tag" class="text-muted">· {{ heroStream.tag }}</span>
                 <span
-                  class="ml-auto text-muted"
+                  class="listing-numeric ml-auto text-muted"
                   role="img"
                   :aria-label="`${formatViewersExact(heroStream.viewers)} ${heroMode === 'live' ? 'watching' : 'interested'}`"
                 >
@@ -312,14 +308,14 @@ useSeoMeta({
                 :now="nowSeconds"
               />
 
-              <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+              <h1 class="listing-display wrap-anywhere text-feature text-fg">
                 {{ heroStream.name }}
               </h1>
 
               <div class="pt-1">
                 <NuxtLink
                   :to="`/live/${heroStream.uri_name}`"
-                  class="inline-flex items-center gap-2 rounded-[var(--radius)] bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg hover:opacity-90"
+                  class="inline-flex min-h-11 items-center gap-2 rounded-listing bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg hover:underline"
                 >
                   <svg
                     aria-hidden="true"
@@ -336,45 +332,13 @@ useSeoMeta({
           </div>
         </section>
 
-        <section v-if="nextUpStreams.length" aria-labelledby="next-up-heading" class="!mt-4 border-t border-border pt-3">
-          <h2 id="next-up-heading" class="mb-2 text-xs font-semibold text-muted">
+        <section v-if="nextUpStreams.length" aria-labelledby="next-up-heading" class="space-y-(--card-gap)">
+          <h2 id="next-up-heading" class="listing-display listing-rule text-lg text-fg">
             Next up
           </h2>
-          <ul class="grid grid-cols-1 gap-1 min-[641px]:grid-cols-3 min-[641px]:gap-3">
+          <ul class="grid grid-cols-1 gap-(--card-gap) sm:grid-cols-3 sm:gap-(--grid-gap)">
             <li v-for="stream in nextUpStreams" :key="stream.uri_name" class="min-w-0">
-              <NuxtLink
-                :to="`/live/${stream.uri_name}`"
-                class="group flex min-h-11 items-center gap-2.5 rounded-[var(--radius)] p-1.5 hover:bg-surface"
-              >
-                <div class="relative h-10 w-[72px] shrink-0 overflow-hidden rounded bg-surface-2">
-                  <img
-                    v-if="stream.poster && !failedNextUpPosters.has(stream.poster)"
-                    :src="stream.poster"
-                    alt=""
-                    width="72"
-                    height="40"
-                    loading="lazy"
-                    decoding="async"
-                    class="h-full w-full object-cover"
-                    @error="failedNextUpPosters.add(stream.poster)"
-                  >
-                  <PosterFallback v-else :name="stream.name" :colors="stream.colors" :blurhash="stream.blurhash" />
-                </div>
-                <div class="min-w-0">
-                  <div class="line-clamp-2 break-words text-sm font-semibold leading-tight text-fg group-hover:text-accent">
-                    {{ stream.name }}
-                  </div>
-                  <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span class="min-w-0 truncate text-xs text-muted">{{ stream.category_name }}</span>
-                    <StatusPill
-                      :starts-at="stream.starts_at"
-                      :ends-at="stream.ends_at"
-                      :always-live="stream.always_live"
-                      :now="nowSeconds"
-                    />
-                  </div>
-                </div>
-              </NuxtLink>
+              <StreamCard layout="listing" :stream="stream" :now="nowSeconds" />
             </li>
           </ul>
         </section>
@@ -383,17 +347,17 @@ useSeoMeta({
 
         <!-- Live now rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && liveRailStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && liveNowStreams.length > 0"
           title="Live now"
-          :streams="liveRailStreams"
+          :streams="liveNowStreams"
           :now="nowSeconds"
         />
 
         <!-- 24/7 rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && alwaysLiveRailStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && alwaysLiveStreams.length > 0"
           title="24/7"
-          :streams="alwaysLiveRailStreams"
+          :streams="alwaysLiveStreams"
           :now="nowSeconds"
         />
 
@@ -409,11 +373,11 @@ useSeoMeta({
 
         <!-- Upcoming block with relative countdown -->
         <section v-if="activeFilter !== 'live' && upcomingBelowHero.length > 0" class="space-y-3">
-          <div class="flex items-baseline justify-between gap-3">
-            <h2 class="text-lg font-semibold tracking-tight text-fg">
+          <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
+            <h2 class="listing-display text-lg text-fg">
               Upcoming
             </h2>
-            <span class="text-xs text-muted">{{ upcomingBelowHero.length }} scheduled</span>
+            <span class="listing-numeric text-xs text-muted">{{ upcomingBelowHero.length }} scheduled</span>
           </div>
 
           <div class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">

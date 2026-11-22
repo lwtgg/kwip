@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
+  <div class="relative aspect-video w-full overflow-hidden rounded-listing border border-border bg-surface"
     :class="{ '[@media(scripting:none)]:hidden': !src }"
   >
     <div
@@ -155,7 +155,7 @@ onBeforeUnmount(() => {
         decoding="async"
         class="absolute inset-0 h-full w-full object-cover"
       >
-      <span class="relative rounded-full bg-surface-2 px-3 py-1.5">Loading player embed…</span>
+      <span class="relative rounded-listing bg-surface-2 px-3 py-1.5">Loading player embed…</span>
     </div>
 
     <div

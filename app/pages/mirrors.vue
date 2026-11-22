@@ -107,7 +107,7 @@ useSeoMeta({
           <a
             :href="`https://${domain}/`"
             rel="nofollow noopener"
-            class="text-accent underline underline-offset-2 hover:opacity-90"
+            class="text-fg underline underline-offset-2 hover:decoration-muted"
           >
             {{ domain }}
           </a>

@@ -5,7 +5,7 @@ import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, isSupplementSource, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
 import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
-import { sourceHost, sourceKey } from '~/utils/sourceIdentity'
+import { sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
 import { slugifyCategory } from '~/utils/supplementMatch'
@@ -69,7 +69,7 @@ const ReplayLink = defineComponent({
       : replayFallback
   },
 })
-const replayLinkClass = 'text-fg underline hover:text-accent max-md:inline-flex max-md:min-h-11 max-md:items-center'
+const replayLinkClass = 'text-fg underline hover:decoration-muted max-md:inline-flex max-md:min-h-11 max-md:items-center'
 
 function humanizeUri(uri: string): string {
   const last = uri.split('/').filter(Boolean).pop() || ''
@@ -382,22 +382,60 @@ const activeSourceKey = computed({
   },
 })
 
-const { isShielded, toggleShield } = usePlayerShield()
-const shieldSourceKey = computed(() => {
-  const source = currentSource.value
-  if (!source || source.kind === 'link') return null
-  // Keep stored preferences keyed to the original feed name and position.
-  const feedIndex = feedSources.value.findIndex((entry) => entry.data === source.url)
-  const feedSource = feedSources.value[feedIndex]
-  return feedSource ? JSON.stringify([uriName.value, feedSource.name.trim().toLowerCase(), feedIndex]) : null
+const { isShielded, toggleShield, reconcile } = usePlayerShield()
+const shieldSources = computed(() => {
+  const identities = new Map<string, { group: string; member: string }>()
+  for (const entry of playerInput.value.sources) {
+    const key = sourceKey(entry.data)
+    if (!key || identities.has(key) || entry.type !== 'iframe') continue
+
+    const substreamName = 'substreamName' in entry && typeof entry.substreamName === 'string'
+      ? entry.substreamName
+      : undefined
+    const name = sourceLabel({ data: entry.data, name: entry.name, substreamName }, 0).toLowerCase()
+    const variant = 'sourceTag' in entry && typeof entry.sourceTag === 'string'
+      ? entry.sourceTag.trim().toLowerCase()
+      : ''
+    const group = `name:${JSON.stringify([name, sourceHost(entry.data), variant])}`
+    identities.set(key, { group, member: `source:${key}` })
+  }
+  return identities
 })
-const shieldEnabled = computed(() => shieldSourceKey.value !== null && isShielded(shieldSourceKey.value))
+const shieldIdentity = computed(() => {
+  const source = currentSource.value
+  if (source?.kind !== 'iframe') return null
+  return shieldSources.value.get(source.key) ?? null
+})
+const shieldRoster = computed(() => {
+  const group = shieldIdentity.value?.group
+  return [...shieldSources.value.values()].filter(source => source.group === group).map(source => source.member)
+})
+const shieldEnabled = computed(() => {
+  const identity = shieldIdentity.value
+  return identity !== null && isShielded(uriName.value, identity.group, identity.member)
+})
+
+watchEffect(() => {
+  const source = currentSource.value
+  const identity = shieldIdentity.value
+  if (!source || !identity) return
+
+  const scope = uriName.value
+  const feedIndex = feedSources.value.findIndex(candidate => candidate.data === source.url)
+  const feedSource = feedSources.value[feedIndex]
+  // Only the legacy format that included the event URI can be attributed safely.
+  const legacyAlias = feedSource
+    ? JSON.stringify([scope, feedSource.name.trim().toLowerCase(), feedIndex])
+    : undefined
+  reconcile(scope, identity.group, identity.member, shieldRoster.value, legacyAlias)
+})
 
 function toggleCurrentShield() {
-  if (shieldSourceKey.value !== null) toggleShield(shieldSourceKey.value)
+  const identity = shieldIdentity.value
+  if (identity) toggleShield(uriName.value, identity.group, identity.member, shieldRoster.value)
 }
 
-const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-[var(--radius)] border text-xs font-medium hover:border-accent md:min-h-8 md:min-w-8'
+const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-listing border text-xs font-medium hover:border-muted md:min-h-8 md:min-w-8'
 
 async function enterFullscreen() {
   const wrapper = playerWrapper.value
@@ -717,7 +755,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 
       <div class="flex flex-col justify-between gap-x-4 gap-y-(--stack-gap) lg:flex-row lg:items-end">
         <div class="space-y-2">
-          <h1 class="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+          <h1 class="listing-display text-2xl text-fg sm:text-3xl">
             {{ pageHeading }}
           </h1>
           <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
@@ -730,12 +768,12 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             <NuxtLink
               v-if="categorySlug"
               :to="`/c/${categorySlug}`"
-              class="rounded bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-fg hover:text-accent"
+              class="rounded-listing bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-fg hover:underline"
             >
               {{ detail.category_name }}
             </NuxtLink>
             <span v-if="detail.tag">· {{ detail.tag }}</span>
-            <span>· {{ formatViewersExact(detail.viewers) }} viewers</span>
+            <span class="listing-numeric">· {{ formatViewersExact(detail.viewers) }} viewers</span>
           </div>
           <LiveProgress
             v-if="detail"
@@ -757,12 +795,12 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
           <button
-            v-if="shieldSourceKey !== null"
+            v-if="shieldIdentity !== null"
             type="button"
             :aria-pressed="shieldEnabled"
-            title="Reload the player to block popups and page redirects"
-            class="inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-[var(--radius)] border px-2.5 text-xs font-medium hover:border-accent sm:min-h-8"
-            :class="shieldEnabled ? 'border-accent text-accent' : 'border-border text-fg'"
+            aria-describedby="player-shield-description"
+            class="inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-listing border px-2.5 text-xs font-medium text-fg hover:border-muted sm:min-h-8"
+            :class="shieldEnabled ? 'border-muted bg-surface-2 underline underline-offset-4' : 'border-border'"
             @click="toggleCurrentShield"
           >
             <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
@@ -787,23 +825,20 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               aria-label="Player help"
               :aria-pressed="playerHelpOpen"
               title="Not playing?"
-              :class="[playerControlClass, playerHelpOpen ? 'border-accent text-accent' : 'border-border text-fg']"
+              :class="[playerControlClass, playerHelpOpen ? 'border-muted bg-surface-2 text-fg' : 'border-border text-fg']"
               @click="playerHelpOpen = !playerHelpOpen"
             >
               <span aria-hidden="true">?</span>
             </button>
           </template>
-          <p v-if="shieldEnabled" class="basis-full text-xs text-muted">
-            Popups and page redirects are blocked. Some players may stop working.
-            <button type="button" class="text-fg underline hover:text-accent" @click="toggleCurrentShield">
-              Reload without shield
-            </button>
+          <p v-if="shieldIdentity !== null" id="player-shield-description" class="basis-full text-xs text-muted">
+            Shield reloads this player to block popups and page redirects.
           </p>
           <p v-if="playerHelpOpen && currentSource?.kind === 'iframe'" class="basis-full text-xs text-muted">
             If the picture stays black, reload the frame or open it in a new tab.
             <button
               type="button"
-              class="inline-flex items-center text-fg underline hover:text-accent max-md:min-h-11"
+              class="inline-flex items-center text-fg underline hover:decoration-muted max-md:min-h-11"
               @click="handleReloadPlayer"
             >
               Reload player
@@ -812,7 +847,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               :href="currentSource.url"
               target="_blank"
               rel="noreferrer"
-              class="inline-flex items-center text-fg underline hover:text-accent max-md:min-h-11"
+              class="inline-flex items-center text-fg underline hover:decoration-muted max-md:min-h-11"
             >
               Open in new tab
             </a>
@@ -860,7 +895,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         </p>
         <div
           v-if="currentSource && currentSource.kind === 'link'"
-          class="relative aspect-video w-full overflow-hidden rounded-[var(--radius)] border border-border bg-surface"
+          class="relative aspect-video w-full overflow-hidden rounded-listing border border-border bg-surface"
           :style="{ backgroundColor: placeholderColor }"
         >
           <img
@@ -871,7 +906,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             height="720"
             loading="lazy"
             decoding="async"
-            class="h-full w-full object-cover motion-safe:transition-opacity motion-safe:duration-300"
+            class="h-full w-full object-cover"
             :class="posterLoaded ? 'opacity-100' : 'opacity-0'"
             @load="posterLoaded = true"
             @error="posterError = true"
@@ -885,7 +920,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               target="_blank"
               rel="noopener noreferrer"
               :aria-label="announceAd ? `Open at source · ${currentSource.label}. Standard activation may open the source in this tab and an advertiser in a new tab` : undefined"
-              class="inline-flex items-center gap-2 rounded-[var(--radius)] bg-accent px-6 py-3 text-sm font-semibold text-accent-fg shadow-sm hover:opacity-90"
+              class="inline-flex items-center gap-2 rounded-listing bg-accent px-6 py-3 text-sm font-semibold text-accent-fg shadow-sm hover:underline"
               @click="handlePrimaryPlay"
             >
               <span>Open at source · {{ currentSource.label }}</span>
@@ -925,7 +960,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               :title="`${detail.name} — ${currentSource.label}`"
               allow="autoplay; fullscreen; picture-in-picture"
               allowfullscreen
-              class="aspect-video w-full rounded-[var(--radius)] border border-border bg-surface"
+              class="aspect-video w-full rounded-listing border border-border bg-surface"
             />
           </noscript>
         </div>
@@ -933,7 +968,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         <div
           v-else
           role="alert"
-          class="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-[var(--radius)] border border-border bg-surface p-6 text-center"
+          class="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-listing border border-border bg-surface p-6 text-center"
         >
           <div class="max-w-md space-y-1.5">
             <p class="text-base font-semibold text-fg">
@@ -951,7 +986,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               :href="firstRemainingLink.url"
               target="_blank"
               rel="noopener noreferrer"
-              class="inline-flex items-center gap-2 rounded-[var(--radius)] bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg hover:opacity-90"
+              class="inline-flex items-center gap-2 rounded-listing bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg hover:underline"
             >
               <span>Open at source · {{ firstRemainingLink.label }}</span>
               <svg
@@ -969,7 +1004,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             </a>
             <button
               type="button"
-              class="rounded-[var(--radius)] border border-border bg-surface-2 px-4 py-2.5 text-sm font-medium text-fg hover:border-accent"
+              class="rounded-listing border border-border bg-surface-2 px-4 py-2.5 text-sm font-medium text-fg hover:border-muted"
               @click="handleRetryChain"
             >
               Retry sources
@@ -982,14 +1017,14 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 
       <!-- Related streams in same category -->
       <section class="space-y-(--related-heading-gap)">
-        <div class="flex items-baseline justify-between gap-3">
-          <h2 class="text-lg font-semibold tracking-tight text-fg">
+        <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
+          <h2 class="listing-display text-lg text-fg">
             Related in {{ detail.category_name }}
           </h2>
           <NuxtLink
             v-if="categorySlug"
             :to="`/c/${categorySlug}`"
-            class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:text-accent"
+            class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:underline"
           >
             More {{ detail.category_name }} →
           </NuxtLink>

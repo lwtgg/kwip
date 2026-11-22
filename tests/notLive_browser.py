@@ -112,6 +112,8 @@ def check_status(browser, origin, stream, width, case, live_flags):
             chip.click()
             expect(chip).to_have_attribute('aria-pressed', 'true')
             expect(chips[1 - index]).to_have_attribute('aria-pressed', 'false')
+            expect(chip).to_have_css('text-decoration-line', 'underline')
+            expect(chips[1 - index]).to_have_css('text-decoration-line', 'none')
             expect(frame).to_have_attribute('src', url)
             expect(chip.get_by_text('· Not live', exact=True)).to_have_count(1 if expected_live[index] is False else 0)
             key = chip.get_attribute('value')
