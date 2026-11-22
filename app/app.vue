@@ -23,31 +23,12 @@ useSeoMeta({
   ogType: 'website',
 })
 useOgImage(undefined, siteName)
-
-function revealHorizontalFocus(event: FocusEvent) {
-  const target = event.target
-  if (!(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
-
-  const scroller = target.closest<HTMLElement>('.overflow-x-auto, [class~="md:overflow-x-auto"]')
-  if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
-
-  requestAnimationFrame(() => {
-    if (document.activeElement !== target) return
-    const bounds = scroller.getBoundingClientRect()
-    const item = target.getBoundingClientRect()
-    if (item.left < bounds.left) scroller.scrollLeft += item.left - bounds.left
-    else if (item.right > bounds.right) scroller.scrollLeft += item.right - bounds.right
-  })
-}
-
-onMounted(() => document.addEventListener('focusin', revealHorizontalFocus))
-onBeforeUnmount(() => document.removeEventListener('focusin', revealHorizontalFocus))
 </script>
 
 <template>
   <a
     href="#main"
-    class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-[var(--radius)] focus:bg-accent focus:px-4 focus:py-2 focus:text-accent-fg"
+    class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:inline-flex focus:min-h-target focus:items-center focus:rounded-control focus:bg-surface focus:px-4 focus:text-fg"
   >Skip to content</a>
   <NuxtLayout>
     <main id="main">

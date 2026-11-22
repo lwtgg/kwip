@@ -69,7 +69,7 @@ const ReplayLink = defineComponent({
       : replayFallback
   },
 })
-const replayLinkClass = 'text-fg underline hover:decoration-muted max-md:inline-flex max-md:min-h-11 max-md:items-center'
+const replayLinkClass = 'text-fg underline hover:decoration-muted inline-flex min-h-target items-center'
 
 function humanizeUri(uri: string): string {
   const last = uri.split('/').filter(Boolean).pop() || ''
@@ -435,7 +435,7 @@ function toggleCurrentShield() {
   if (identity) toggleShield(uriName.value, identity.group, identity.member, shieldRoster.value)
 }
 
-const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-listing border text-xs font-medium hover:border-muted md:min-h-8 md:min-w-8'
+const playerControlClass = 'inline-flex min-h-target min-w-target items-center justify-center rounded-control border text-metadata font-medium hover:border-control hover:bg-surface-2'
 
 async function enterFullscreen() {
   const wrapper = playerWrapper.value
@@ -551,7 +551,6 @@ const categorySlug = computed(() =>
   categoryLabel.value ? slugifyCategory(categoryLabel.value) : '',
 )
 
-const placeholderColor = computed(() => detail.value?.colors?.[0] || 'var(--color-surface-2)')
 
 const relatedStreams = computed<FeedStreamItem[]>(() => {
   const d = detail.value
@@ -729,130 +728,43 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
-    <StateBlock
-      v-if="isStale && detail"
-      variant="stale"
-      message="Directory data is older than 5 minutes."
-      @retry="handleRetryFeed"
-    />
-
+  <div class="mx-auto max-w-fixtures space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
     <!-- Header rendered in every state so loading, error, and empty still expose the page h1 -->
     <div class="space-y-(--stack-gap)">
-      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
-        <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
-        <span>/</span>
+      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-2 text-xs text-muted">
+        <NuxtLink to="/" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Home</NuxtLink>
+        <span v-if="categorySlug" aria-hidden="true">/</span>
         <NuxtLink
           v-if="categorySlug"
           :to="`/c/${categorySlug}`"
-          class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
+          class="inline-flex min-h-target min-w-target items-center hover:text-fg"
         >
           {{ categoryLabel }}
         </NuxtLink>
-        <span v-if="categorySlug">/</span>
-        <span class="truncate text-fg">{{ pageHeading }}</span>
       </nav>
 
-      <div class="flex flex-col justify-between gap-x-4 gap-y-(--stack-gap) lg:flex-row lg:items-end">
-        <div class="space-y-2">
-          <h1 class="listing-display text-2xl text-fg sm:text-3xl">
-            {{ pageHeading }}
-          </h1>
-          <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
-            <StatusPill
-              :starts-at="detail.starts_at || 0"
-              :ends-at="detail.ends_at || 0"
-              :always-live="detail.always_live"
-              :now="nowSeconds"
-            />
-            <NuxtLink
-              v-if="categorySlug"
-              :to="`/c/${categorySlug}`"
-              class="rounded-listing bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-fg hover:underline"
-            >
-              {{ detail.category_name }}
-            </NuxtLink>
-            <span v-if="detail.tag">· {{ detail.tag }}</span>
-            <span class="listing-numeric">· {{ formatViewersExact(detail.viewers) }} viewers</span>
-          </div>
-          <LiveProgress
-            v-if="detail"
-            :starts-at="detail.starts_at"
-            :ends-at="detail.ends_at"
+      <div class="space-y-2">
+        <h1 class="wrap-anywhere text-event font-semibold text-fg">{{ pageHeading }}</h1>
+        <div v-if="detail" class="flex flex-wrap items-center gap-x-3 text-metadata text-muted">
+          <StatusPill
+            :starts-at="detail.starts_at || 0"
+            :ends-at="detail.ends_at || 0"
             :always-live="detail.always_live"
             :now="nowSeconds"
-            show-label
+            :stale="isStale"
           />
+          <span v-if="detail.tag">{{ detail.tag }}</span>
+          <span class="tabular-nums">{{ formatViewersExact(detail.viewers) }} viewers</span>
         </div>
-
-        <div v-if="detail" class="relative z-10 flex flex-wrap items-center gap-3">
-          <SourceSelect
-            v-model="activeSourceKey"
-            :sources="sources"
-            :click-under="announceAd"
-            :failed-keys="rememberedFailures"
-            :noscript-source-key="initialFeedSource?.key"
-            @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
-          />
-          <button
-            v-if="shieldIdentity !== null"
-            type="button"
-            :aria-pressed="shieldEnabled"
-            aria-describedby="player-shield-description"
-            class="inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-listing border px-2.5 text-xs font-medium text-fg hover:border-muted sm:min-h-8"
-            :class="shieldEnabled ? 'border-muted bg-surface-2 underline underline-offset-4' : 'border-border'"
-            @click="toggleCurrentShield"
-          >
-            <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
-              <path d="M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Z" />
-            </svg>
-            Shield
-          </button>
-          <template v-if="currentSource?.kind === 'iframe'">
-            <button
-              type="button"
-              aria-label="Fullscreen"
-              title="Fullscreen"
-              :class="[playerControlClass, 'border-border text-fg']"
-              @click="enterFullscreen"
-            >
-              <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Player help"
-              :aria-pressed="playerHelpOpen"
-              title="Not playing?"
-              :class="[playerControlClass, playerHelpOpen ? 'border-muted bg-surface-2 text-fg' : 'border-border text-fg']"
-              @click="playerHelpOpen = !playerHelpOpen"
-            >
-              <span aria-hidden="true">?</span>
-            </button>
-          </template>
-          <p v-if="shieldIdentity !== null" id="player-shield-description" class="basis-full text-xs text-muted">
-            Shield reloads this player to block popups and page redirects.
-          </p>
-          <p v-if="playerHelpOpen && currentSource?.kind === 'iframe'" class="basis-full text-xs text-muted">
-            If the picture stays black, reload the frame or open it in a new tab.
-            <button
-              type="button"
-              class="inline-flex items-center text-fg underline hover:decoration-muted max-md:min-h-11"
-              @click="handleReloadPlayer"
-            >
-              Reload player
-            </button>
-            <a
-              :href="currentSource.url"
-              target="_blank"
-              rel="noreferrer"
-              class="inline-flex items-center text-fg underline hover:decoration-muted max-md:min-h-11"
-            >
-              Open in new tab
-            </a>
-          </p>
-        </div>
+        <LiveProgress
+          v-if="detail && !isStale"
+          :starts-at="detail.starts_at"
+          :ends-at="detail.ends_at"
+          :always-live="detail.always_live"
+          :now="nowSeconds"
+          show-label
+        />
+        <StateBlock v-if="isStale && detail" variant="stale" @retry="handleRetryFeed" />
       </div>
     </div>
 
@@ -865,7 +777,6 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     <StateBlock
       v-else-if="streamError && !detail"
       variant="error"
-      :message="streamError.message"
       @retry="handleRetryFeed"
     />
 
@@ -877,8 +788,8 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 
     <template v-else>
       <!-- Player frame (iframe) or outbound link block or exhausted-chain fallback -->
-      <section aria-label="Event player">
-        <p v-if="hasEnded" class="w-full border-t border-border py-2 text-xs text-muted">
+      <section aria-label="Event player" class="rounded-card bg-surface">
+        <p v-if="hasEnded" class="w-full px-4 text-metadata text-muted">
           This event has ended.
           <NuxtLink
             v-if="streamResp?.fromSnapshot && streamResp.hasSnapshotReplay"
@@ -895,8 +806,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         </p>
         <div
           v-if="currentSource && currentSource.kind === 'link'"
-          class="relative aspect-video w-full overflow-hidden rounded-listing border border-border bg-surface"
-          :style="{ backgroundColor: placeholderColor }"
+          class="relative aspect-video w-full overflow-hidden rounded-card bg-surface"
         >
           <img
             v-if="detail.poster && !posterError"
@@ -911,32 +821,34 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             @load="posterLoaded = true"
             @error="posterError = true"
           >
-          <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-bg/70 p-6 text-center backdrop-blur-xs">
-            <p class="text-xs font-medium uppercase tracking-wide text-muted">
-              External player source
-            </p>
-            <a
-              :href="currentSource.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              :aria-label="announceAd ? `Open at source · ${currentSource.label}. Standard activation may open the source in this tab and an advertiser in a new tab` : undefined"
-              class="inline-flex items-center gap-2 rounded-listing bg-accent px-6 py-3 text-sm font-semibold text-accent-fg shadow-sm hover:underline"
-              @click="handlePrimaryPlay"
-            >
-              <span>Open at source · {{ currentSource.label }}</span>
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="h-4 w-4"
+          <div class="absolute inset-0 grid place-items-center p-3">
+            <div class="flex max-w-full flex-col items-center gap-2 rounded-card bg-surface p-3 text-center">
+              <p class="text-metadata font-medium text-fg">
+                External player source
+              </p>
+              <a
+                :href="currentSource.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :aria-label="announceAd ? 'Open at source. Standard activation may open the source in this tab and an advertiser in a new tab' : undefined"
+                class="inline-flex items-center min-h-target gap-2 rounded-control bg-accent px-4 py-2 wrap-anywhere text-sm font-semibold text-accent-fg hover:underline"
+                @click="handlePrimaryPlay"
               >
-                <path d="M7 17 17 7M7 7h10v10" />
-              </svg>
-            </a>
+                <span>Open at source</span>
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="size-4 shrink-0"
+                >
+                  <path d="M7 17 17 7M7 7h10v10" />
+                </svg>
+              </a>
+            </div>
           </div>
         </div>
 
@@ -960,7 +872,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               :title="`${detail.name} — ${currentSource.label}`"
               allow="autoplay; fullscreen; picture-in-picture"
               allowfullscreen
-              class="aspect-video w-full rounded-listing border border-border bg-surface"
+              class="aspect-video w-full rounded-card bg-surface"
             />
           </noscript>
         </div>
@@ -968,16 +880,14 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         <div
           v-else
           role="alert"
-          class="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-listing border border-border bg-surface p-6 text-center"
+          class="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-card bg-surface p-6 text-center"
         >
           <div class="max-w-md space-y-1.5">
             <p class="text-base font-semibold text-fg">
               No working source available
             </p>
             <p class="text-sm text-muted">
-              {{ supplement.status === 'merged' && sources.some(source => source.origin === 'supplement' && failedKeys.has(source.key))
-                ? 'The second provider’s players also timed out or reported an error.'
-                : 'Every embedded player source in the chain timed out or reported an error.' }}
+              The available players did not load. Choose another source if one is listed, or try again.
             </p>
           </div>
           <div class="flex flex-wrap items-center justify-center gap-3">
@@ -986,7 +896,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               :href="firstRemainingLink.url"
               target="_blank"
               rel="noopener noreferrer"
-              class="inline-flex items-center gap-2 rounded-listing bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg hover:underline"
+              class="inline-flex items-center min-h-target gap-2 rounded-control bg-accent px-4 py-2 wrap-anywhere text-sm font-semibold text-accent-fg hover:underline"
             >
               <span>Open at source · {{ firstRemainingLink.label }}</span>
               <svg
@@ -997,50 +907,105 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
-                class="h-4 w-4"
+                class="size-4 shrink-0"
               >
                 <path d="M7 17 17 7M7 7h10v10" />
               </svg>
             </a>
             <button
               type="button"
-              class="rounded-listing border border-border bg-surface-2 px-4 py-2.5 text-sm font-medium text-fg hover:border-muted"
+              class="min-h-target rounded-control px-4 text-sm font-semibold hover:underline"
+              :class="firstRemainingLink ? 'border border-control-surface text-fg' : 'bg-accent text-accent-fg'"
               @click="handleRetryChain"
             >
               Retry sources
             </button>
           </div>
         </div>
+        <div v-if="sources.length || currentSource?.kind === 'iframe'">
+          <SourceSelect
+            v-model="activeSourceKey"
+            :sources="sources"
+            :click-under="announceAd"
+            :failed-keys="rememberedFailures"
+            :noscript-source-key="initialFeedSource?.key"
+            @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
+          />
+          <div v-if="shieldIdentity !== null || currentSource?.kind === 'iframe'" class="flex flex-wrap items-center gap-2 border-t border-border p-4 [@media(scripting:none)]:hidden">
+            <button
+              v-if="shieldIdentity !== null"
+              type="button"
+              :aria-pressed="shieldEnabled"
+              aria-describedby="player-shield-description"
+              class="inline-flex min-h-target min-w-target items-center gap-2 rounded-control border px-3 text-metadata font-medium text-fg hover:border-control hover:bg-surface-2"
+              :class="shieldEnabled ? 'border-control bg-surface-2 underline underline-offset-4' : 'border-control-surface'"
+              @click="toggleCurrentShield"
+            >
+              <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                <path d="M12 22s7-3 7-10V5l-7-3-7 3v7c0 7 7 10 7 10Z" />
+              </svg>
+              Shield
+            </button>
+            <template v-if="currentSource?.kind === 'iframe'">
+              <button
+                type="button"
+                aria-label="Fullscreen"
+                title="Fullscreen"
+                :class="[playerControlClass, 'border-control-surface text-fg']"
+                @click="enterFullscreen"
+              >
+                <svg aria-hidden="true" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label="Player help"
+                :aria-pressed="playerHelpOpen"
+                title="Not playing?"
+                :class="[playerControlClass, playerHelpOpen ? 'border-control bg-surface-2 text-fg' : 'border-control-surface text-fg']"
+                @click="playerHelpOpen = !playerHelpOpen"
+                class="px-3"
+              >
+                Player help
+              </button>
+            </template>
+            <p v-if="shieldIdentity !== null" id="player-shield-description" class="basis-full text-xs text-muted">
+              Shield reloads this player to block popups and page redirects.
+            </p>
+            <p v-if="playerHelpOpen && currentSource?.kind === 'iframe'" class="basis-full text-xs text-muted">
+              If the picture stays black, reload the frame or open it in a new tab.
+              <button
+                type="button"
+                class="inline-flex items-center text-fg underline min-h-target hover:decoration-muted"
+                @click="handleReloadPlayer"
+              >
+                Reload player
+              </button>
+              <a
+                :href="currentSource.url"
+                target="_blank"
+                rel="noreferrer"
+                class="inline-flex items-center text-fg underline min-h-target hover:decoration-muted"
+              >
+                Open in new tab
+              </a>
+            </p>
+          </div>
+        </div>
       </section>
 
       <AdSlot format="leaderboard" placement="event-banner" />
 
-      <!-- Related streams in same category -->
       <section class="space-y-(--related-heading-gap)">
-        <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
-          <h2 class="listing-display text-lg text-fg">
-            Related in {{ detail.category_name }}
-          </h2>
-          <NuxtLink
-            v-if="categorySlug"
-            :to="`/c/${categorySlug}`"
-            class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:underline"
-          >
-            More {{ detail.category_name }} →
-          </NuxtLink>
-        </div>
-
-        <div
-          v-if="relatedStreams.length > 0"
-          class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4"
-        >
-          <StreamCard
-            v-for="stream in relatedStreams"
-            :key="stream.id"
-            :stream="stream"
-            :now="nowSeconds"
-          />
-        </div>
+        <Rail
+          v-if="relatedStreams.length"
+          :title="`Related in ${detail.category_name}`"
+          :category="detail.category_name"
+          :streams="relatedStreams"
+          :stale="isStale"
+          :now="nowSeconds"
+        />
         <StateBlock
           v-else
           variant="empty"

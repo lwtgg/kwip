@@ -9,14 +9,16 @@ const props = withDefaults(
     now?: number
     linkBase?: string
     metricLabel?: 'viewers' | 'views'
-    countdownMap?: Record<number, string>
+    featuredUri?: string
+    stale?: boolean
+    replayDateMap?: Record<number, string>
   }>(),
   {
     category: undefined,
     now: undefined,
     linkBase: '/live',
     metricLabel: 'viewers',
-    countdownMap: undefined,
+    replayDateMap: undefined,
   },
 )
 
@@ -36,45 +38,30 @@ const categoryHref = computed(() => {
 </script>
 
 <template>
-  <section v-if="streams.length > 0" class="space-y-(--card-gap)">
-    <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
-      <h2 class="listing-display text-lg text-fg">
-        <NuxtLink
-          v-if="categoryHref"
-          :to="categoryHref"
-          class="inline-flex items-center gap-1.5 max-sm:min-h-11 hover:underline"
-        >
-          <span>{{ title }}</span>
-          <span aria-hidden="true" class="text-sm text-muted">→</span>
-        </NuxtLink>
-        <span v-else>{{ title }}</span>
-      </h2>
+  <section v-if="streams.length" class="space-y-(--card-gap)">
+    <div class="flex flex-wrap items-center gap-x-4">
+      <h2 class="text-section font-semibold text-fg">{{ title }}</h2>
       <NuxtLink
         v-if="categoryHref"
         :to="categoryHref"
-        class="max-sm:inline-flex max-sm:min-h-11 max-sm:items-center text-xs font-medium text-muted hover:underline"
+        class="inline-flex min-h-target items-center gap-1 text-metadata font-medium text-muted hover:text-fg hover:underline"
       >
-        View all <span class="listing-numeric">({{ streams.length }})</span>
+        {{ linkBase === '/vods' ? `${category} replays` : `All ${category} events` }}
+        <span aria-hidden="true">→</span>
       </NuxtLink>
     </div>
-
-    <div
-      class="flex flex-col gap-(--rail-gap) md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:pb-2 md:has-[:focus-visible]:snap-none"
-    >
-      <div
+    <div class="fixture-list">
+      <StreamCard
         v-for="stream in streams"
         :key="stream.id"
-        class="w-full md:w-72 md:shrink-0 md:snap-start xl:w-80"
-      >
-        <StreamCard
-          class="md:focus-visible:outline-offset-(--focus-ring-inset)"
-          :stream="stream"
-          :now="now"
-          :to="`${linkBase}/${stream.uri_name}`"
-          :metric-label="metricLabel"
-          :countdown="countdownMap?.[stream.id] || ''"
-        />
-      </div>
+        :stream="stream"
+        :now="now"
+        :to="`${linkBase}/${stream.uri_name}`"
+        :metric-label="metricLabel"
+        :replay-date="replayDateMap?.[stream.id]"
+        :stale="stale"
+        :featured="featuredUri === stream.uri_name"
+      />
     </div>
   </section>
 </template>

@@ -39,14 +39,27 @@ onBeforeUnmount(() => {
   if (holdTimer) clearTimeout(holdTimer)
 })
 
-const hasSelection = computed(() =>
-  props.sources.some((source) => source.key === props.modelValue),
-)
+const selected = computed(() => props.sources.find(source => source.key === props.modelValue))
+const alternatives = computed(() => props.sources.filter(source => source.key !== props.modelValue))
+const nativeAlternatives = computed(() => props.sources.filter(source => source.key !== props.noscriptSourceKey))
+const groups = computed(() => [
+  { label: 'Selected source', sources: selected.value ? [selected.value] : [], selected: true },
+  { label: 'Change source', sources: alternatives.value, selected: false },
+].filter(group => group.sources.length))
+const orderedSources = computed(() => groups.value.flatMap(group => group.sources))
+const focusedKey = ref<string>()
+const tabStop = computed(() => orderedSources.value.find(source => source.key === focusedKey.value)?.key
+  ?? orderedSources.value[0]?.key)
 
 function chipStatus(source: SelectableSourceOption) {
   if (props.failedKeys?.includes(source.key)) return 'Failed'
   if (source.live === false) return 'Not live'
   if (source.degraded) return 'Degraded'
+}
+
+function distinctHost(source: SelectableSourceOption) {
+  const hint = source.label.split(' · ')[0]?.toLowerCase()
+  return hint === source.host?.toLowerCase() ? undefined : source.host
 }
 
 function chipLabel(source: SelectableSourceOption) {
@@ -60,8 +73,13 @@ function chipLabel(source: SelectableSourceOption) {
 }
 
 function onChipClick(event: MouseEvent, key: string) {
+  const hadFocus = document.activeElement === event.currentTarget
   emit('source-click', event, key)
   emit('update:modelValue', key)
+  if (hadFocus) {
+    void nextTick(() => findChip(key)?.focus({ preventScroll: event.detail > 0 }))
+    if (event.detail === 0 && key !== props.modelValue) holdFocus(key)
+  }
 }
 
 function findChip(key: string) {
@@ -69,8 +87,10 @@ function findChip(key: string) {
     .find((chip) => chip.value === key)
 }
 
-function onChipKeydown(event: KeyboardEvent, index: number) {
-  const count = props.sources.length
+function onChipKeydown(event: KeyboardEvent, key: string) {
+  const sources = orderedSources.value
+  const index = sources.findIndex(source => source.key === key)
+  const count = sources.length
   let next: number
   switch (event.key) {
     case 'ArrowLeft': next = (index + count - 1) % count; break
@@ -80,55 +100,58 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
     default: return
   }
 
-  const source = props.sources[next]
+  const source = sources[next]
   if (!source) return
 
   event.preventDefault()
-  emit('update:modelValue', source.key)
-  void nextTick(() => findChip(source.key)?.focus())
-  holdFocus(source.key)
+  findChip(source.key)?.focus()
 }
 </script>
 
 <template>
   <div class="min-w-0">
     <div
-      class="flex flex-wrap items-center gap-2 [@media(scripting:none)]:hidden"
+      ref="group"
+      role="group"
+      aria-label="Playback source"
+      class="[@media(scripting:none)]:hidden"
       :class="{ invisible: !mounted }"
     >
-      <span :id="`${id}-label`" class="text-xs font-medium text-muted">Change source</span>
       <div
-        ref="group"
+        v-for="section in groups"
+        :key="section.label"
         role="group"
-        aria-label="Playback source"
-        :aria-describedby="`${id}-label`"
-        class="flex min-w-0 flex-wrap gap-2"
+        :aria-label="section.label"
+        class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4"
+        :class="section.selected ? 'border-b border-border bg-surface-2 py-1' : 'py-3'"
       >
+        <span aria-hidden="true" class="text-metadata font-medium text-muted">{{ section.label }}</span>
         <button
-          v-for="(source, index) in sources"
+          v-for="(source, index) in section.sources"
           :key="source.key"
           type="button"
           :value="source.key"
           data-allow-mismatch="class,attribute"
-          :aria-describedby="source.host ? `${id}-host-${index}` : undefined"
+          :aria-describedby="distinctHost(source) ? `${id}-host-${section.selected}-${index}` : undefined"
           :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
-          :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
-          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-listing border border-muted px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
+          :tabindex="tabStop === source.key ? 0 : -1"
+          class="inline-flex min-h-target min-w-0 max-w-full items-center gap-2 rounded-control border px-3 py-2 text-start text-metadata font-medium hover:bg-surface-2"
           :class="[
-            source.key === modelValue ? 'bg-surface underline underline-offset-4' : 'bg-surface-2',
+            section.selected ? 'border-transparent bg-surface-2 font-semibold' : 'border-control-surface bg-surface hover:border-control',
             chipStatus(source) ? 'text-muted' : 'text-fg',
           ]"
+          @focus="focusedKey = source.key"
           @click="onChipClick($event, source.key)"
-          @keydown="onChipKeydown($event, index)"
+          @keydown="onChipKeydown($event, source.key)"
         >
           <span class="min-w-0 wrap-anywhere" data-allow-mismatch="children">
             {{ source.label }}
             <span v-if="chipStatus(source)"> · {{ chipStatus(source) }}</span>
-            <span v-if="sources.length > 1 && source.host" aria-hidden="true" class="block text-xs text-muted no-underline">
+            <span v-if="!section.selected && sources.length > 1 && distinctHost(source)" :id="`${id}-host-${section.selected}-${index}`" aria-hidden="true" class="block text-xs text-muted no-underline">
               {{ source.host }}
             </span>
-            <span v-if="source.host" :id="`${id}-host-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
+            <span v-if="(section.selected || sources.length === 1) && distinctHost(source)" :id="`${id}-host-${section.selected}-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
           </span>
           <span v-if="source.origin === 'supplement'" aria-hidden="true" class="shrink-0 text-xs">2nd</span>
           <span v-if="source.origin === 'pitsport'" aria-hidden="true" class="shrink-0 text-xs">3rd</span>
@@ -140,7 +163,7 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
             stroke-width="2"
             stroke-linecap="round"
             stroke-linejoin="round"
-            class="size-3.5 shrink-0"
+            class="size-4 shrink-0"
           >
             <path v-if="source.kind === 'link'" d="M7 17 17 7M7 7h10v10" />
             <rect v-else x="3" y="5" width="18" height="14" rx="2" />
@@ -151,28 +174,30 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
 
     <!-- The browser parses noscript contents as text when scripting is enabled. -->
     <noscript v-once data-allow-mismatch="children">
-      <form method="get" class="flex flex-wrap items-center gap-2">
-        <label :for="id" class="text-xs font-medium text-muted">Change source</label>
+      <div v-if="selected" role="group" aria-label="Selected source" class="flex flex-wrap items-center gap-2 border-b border-border bg-surface-2 px-4 py-3 text-metadata">
+        <span aria-hidden="true" class="font-medium text-muted">Selected source</span>
+        <span class="wrap-anywhere font-semibold text-fg">{{ selected.label }}</span>
+      </div>
+      <form v-if="nativeAlternatives.length" method="get" class="flex flex-wrap items-center gap-2 px-4 py-3">
+        <label :for="id" class="text-metadata font-medium text-muted">Change source</label>
         <select
           :id="id"
           name="source"
-          :disabled="sources.length === 0"
-          class="rounded-listing border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11 disabled:cursor-not-allowed disabled:opacity-50"
+          required
+          class="min-h-target min-w-0 max-w-full rounded-control border border-control bg-surface-2 px-3 py-2 text-sm text-fg"
         >
-          <option value="" disabled :selected="!noscriptSourceKey">Change source</option>
+          <option value="" disabled selected>Change source</option>
           <option
-            v-for="source in sources"
+            v-for="source in nativeAlternatives"
             :key="source.key"
             :value="source.key"
-            :selected="source.key === noscriptSourceKey"
           >
             {{ source.kind === 'link' ? `${source.label} (Link ↗)` : source.label }}
           </option>
         </select>
         <button
           type="submit"
-          :disabled="sources.length === 0"
-          class="rounded-listing border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg max-sm:min-h-11"
+          class="rounded-control border border-control bg-surface-2 px-3 py-2 text-sm text-fg min-h-target"
         >
           Change source
         </button>

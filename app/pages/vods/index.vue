@@ -95,32 +95,32 @@ const pageDescription = computed(
 )
 
 useSeoMeta({
-  title: 'Event Archive',
+  title: 'Event archive',
   description: pageDescription,
-  ogTitle: () => `Event Archive · ${siteName}`,
-  ogImageAlt: 'Event Archive',
+  ogTitle: () => `Event archive · ${siteName}`,
+  ogImageAlt: 'Event archive',
   ogDescription: pageDescription,
 })
 </script>
 
 <template>
-  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+  <div class="mx-auto max-w-fixtures space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
     <div class="space-y-1">
       <nav aria-label="Breadcrumb" class="text-xs text-muted">
-        <NuxtLink to="/" class="hover:text-fg">Home</NuxtLink>
+        <NuxtLink to="/" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Home</NuxtLink>
         <span class="mx-1.5">/</span>
         <span class="text-fg">Archive</span>
       </nav>
-      <h1 class="listing-display text-2xl text-fg sm:text-3xl">
-        Event Archive
+      <h1 class="text-event font-semibold text-fg">
+        Event archive
       </h1>
       <NuxtLink
         v-if="activeFilter"
         to="/vods"
-        class="inline-flex items-center gap-1.5 text-xs font-medium text-muted max-sm:min-h-11 hover:underline"
+        class="inline-flex items-center gap-2 text-xs font-medium text-muted min-h-target hover:underline"
       >
-        <span aria-hidden="true">←</span>
         <span>All categories</span>
+        <span aria-hidden="true">→</span>
       </NuxtLink>
     </div>
 
@@ -133,7 +133,6 @@ useSeoMeta({
     <StateBlock
       v-else-if="error && !data"
       variant="error"
-      :message="error.message"
       @retry="handleRefresh"
     />
 
@@ -141,7 +140,6 @@ useSeoMeta({
       <StateBlock
         v-if="isStale"
         variant="stale"
-        message="Archive data is older than 5 minutes."
         @retry="handleRefresh"
       />
 
@@ -159,10 +157,9 @@ useSeoMeta({
           :category="rail.category"
           :streams="rail.items"
           :now="nowSeconds"
-          class="[--rail-gap:var(--grid-gap)]"
           link-base="/vods"
           metric-label="views"
-          :countdown-map="rail.dateLabels"
+          :replay-date-map="rail.dateLabels"
         />
 
         <AdSlot format="leaderboard" placement="vods-banner" />

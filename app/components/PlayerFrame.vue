@@ -138,7 +138,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative aspect-video w-full overflow-hidden rounded-listing border border-border bg-surface"
+  <div class="relative aspect-video w-full overflow-hidden rounded-card bg-surface"
     :class="{ '[@media(scripting:none)]:hidden': !src }"
   >
     <div
@@ -155,13 +155,13 @@ onBeforeUnmount(() => {
         decoding="async"
         class="absolute inset-0 h-full w-full object-cover"
       >
-      <span class="relative rounded-listing bg-surface-2 px-3 py-1.5">Loading player embed…</span>
+      <span class="relative rounded-control bg-surface-2 px-3 py-2">Loading player embed…</span>
     </div>
 
     <div
       aria-hidden="true"
       class="pointer-events-none absolute inset-0 z-20 rounded-[inherit]"
-      :class="{ 'outline-2 outline-offset-[-2px] outline-[var(--focus-ring)]': frameFocused }"
+      :class="{ 'outline-(length:--focus-ring-width) outline-offset-(--focus-ring-inset) outline-(--focus-ring)': frameFocused }"
     />
 
     <iframe

@@ -19,7 +19,7 @@ const progress = computed(() => {
   const aria = live ? remainingLabel(endsAt, now) : label.aria
   const exactTime = new Date((live ? endsAt : startsAt) * 1000).toUTCString()
   const timing = live ? 'Ends' : now < startsAt ? 'Starts' : 'Started'
-  return { percentage, live, text: label.text, aria: `${aria}. ${timing} ${exactTime}` }
+  return { percentage, text: label.text, aria: `${aria}. ${timing} ${exactTime}` }
 })
 </script>
 
@@ -31,16 +31,15 @@ const progress = computed(() => {
       aria-valuemax="100"
       :aria-valuenow="Math.round(progress.percentage)"
       :aria-label="progress.aria"
-      class="h-1 min-w-0 flex-1 overflow-hidden bg-surface-2"
+      class="h-1 min-w-0 flex-1 overflow-hidden border border-muted bg-border"
       data-allow-mismatch="attribute"
     >
       <div
-        class="h-full"
-        :class="progress.live ? 'bg-accent' : 'bg-muted'"
+        class="h-full bg-muted"
         :style="{ width: `${progress.percentage}%` }"
-        data-allow-mismatch="class,style"
+        data-allow-mismatch="style"
       />
     </div>
-    <span v-if="showLabel" aria-hidden="true" class="listing-numeric text-xs text-muted" data-allow-mismatch="text">{{ progress.text }}</span>
+    <span v-if="showLabel" aria-hidden="true" class="tabular-nums text-xs text-muted" data-allow-mismatch="text">{{ progress.text }}</span>
   </div>
 </template>

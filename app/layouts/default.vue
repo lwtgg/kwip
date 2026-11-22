@@ -36,15 +36,20 @@ const categories = computed(() => {
   }
   return visible
 })
+function revealSportLink(event: FocusEvent) {
+  if (event.target instanceof HTMLAnchorElement) {
+    event.target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+  }
+}
 </script>
 
 <template>
   <div class="flex min-h-(--shell-min-height) flex-col bg-bg text-fg">
-    <header class="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur-sm">
-      <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+    <header class="sticky top-0 z-40 border-b border-border bg-bg">
+      <div class="mx-auto flex max-w-fixtures flex-wrap items-center justify-between gap-x-2 gap-y-1 px-4 py-2 sm:px-6 md:flex-nowrap">
         <NuxtLink
           to="/"
-          class="inline-flex shrink-0 items-center max-sm:min-h-11 hover:opacity-90"
+          class="inline-flex shrink-0 items-center min-h-target hover:opacity-90"
         >
           <img
             src="/logo.png"
@@ -56,44 +61,19 @@ const categories = computed(() => {
           >
         </NuxtLink>
 
-        <nav
-          aria-label="Category jump bar"
-          class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-0.5"
-        >
-          <NuxtLink
-            to="/"
-            :aria-current="route.path === '/' ? 'page' : undefined"
-            class="shrink-0 rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap"
-            :class="
-              route.path === '/'
-                ? 'bg-surface-2 text-fg underline underline-offset-4'
-                : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
-            "
-          >
-            All
-          </NuxtLink>
-          <NuxtLink
-            v-for="cat in categories"
-            :key="cat.id"
-            :to="`/c/${cat.slug}`"
-            :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
-            class="shrink-0 rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1 text-xs font-medium whitespace-nowrap"
-            :class="
-              isCategoryActive(cat.slug)
-                ? 'bg-surface-2 text-fg underline underline-offset-4'
-                : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
-            "
-          >
-            {{ cat.name }}
-          </NuxtLink>
-        </nav>
-
         <div class="flex shrink-0 items-center gap-2">
+          <NuxtLink
+            to="/vods"
+            :aria-current="route.path === '/vods' ? 'page' : undefined"
+            class="inline-flex min-h-target items-center rounded-control px-2 text-metadata font-medium text-fg hover:underline"
+          >
+            Archive
+          </NuxtLink>
           <NuxtLink
             to="/mirrors"
             aria-label="Mirror domains"
             title="Mirror domains"
-            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-listing border border-border bg-surface text-muted hover:border-muted hover:text-fg"
+            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
           >
             <svg
               aria-hidden="true"
@@ -115,7 +95,7 @@ const categories = computed(() => {
             type="button"
             :aria-label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
             :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-listing border border-border bg-surface text-muted hover:border-muted hover:text-fg"
+            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
             @click="toggleTheme"
           >
             <svg
@@ -152,7 +132,7 @@ const categories = computed(() => {
             :aria-pressed="isCompact"
             :aria-label="isCompact ? 'Compact layout' : 'Comfortable layout'"
             :title="densityAction"
-            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-muted hover:text-fg"
+            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
             @click="toggleDensity"
           >
             <svg
@@ -169,6 +149,39 @@ const categories = computed(() => {
             </svg>
           </button>
         </div>
+        <nav
+          aria-label="Category jump bar"
+          class="sport-scroll flex min-w-0 basis-full items-center gap-1 overflow-x-auto md:flex-1"
+          @focusin="revealSportLink"
+        >
+          <NuxtLink
+            to="/"
+            :aria-current="route.path === '/' ? 'page' : undefined"
+            class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 text-metadata font-medium whitespace-nowrap"
+            :class="
+              route.path === '/'
+                ? 'bg-surface-2 text-fg underline underline-offset-4'
+                : 'text-muted hover:bg-surface-2 hover:text-fg'
+            "
+          >
+            All
+          </NuxtLink>
+          <NuxtLink
+            v-for="cat in categories"
+            :key="cat.id"
+            :to="`/c/${cat.slug}`"
+            :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
+            class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 text-metadata font-medium whitespace-nowrap"
+            :class="
+              isCategoryActive(cat.slug)
+                ? 'bg-surface-2 text-fg underline underline-offset-4'
+                : 'text-muted hover:bg-surface-2 hover:text-fg'
+            "
+          >
+            {{ cat.name }}
+          </NuxtLink>
+        </nav>
+
       </div>
     </header>
 
@@ -177,12 +190,12 @@ const categories = computed(() => {
     </div>
 
     <footer class="mt-(--footer-gap) border-t border-border bg-surface">
-      <div class="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
+      <div class="mx-auto flex max-w-fixtures flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
         <p>{{ siteName }} · Live sports event directory</p>
         <nav aria-label="Footer navigation" class="flex flex-wrap items-center gap-4">
-          <NuxtLink to="/vods" class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">Archive</NuxtLink>
-          <NuxtLink to="/about" class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">About</NuxtLink>
-          <NuxtLink to="/mirrors" class="hover:text-fg max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">Mirrors</NuxtLink>
+          <NuxtLink to="/vods" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Archive</NuxtLink>
+          <NuxtLink to="/about" class="inline-flex min-h-target min-w-target items-center hover:text-fg">About</NuxtLink>
+          <NuxtLink to="/mirrors" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Mirrors</NuxtLink>
         </nav>
       </div>
     </footer>
