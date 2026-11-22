@@ -382,40 +382,58 @@ const activeSourceKey = computed({
   },
 })
 
-const { isShielded, toggleShield, migrateShield } = usePlayerShield()
+const { isShielded, toggleShield, reconcile } = usePlayerShield()
+const shieldSources = computed(() => {
+  const identities = new Map<string, { name: string; group: string; member: string }>()
+  for (const entry of playerInput.value.sources) {
+    const key = sourceKey(entry.data)
+    if (!key || identities.has(key) || entry.type !== 'iframe') continue
+
+    const substreamName = 'substreamName' in entry && typeof entry.substreamName === 'string'
+      ? entry.substreamName
+      : undefined
+    const name = sourceLabel({ data: entry.data, name: entry.name, substreamName }, 0).toLowerCase()
+    const variant = 'sourceTag' in entry && typeof entry.sourceTag === 'string'
+      ? entry.sourceTag.trim().toLowerCase()
+      : ''
+    const group = `name:${JSON.stringify([name, sourceHost(entry.data), variant])}`
+    identities.set(key, { name, group, member: `source:${key}` })
+  }
+  return identities
+})
 const shieldIdentity = computed(() => {
   const source = currentSource.value
   if (source?.kind !== 'iframe') return null
-
-  const entry = playerInput.value.sources.find(candidate => candidate.data === source.url)
-  const substreamName = entry && 'substreamName' in entry && typeof entry.substreamName === 'string'
-    ? entry.substreamName
-    : undefined
-  const name = sourceLabel({ data: source.url, name: entry?.name, substreamName }, 0).toLowerCase()
-  const variant = entry && 'sourceTag' in entry && typeof entry.sourceTag === 'string'
-    ? entry.sourceTag.trim().toLowerCase()
-    : ''
-  // Compare the provider and variant within a name, independent of picker order or embed path.
-  return { name, key: `name:${JSON.stringify([name, source.host, variant])}` }
+  return shieldSources.value.get(source.key) ?? null
 })
-const shieldEnabled = computed(() => shieldIdentity.value !== null && isShielded(shieldIdentity.value.key))
+const shieldRoster = computed(() => {
+  const group = shieldIdentity.value?.group
+  return [...shieldSources.value.values()].filter(source => source.group === group).map(source => source.member)
+})
+const shieldEnabled = computed(() => {
+  const identity = shieldIdentity.value
+  return identity !== null && isShielded(identity.group, identity.member)
+})
 
-// Promote preferences saved by earlier releases when their source is selected.
 watchEffect(() => {
   const source = currentSource.value
   const identity = shieldIdentity.value
   if (!source || !identity) return
 
-  const { name, key } = identity
-  const aliases = [`source:${source.key}`, name, JSON.stringify([name, source.key])]
+  const { name, group, member } = identity
+  const roster = shieldRoster.value
+  // Old name-only choices have no member information in a colliding group.
+  const aliases = [member, JSON.stringify([name, source.key])]
+  if (roster.length === 1) aliases.push(name, group)
   const feedIndex = feedSources.value.findIndex(candidate => candidate.data === source.url)
   const feedSource = feedSources.value[feedIndex]
   if (feedSource) aliases.push(JSON.stringify([uriName.value, feedSource.name.trim().toLowerCase(), feedIndex]))
-  migrateShield(key, aliases)
+  reconcile(group, member, roster, aliases)
 })
 
 function toggleCurrentShield() {
-  if (shieldIdentity.value) toggleShield(shieldIdentity.value.key)
+  const identity = shieldIdentity.value
+  if (identity) toggleShield(identity.group, identity.member, shieldRoster.value)
 }
 
 const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-listing border text-xs font-medium hover:border-muted md:min-h-8 md:min-w-8'

@@ -21,14 +21,16 @@ from click_under_browser import EVENT, worker
 
 
 def check_late_supplement_shield(browser, directory, output):
-    former_url = 'https://shield.example.test/one'
-    first_url = 'https://shield.example.test/moved'
+    former_url = 'https://strmfree.st/one'
+    first_url = 'https://strmfree.st/moved'
+    peer_url = 'https://strmfree.st/peer'
 
     def fixture(name, url):
         def configure(_):
             path = directory / f'{name}-assets/fixtures/stream.json'
             detail = json.loads(path.read_text())
             detail['data']['sources'][0].update(name='strmfree', data=url)
+            detail['data']['sources'][1].update(name='strmfree', data=peer_url)
             path.write_text(json.dumps(detail))
             return {}
         return configure
@@ -43,7 +45,7 @@ def check_late_supplement_shield(browser, directory, output):
         former_origin = start('former-shield', former_url)
         sandbox = 'allow-scripts allow-same-origin allow-presentation'
         with browser.new_context() as former:
-            former.route(former_url, lambda route: route.fulfill(
+            former.route('https://strmfree.st/**', lambda route: route.fulfill(
                 body='<h1>Playable fixture</h1>', content_type='text/html',
             ))
             former.route(former_origin + '/fixtures/strmfree.json',
@@ -54,6 +56,11 @@ def check_late_supplement_shield(browser, directory, output):
             expect(shield).to_have_attribute('aria-pressed', 'false')
             shield.click()
             expect(page.locator('iframe')).to_have_attribute('sandbox', sandbox)
+            peer = page.locator('button[value="strmfree.st/peer"]')
+            peer.click()
+            expect(page.locator('iframe')).to_have_attribute('src', peer_url)
+            expect(shield).to_have_attribute('aria-pressed', 'false')
+            assert page.locator('iframe').get_attribute('sandbox') is None
             saved = former.storage_state()
 
         origin = start('late-shield', first_url)
@@ -68,7 +75,7 @@ def check_late_supplement_shield(browser, directory, output):
 
         def intercept(route):
             url = route.request.url
-            if url in (first_url, supplement_url):
+            if url in (first_url, peer_url, supplement_url):
                 requests.append(url)
                 route.fulfill(body='<h1>Playable fixture</h1>', content_type='text/html')
             elif url == origin + '/fixtures/strmfree.json':
@@ -103,13 +110,18 @@ def check_late_supplement_shield(browser, directory, output):
         assert original_frame.evaluate('element => element.isConnected')
         assert requests == [first_url], requests
 
+        picker.locator('button[value="strmfree.st/peer"]').click()
+        expect(frame).to_have_attribute('src', peer_url)
+        expect(shield).to_have_attribute('aria-pressed', 'false')
+        assert frame.get_attribute('sandbox') is None
+
         supplement.click()
         expect(frame).to_have_attribute('src', supplement_url)
         expect(shield).to_have_attribute('aria-pressed', 'false')
         picker.get_by_role('button', name='strmfree', exact=True).click()
         expect(frame).to_have_attribute('src', first_url)
         expect(frame).to_have_attribute('sandbox', sandbox)
-        print('Shield survives a new embed path and a delayed, same-name supplement')
+        print('Same-name, same-host sources stay isolated through a path change and late supplement')
 
 
 def check_source_health(browser, origin):
