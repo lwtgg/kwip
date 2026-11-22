@@ -114,9 +114,8 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
-          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-listing border px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
+          class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-listing border border-muted px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
           :class="[
-            source.key === modelValue ? 'border-muted' : 'border-border hover:border-muted',
             chipStatus(source) ? 'bg-surface-2 text-muted'
               : source.key === modelValue ? 'bg-surface text-fg underline underline-offset-4' : 'bg-surface-2 text-fg',
           ]"

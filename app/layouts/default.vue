@@ -152,7 +152,7 @@ const categories = computed(() => {
             :aria-pressed="isCompact"
             :aria-label="isCompact ? 'Compact layout' : 'Comfortable layout'"
             :title="densityAction"
-            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-accent hover:text-fg"
+            class="inline-flex h-9 w-9 max-sm:h-11 max-sm:w-11 items-center justify-center rounded-[var(--radius)] border border-border bg-surface text-muted hover:border-muted hover:text-fg"
             @click="toggleDensity"
           >
             <svg

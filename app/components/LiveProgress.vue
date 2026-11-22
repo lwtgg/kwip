@@ -19,7 +19,7 @@ const progress = computed(() => {
   const aria = live ? remainingLabel(endsAt, now) : label.aria
   const exactTime = new Date((live ? endsAt : startsAt) * 1000).toUTCString()
   const timing = live ? 'Ends' : now < startsAt ? 'Starts' : 'Started'
-  return { percentage, text: label.text, aria: `${aria}. ${timing} ${exactTime}` }
+  return { percentage, live, text: label.text, aria: `${aria}. ${timing} ${exactTime}` }
 })
 </script>
 
@@ -35,9 +35,10 @@ const progress = computed(() => {
       data-allow-mismatch="attribute"
     >
       <div
-        class="h-full bg-accent"
+        class="h-full"
+        :class="progress.live ? 'bg-accent' : 'bg-muted'"
         :style="{ width: `${progress.percentage}%` }"
-        data-allow-mismatch="style"
+        data-allow-mismatch="class,style"
       />
     </div>
     <span v-if="showLabel" aria-hidden="true" class="listing-numeric text-xs text-muted" data-allow-mismatch="text">{{ progress.text }}</span>

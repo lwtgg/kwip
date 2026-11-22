@@ -118,10 +118,8 @@ const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
 const nextUpStreams = computed(() => {
   if (activeFilter.value !== 'all') return []
 
-  const liveByViewers = [...liveNowStreams.value, ...alwaysLiveStreams.value]
-    .sort((a, b) => viewerCount(b) - viewerCount(a))
   const seen = new Set([heroStream.value?.uri_name])
-  return [...upcomingStreams.value, ...liveByViewers].filter((stream) => {
+  return upcomingStreams.value.filter((stream) => {
     if (seen.has(stream.uri_name)) return false
     seen.add(stream.uri_name)
     return true
@@ -134,9 +132,7 @@ function withoutNextUp(streams: FeedStreamItem[]) {
   return streams.filter((stream) => !nextUpUris.value.has(stream.uri_name))
 }
 
-// Rails lose whatever the strip promoted, so a rail emptied by the hand-off is dropped entirely.
-const liveRailStreams = computed(() => withoutNextUp(liveNowStreams.value))
-const alwaysLiveRailStreams = computed(() => withoutNextUp(alwaysLiveStreams.value))
+// Category rails omit events promoted to the strip and drop any emptied rail.
 const categoryRails = computed(() =>
   categories.value
     .map((cat) => ({ cat, streams: withoutNextUp(cat.streams) }))
@@ -194,7 +190,7 @@ useSeoMeta({
         :key="opt.value"
         :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
         :aria-current="activeFilter === opt.value ? 'page' : undefined"
-        class="rounded max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
+        class="rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
         :class="
           activeFilter === opt.value
             ? 'bg-surface-2 text-fg underline underline-offset-4'
@@ -289,7 +285,7 @@ useSeoMeta({
 
                 <NuxtLink
                   :to="`/c/${slugifyCategory(heroStream.category_name)}`"
-                  class="rounded bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-muted hover:text-fg"
+                  class="rounded-listing bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-muted hover:text-fg"
                 >
                   {{ heroStream.category_name }}
                 </NuxtLink>
@@ -351,17 +347,17 @@ useSeoMeta({
 
         <!-- Live now rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && liveRailStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && liveNowStreams.length > 0"
           title="Live now"
-          :streams="liveRailStreams"
+          :streams="liveNowStreams"
           :now="nowSeconds"
         />
 
         <!-- 24/7 rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && alwaysLiveRailStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && alwaysLiveStreams.length > 0"
           title="24/7"
-          :streams="alwaysLiveRailStreams"
+          :streams="alwaysLiveStreams"
           :now="nowSeconds"
         />
 

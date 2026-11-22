@@ -125,7 +125,7 @@ useSeoMeta({
           :key="opt.value"
           :to="{ path: route.path, query: opt.value === 'all' ? {} : { filter: opt.value } }"
           :aria-current="activeFilter === opt.value ? 'page' : undefined"
-          class="rounded max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
+          class="rounded-listing max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-3 py-1.5 text-xs font-medium"
           :class="
             activeFilter === opt.value
               ? 'bg-surface-2 text-fg underline underline-offset-4'

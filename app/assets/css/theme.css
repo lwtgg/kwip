@@ -16,6 +16,7 @@
   --radius: 0.75rem;
   --radius-listing: 0.1875rem;
   --tracking-display: -0.045em;
+  --text-metadata: 0.6875rem;
   --text-feature: clamp(2rem, 5vw, 4.5rem);
   --text-feature--line-height: 0.98;
   --spacing-feature-art: 20rem;

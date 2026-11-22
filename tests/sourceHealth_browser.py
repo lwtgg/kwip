@@ -19,6 +19,71 @@ from playwright.sync_api import expect, sync_playwright
 from click_under_browser import EVENT, worker
 
 
+def check_late_supplement_shield(browser, directory, output):
+    def fixture(_):
+        path = directory / 'late-shield-assets/fixtures/stream.json'
+        detail = json.loads(path.read_text())
+        detail['data']['sources'][0]['name'] = 'strmfree'
+        path.write_text(json.dumps(detail))
+        return {}
+
+    with worker(directory, 'late-shield', output, 'https://advertiser.example',
+                False, player='/fixtures', variables=fixture) as origin, browser.new_context() as context:
+        first_url = origin + '/fixtures/one'
+        supplement_url = 'https://strmfree.st/embed/hou-mia'
+        pending = []
+        requests = []
+
+        def intercept(route):
+            url = route.request.url
+            if url in (first_url, supplement_url):
+                requests.append(url)
+                route.fulfill(body='<h1>Playable fixture</h1>', content_type='text/html')
+            elif url == origin + '/fixtures/strmfree.json':
+                pending.append(route)
+            elif url.startswith(origin + '/'):
+                route.continue_()
+            else:
+                route.abort()
+
+        context.route('**/*', intercept)
+        context.add_init_script("""if (location.pathname.startsWith('/live/')) {
+            localStorage.setItem('kwip:shielded-sources', JSON.stringify(['strmfree']));
+        }""")
+        page = context.new_page()
+        with page.expect_request(origin + '/fixtures/strmfree.json'):
+            assert page.goto(origin + EVENT, wait_until='domcontentloaded').ok
+        frame = page.locator('iframe')
+        shield = page.get_by_role('button', name='Shield', exact=True)
+        sandbox = 'allow-scripts allow-same-origin allow-presentation'
+        expect(shield).to_have_attribute('aria-pressed', 'true')
+        expect(frame).to_have_attribute('sandbox', sandbox)
+        original_frame = frame.element_handle()
+        expect(page.frame_locator('iframe').get_by_text('Playable fixture')).to_be_visible()
+
+        assert len(pending) == 1
+        pending.pop().fulfill(json={'streams': [{
+            'name': 'Miami Heat at Houston Rockets', 'category': 'basketball',
+            'stream_key': 'hou-mia', 'match_timestamp': int(time()) - 60,
+            'iframe': supplement_url,
+        }]})
+        picker = page.get_by_role('group', name='Playback source')
+        supplement = picker.get_by_role('button', name=re.compile(r'^strmfree · [0-9]+, second provider$'))
+        expect(supplement).to_be_visible()
+        expect(shield).to_have_attribute('aria-pressed', 'true')
+        expect(frame).to_have_attribute('sandbox', sandbox)
+        assert original_frame.evaluate('element => element.isConnected')
+        assert requests == [first_url], requests
+
+        supplement.click()
+        expect(frame).to_have_attribute('src', supplement_url)
+        expect(shield).to_have_attribute('aria-pressed', 'false')
+        picker.get_by_role('button', name='strmfree', exact=True).click()
+        expect(frame).to_have_attribute('src', first_url)
+        expect(frame).to_have_attribute('sandbox', sandbox)
+        print('A delayed, same-name supplement preserves the original shield and iframe')
+
+
 def check_source_health(browser, origin):
     with browser.new_context() as context:
         hold_first = True
@@ -568,6 +633,7 @@ def main():
         with worker(Path(temp), 'source-health', args.output.resolve(), 'https://advertiser.example', False, player='/fixtures') as origin:
             browser = pw.chromium.launch()
             check_source_health(browser, origin)
+        check_late_supplement_shield(browser, Path(temp), args.output.resolve())
         check_stalled_feed(browser, Path(temp), args.output.resolve())
         check_snapshot_generation(browser, Path(temp), args.output.resolve())
         browser.close()

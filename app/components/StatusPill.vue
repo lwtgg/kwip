@@ -36,7 +36,7 @@ const accessibleTime = computed(() => {
 
 <template>
   <span
-    class="listing-numeric inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold tracking-wide"
+    class="listing-numeric inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-metadata font-semibold tracking-wide"
     :class="{
       'bg-live text-live-fg': status.state === 'live',
       'bg-surface-2 text-fg': status.state === 'always-live' || status.state === 'event' || status.state === 'upcoming',

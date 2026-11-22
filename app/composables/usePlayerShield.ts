@@ -21,19 +21,32 @@ export function usePlayerShield() {
     return shieldedSources.value.has(key)
   }
 
-  function toggleShield(key: string) {
-    const keys = shieldedSources.value
-    if (keys.has(key)) keys.delete(key)
-    else keys.add(key)
-
+  function saveShieldPreferences() {
     if (import.meta.client) {
       try {
-        localStorage.setItem(storageKey, JSON.stringify([...keys]))
+        localStorage.setItem(storageKey, JSON.stringify([...shieldedSources.value]))
       } catch {
         // The selection still applies in memory.
       }
     }
   }
 
-  return { isShielded, toggleShield, shieldedCount: computed(() => shieldedSources.value.size) }
+  function toggleShield(key: string) {
+    const keys = shieldedSources.value
+    if (keys.has(key)) keys.delete(key)
+    else keys.add(key)
+    saveShieldPreferences()
+  }
+
+  function migrateShield(key: string, aliases: string[]) {
+    const keys = shieldedSources.value
+    const remembered = aliases.filter(alias => keys.has(alias))
+    if (remembered.length === 0) return
+
+    keys.add(key)
+    for (const alias of remembered) keys.delete(alias)
+    saveShieldPreferences()
+  }
+
+  return { isShielded, toggleShield, migrateShield, shieldedCount: computed(() => shieldedSources.value.size) }
 }

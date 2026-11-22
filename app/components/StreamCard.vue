@@ -125,7 +125,7 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
         <span
           role="img"
           :aria-label="`${exact} ${metricLabel}`"
-          class="listing-numeric inline-flex items-center gap-1 rounded-listing bg-bg px-2.5 py-0.5 text-[11px] font-medium text-fg"
+          class="listing-numeric inline-flex items-center gap-1 rounded-listing bg-bg px-2.5 py-0.5 text-metadata font-medium text-fg"
         >
           <span v-if="metricLabel === 'viewers'" aria-hidden="true">●</span>
           <span aria-hidden="true">{{ compact }}</span>
@@ -134,7 +134,7 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
       </div>
       <span
         v-if="metricLabel === 'views' && countdown"
-        class="listing-numeric absolute bottom-2.5 left-2.5 rounded-listing bg-bg px-2.5 py-0.5 text-[11px] font-medium text-fg"
+        class="listing-numeric absolute bottom-2.5 left-2.5 rounded-listing bg-bg px-2.5 py-0.5 text-metadata font-medium text-fg"
       >
         {{ countdown }}
       </span>

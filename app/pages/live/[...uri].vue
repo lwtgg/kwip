@@ -382,44 +382,35 @@ const activeSourceKey = computed({
   },
 })
 
-const { isShielded, toggleShield } = usePlayerShield()
-function shieldName(entry: (typeof playerInput.value.sources)[number]) {
-  const substreamName = 'substreamName' in entry && typeof entry.substreamName === 'string'
-    ? entry.substreamName
-    : undefined
-  return sourceLabel({ data: entry.data, name: entry.name, substreamName }, 0).toLowerCase()
-}
-
+const { isShielded, toggleShield, migrateShield } = usePlayerShield()
 const shieldSourceKey = computed(() => {
   const source = currentSource.value
-  if (!source || source.kind === 'link') return null
-  const entry = playerInput.value.sources.find((entry) => entry.data === source.url)
-  if (!entry) return source.label.trim().toLowerCase()
-  const name = shieldName(entry)
-  const duplicate = playerInput.value.sources.some(candidate =>
-    candidate.type === 'iframe' && sourceKey(candidate.data) !== source.key && shieldName(candidate) === name,
-  )
-  return duplicate ? JSON.stringify([name, source.key]) : name
+  return source?.kind === 'iframe' ? `source:${source.key}` : null
 })
-const legacyShieldKey = computed(() => {
-  const index = feedSources.value.findIndex((entry) => entry.data === currentSource.value?.url)
-  const entry = feedSources.value[index]
-  return entry ? JSON.stringify([uriName.value, entry.name.trim().toLowerCase(), index]) : null
+const shieldEnabled = computed(() => shieldSourceKey.value !== null && isShielded(shieldSourceKey.value))
+
+// Promote saved preferences from earlier releases to the source identity on first use.
+watchEffect(() => {
+  const source = currentSource.value
+  const key = shieldSourceKey.value
+  if (!source || key === null) return
+
+  const entry = playerInput.value.sources.find(candidate => candidate.data === source.url)
+  const substreamName = entry && 'substreamName' in entry && typeof entry.substreamName === 'string'
+    ? entry.substreamName
+    : undefined
+  const name = entry
+    ? sourceLabel({ data: entry.data, name: entry.name, substreamName }, 0).toLowerCase()
+    : source.label.trim().toLowerCase()
+  const aliases = [name, JSON.stringify([name, source.key])]
+  const feedIndex = feedSources.value.findIndex(candidate => candidate.data === source.url)
+  const feedSource = feedSources.value[feedIndex]
+  if (feedSource) aliases.push(JSON.stringify([uriName.value, feedSource.name.trim().toLowerCase(), feedIndex]))
+  migrateShield(key, aliases)
 })
-const shieldEnabled = computed(() =>
-  shieldSourceKey.value !== null && (
-    isShielded(shieldSourceKey.value) || (legacyShieldKey.value !== null && isShielded(legacyShieldKey.value))
-  ),
-)
 
 function toggleCurrentShield() {
-  const key = shieldSourceKey.value
-  if (key === null) return
-
-  const legacy = legacyShieldKey.value
-  const wasShielded = shieldEnabled.value
-  if (legacy !== null && isShielded(legacy)) toggleShield(legacy)
-  if (!wasShielded || isShielded(key)) toggleShield(key)
+  if (shieldSourceKey.value !== null) toggleShield(shieldSourceKey.value)
 }
 
 const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-listing border text-xs font-medium hover:border-muted md:min-h-8 md:min-w-8'
