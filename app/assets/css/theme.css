@@ -149,6 +149,17 @@
   &[data-featured] {
     grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) auto;
 
+    &[data-wide-matchup] {
+      @media (width < 40rem) {
+        grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr);
+        row-gap: var(--spacing-2);
+
+        .fixture-action {
+          grid-column-start: 2;
+        }
+      }
+    }
+
     @media (width >= 40rem) {
       grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) auto var(--spacing-fixture-poster);
     }

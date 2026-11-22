@@ -75,9 +75,10 @@ const upcomingStreams = computed(() =>
     .sort((a, b) => a.starts_at - b.starts_at),
 )
 
-const featuredUri = computed(() =>
-  liveNowStreams.value[0]?.uri_name ?? alwaysLiveStreams.value[0]?.uri_name,
-)
+const featuredStream = computed(() => liveNowStreams.value[0] ?? alwaysLiveStreams.value[0])
+const featuredRows = computed(() => featuredStream.value ? [featuredStream.value] : [])
+const remainingLive = computed(() => liveNowStreams.value.filter(stream => stream !== featuredStream.value))
+const remainingContinuous = computed(() => alwaysLiveStreams.value.filter(stream => stream !== featuredStream.value))
 
 const nextUpStreams = computed(() => upcomingStreams.value.slice(0, 3))
 const nextUpUris = computed(() => new Set(nextUpStreams.value.map(stream => stream.uri_name)))
@@ -134,45 +135,58 @@ useSeoMeta({
           {{ opt.label }}
         </NuxtLink>
       </nav>
-      <StateBlock v-if="data && isStale" variant="stale" @retry="handleRefresh" />
     </div>
 
     <StateBlock v-if="status === 'pending' && !data" variant="skeleton" :rows="8" />
     <StateBlock v-else-if="error && !data" variant="error" @retry="handleRefresh" />
-    <StateBlock
-      v-else-if="!hasVisibleStreams"
-      variant="empty"
-      :show-current-events="activeFilter !== 'all'"
-      message="No events are listed for this view right now."
-    />
     <template v-else>
-      <Rail
-        v-if="activeFilter !== 'upcoming'"
-        title="Live now"
-        :streams="liveNowStreams"
-        :now="nowSeconds"
-        :featured-uri="featuredUri"
+      <StateBlock v-if="data && isStale" variant="stale" @retry="handleRefresh" />
+      <StateBlock
+        v-if="!hasVisibleStreams"
+        variant="empty"
+        :show-current-events="activeFilter !== 'all'"
+        message="No events are listed for this view right now."
       />
+    </template>
+    <template v-if="hasVisibleStreams">
       <Rail
         v-if="activeFilter !== 'upcoming'"
-        title="24/7"
-        :streams="alwaysLiveStreams"
+        :title="isStale ? 'Last listed availability' : featuredStream?.always_live === 1 ? '24/7' : 'Live now'"
+        :streams="featuredRows"
         :now="nowSeconds"
-        :featured-uri="featuredUri"
+        :stale="isStale"
+        :featured-uri="featuredStream?.uri_name"
       />
       <Rail
         v-if="activeFilter === 'all'"
         title="Next up"
         :streams="nextUpStreams"
+        :stale="isStale"
         :now="nowSeconds"
       />
 
       <AdSlot format="leaderboard" placement="home-banner" />
 
       <Rail
+        v-if="activeFilter !== 'upcoming'"
+        :title="isStale ? 'Other events listed live' : 'More live events'"
+        :streams="remainingLive"
+        :now="nowSeconds"
+        :stale="isStale"
+      />
+      <Rail
+        v-if="activeFilter !== 'upcoming'"
+        :title="featuredStream?.always_live === 1 ? 'More 24/7 channels' : '24/7'"
+        :streams="remainingContinuous"
+        :now="nowSeconds"
+        :stale="isStale"
+      />
+
+      <Rail
         v-if="activeFilter !== 'live'"
         title="Upcoming"
         :streams="activeFilter === 'upcoming' ? upcomingStreams : upcomingStreams.filter(stream => !nextUpUris.has(stream.uri_name))"
+        :stale="isStale"
         :now="nowSeconds"
       />
       <Rail
@@ -181,6 +195,7 @@ useSeoMeta({
         :title="rail.cat.category"
         :category="rail.cat.category"
         :streams="rail.streams"
+        :stale="isStale"
         :now="nowSeconds"
       />
     </template>

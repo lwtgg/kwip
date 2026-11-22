@@ -10,6 +10,7 @@ const props = withDefaults(
     linkBase?: string
     metricLabel?: 'viewers' | 'views'
     featuredUri?: string
+    stale?: boolean
     replayDateMap?: Record<number, string>
   }>(),
   {
@@ -38,7 +39,7 @@ const categoryHref = computed(() => {
 
 <template>
   <section v-if="streams.length" class="space-y-(--card-gap)">
-    <div class="flex flex-wrap items-center justify-between gap-x-4">
+    <div class="flex flex-wrap items-center gap-x-4">
       <h2 class="text-section font-semibold text-fg">{{ title }}</h2>
       <NuxtLink
         v-if="categoryHref"
@@ -58,6 +59,7 @@ const categoryHref = computed(() => {
         :to="`${linkBase}/${stream.uri_name}`"
         :metric-label="metricLabel"
         :replay-date="replayDateMap?.[stream.id]"
+        :stale="stale"
         :featured="featuredUri === stream.uri_name"
       />
     </div>

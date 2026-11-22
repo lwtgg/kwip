@@ -50,9 +50,25 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
       <p class="font-semibold text-fg">Unable to load the event directory</p>
       <p class="text-sm text-muted">Current listings are unavailable. Try again in a moment.</p>
     </div>
-    <p v-else class="text-sm text-muted">
-      {{ message || (variant === 'not-found' ? 'That event is no longer listed.' : 'No events match this view right now.') }}
-    </p>
+    <div v-else class="flex items-center gap-3 text-muted">
+      <svg
+        v-if="variant === 'empty'"
+        aria-hidden="true"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="size-6 shrink-0"
+      >
+        <rect x="3" y="5" width="18" height="16" rx="2" />
+        <path d="M7 3v4m10-4v4M3 10h18m-12 5h6" />
+      </svg>
+      <p class="text-sm">
+        {{ message || (variant === 'not-found' ? 'That event is no longer listed.' : 'No events match this view right now.') }}
+      </p>
+    </div>
     <button
       v-if="variant === 'error'"
       type="button"

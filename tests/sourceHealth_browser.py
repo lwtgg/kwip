@@ -262,7 +262,13 @@ def check_source_health(browser, origin, width):
         expect(second).to_have_attribute('aria-pressed', 'true')
         expect(frame).to_have_attribute('src', second_url)
         assert [url for url in frame_requests if url in (first_url, second_url)] == [second_url], frame_requests
-        assert chips.get_by_role('button').evaluate_all('buttons => buttons.map(button => button.value)') == original_order
+        selected = chips.get_by_role('group', name='Selected source', exact=True).get_by_role('button')
+        expect(selected).to_have_count(1)
+        expect(selected).to_have_attribute('value', second_key)
+        alternatives = chips.get_by_role('group', name='Change source', exact=True).get_by_role('button')
+        assert alternatives.evaluate_all('buttons => buttons.map(button => button.value)') == [
+            key for key in original_order if key != second_key
+        ]
         previous_frame = frame.element_handle()
         failed.click()
         expect(failed).to_have_count(0)
@@ -326,7 +332,9 @@ def check_source_health(browser, origin, width):
         frame = page.locator('iframe')
         expect(frame).to_have_count(1)
         expect(frame).to_have_attribute('src', first_url)
-        page.get_by_label('Change source').select_option(second_key)
+        picker = page.get_by_role('combobox', name='Change source', exact=True)
+        expect(picker.get_by_role('option', name='First embed', exact=True)).to_have_count(0)
+        picker.select_option(second_key)
         page.get_by_role('button', name='Change source').click()
         expect(frame).to_have_count(1)
         expect(frame).to_have_attribute('src', second_url)
@@ -702,6 +710,7 @@ export default {
                             expect(selected).to_contain_text('Strmfree · FHD')
                             expect(primary).to_have_css('background-color', 'rgb(25, 33, 30)')
                             primary.click()
+                            page.mouse.move(0, 0)
                             expect(primary).to_contain_text('Degraded')
                             expect(primary).to_have_attribute('aria-pressed', 'true')
                             expect(selected).to_contain_text(primary.inner_text().split(' · Degraded')[0].strip())

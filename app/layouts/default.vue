@@ -36,6 +36,11 @@ const categories = computed(() => {
   }
   return visible
 })
+function revealSportLink(event: FocusEvent) {
+  if (event.target instanceof HTMLAnchorElement) {
+    event.target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
+  }
+}
 </script>
 
 <template>
@@ -146,7 +151,8 @@ const categories = computed(() => {
         </div>
         <nav
           aria-label="Category jump bar"
-          class="sport-scroll flex basis-full items-center gap-1 overflow-x-auto md:min-w-0 md:flex-1"
+          class="sport-scroll flex min-w-0 basis-full items-center gap-1 overflow-x-auto md:flex-1"
+          @focusin="revealSportLink"
         >
           <NuxtLink
             to="/"

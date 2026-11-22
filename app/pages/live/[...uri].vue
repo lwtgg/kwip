@@ -829,11 +829,11 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
                 :href="currentSource.url"
                 target="_blank"
                 rel="noopener noreferrer"
-                :aria-label="announceAd ? `Open at source · ${currentSource.label}. Standard activation may open the source in this tab and an advertiser in a new tab` : undefined"
+                :aria-label="announceAd ? 'Open at source. Standard activation may open the source in this tab and an advertiser in a new tab' : undefined"
                 class="inline-flex items-center min-h-target gap-2 rounded-control bg-accent px-4 py-2 wrap-anywhere text-sm font-semibold text-accent-fg hover:underline"
                 @click="handlePrimaryPlay"
               >
-                <span>Open at source · {{ currentSource.label }}</span>
+                <span>Open at source</span>
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 24 24"
@@ -921,18 +921,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             </button>
           </div>
         </div>
-        <div
-          v-if="currentSource"
-          role="group"
-          aria-label="Selected source"
-          class="flex min-h-target items-center gap-2 border-b border-border bg-surface-2 px-4 text-metadata"
-        >
-          <span aria-hidden="true" class="shrink-0 font-medium text-muted">Selected source</span>
-          <span class="truncate font-semibold text-fg" :title="currentSource.label" data-allow-mismatch="text attribute">
-            {{ currentSource.label }}
-          </span>
-        </div>
-        <div v-if="sources.length || currentSource?.kind === 'iframe'" class="space-y-3 p-4">
+        <div v-if="sources.length || currentSource?.kind === 'iframe'">
           <SourceSelect
             v-model="activeSourceKey"
             :sources="sources"
@@ -941,7 +930,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :noscript-source-key="initialFeedSource?.key"
             @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
-          <div v-if="shieldIdentity !== null || currentSource?.kind === 'iframe'" class="flex flex-wrap items-center gap-2 border-t border-border pt-3 [@media(scripting:none)]:hidden">
+          <div v-if="shieldIdentity !== null || currentSource?.kind === 'iframe'" class="flex flex-wrap items-center gap-2 border-t border-border p-4 [@media(scripting:none)]:hidden">
             <button
               v-if="shieldIdentity !== null"
               type="button"

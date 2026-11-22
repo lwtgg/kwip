@@ -228,7 +228,7 @@ def check_play(browser, origin, width):
         chip(page, 'First embed').press('End')
         play = page.get_by_role('link', name='Open at source')
         expect(play).to_have_accessible_name(
-            'Open at source · External fixture. Standard activation may open the source in this tab and an advertiser in a new tab')
+            'Open at source. Standard activation may open the source in this tab and an advertiser in a new tab')
         with context.expect_page() as modified:
             play.click(modifiers=['ControlOrMeta'])
         expect(modified.value.get_by_text('Playable fixture')).to_be_visible()
