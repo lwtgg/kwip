@@ -384,7 +384,7 @@ const activeSourceKey = computed({
 
 const { isShielded, toggleShield, reconcile } = usePlayerShield()
 const shieldSources = computed(() => {
-  const identities = new Map<string, { name: string; group: string; member: string }>()
+  const identities = new Map<string, { group: string; member: string }>()
   for (const entry of playerInput.value.sources) {
     const key = sourceKey(entry.data)
     if (!key || identities.has(key) || entry.type !== 'iframe') continue
@@ -397,7 +397,7 @@ const shieldSources = computed(() => {
       ? entry.sourceTag.trim().toLowerCase()
       : ''
     const group = `name:${JSON.stringify([name, sourceHost(entry.data), variant])}`
-    identities.set(key, { name, group, member: `source:${key}` })
+    identities.set(key, { group, member: `source:${key}` })
   }
   return identities
 })
@@ -412,7 +412,7 @@ const shieldRoster = computed(() => {
 })
 const shieldEnabled = computed(() => {
   const identity = shieldIdentity.value
-  return identity !== null && isShielded(identity.group, identity.member)
+  return identity !== null && isShielded(uriName.value, identity.group, identity.member)
 })
 
 watchEffect(() => {
@@ -420,20 +420,19 @@ watchEffect(() => {
   const identity = shieldIdentity.value
   if (!source || !identity) return
 
-  const { name, group, member } = identity
-  const roster = shieldRoster.value
-  // Old name-only choices have no member information in a colliding group.
-  const aliases = [member, JSON.stringify([name, source.key])]
-  if (roster.length === 1) aliases.push(name, group)
+  const scope = uriName.value
   const feedIndex = feedSources.value.findIndex(candidate => candidate.data === source.url)
   const feedSource = feedSources.value[feedIndex]
-  if (feedSource) aliases.push(JSON.stringify([uriName.value, feedSource.name.trim().toLowerCase(), feedIndex]))
-  reconcile(group, member, roster, aliases)
+  // Only the legacy format that included the event URI can be attributed safely.
+  const legacyAlias = feedSource
+    ? JSON.stringify([scope, feedSource.name.trim().toLowerCase(), feedIndex])
+    : undefined
+  reconcile(scope, identity.group, identity.member, shieldRoster.value, legacyAlias)
 })
 
 function toggleCurrentShield() {
   const identity = shieldIdentity.value
-  if (identity) toggleShield(identity.group, identity.member, shieldRoster.value)
+  if (identity) toggleShield(uriName.value, identity.group, identity.member, shieldRoster.value)
 }
 
 const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-listing border text-xs font-medium hover:border-muted md:min-h-8 md:min-w-8'
