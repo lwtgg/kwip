@@ -116,8 +116,8 @@ function onChipKeydown(event: KeyboardEvent, index: number) {
           :tabindex="(hasSelection ? source.key === modelValue : index === 0) ? 0 : -1"
           class="inline-flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-listing border border-muted px-3 py-1.5 text-start text-sm font-medium min-[641px]:min-h-0"
           :class="[
-            chipStatus(source) ? 'bg-surface-2 text-muted'
-              : source.key === modelValue ? 'bg-surface text-fg underline underline-offset-4' : 'bg-surface-2 text-fg',
+            source.key === modelValue ? 'bg-surface underline underline-offset-4' : 'bg-surface-2',
+            chipStatus(source) ? 'text-muted' : 'text-fg',
           ]"
           @click="onChipClick($event, source.key)"
           @keydown="onChipKeydown($event, index)"

@@ -3,6 +3,7 @@
     python tests/sourceHealth_browser.py .output
 """
 import argparse
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -20,16 +21,47 @@ from click_under_browser import EVENT, worker
 
 
 def check_late_supplement_shield(browser, directory, output):
-    def fixture(_):
-        path = directory / 'late-shield-assets/fixtures/stream.json'
-        detail = json.loads(path.read_text())
-        detail['data']['sources'][0]['name'] = 'strmfree'
-        path.write_text(json.dumps(detail))
-        return {}
+    former_url = 'https://shield.example.test/one'
+    first_url = 'https://shield.example.test/moved'
 
-    with worker(directory, 'late-shield', output, 'https://advertiser.example',
-                False, player='/fixtures', variables=fixture) as origin, browser.new_context() as context:
-        first_url = origin + '/fixtures/one'
+    def fixture(name, url):
+        def configure(_):
+            path = directory / f'{name}-assets/fixtures/stream.json'
+            detail = json.loads(path.read_text())
+            detail['data']['sources'][0].update(name='strmfree', data=url)
+            path.write_text(json.dumps(detail))
+            return {}
+        return configure
+
+    with ExitStack() as stack:
+        def start(name, url):
+            return stack.enter_context(worker(
+                directory, name, output, 'https://advertiser.example',
+                False, player='/fixtures', variables=fixture(name, url),
+            ))
+
+        former_origin = start('former-shield', former_url)
+        sandbox = 'allow-scripts allow-same-origin allow-presentation'
+        with browser.new_context() as former:
+            former.route(former_url, lambda route: route.fulfill(
+                body='<h1>Playable fixture</h1>', content_type='text/html',
+            ))
+            former.route(former_origin + '/fixtures/strmfree.json',
+                         lambda route: route.fulfill(json={'streams': []}))
+            page = former.new_page()
+            assert page.goto(former_origin + EVENT, wait_until='networkidle').ok
+            shield = page.get_by_role('button', name='Shield', exact=True)
+            expect(shield).to_have_attribute('aria-pressed', 'false')
+            shield.click()
+            expect(page.locator('iframe')).to_have_attribute('sandbox', sandbox)
+            saved = former.storage_state()
+
+        origin = start('late-shield', first_url)
+        # Carry browser storage to the second test Worker, which runs on a different port.
+        for entry in saved['origins']:
+            if entry['origin'] == former_origin:
+                entry['origin'] = origin
+        context = stack.enter_context(browser.new_context(storage_state=saved))
         supplement_url = 'https://strmfree.st/embed/hou-mia'
         pending = []
         requests = []
@@ -47,15 +79,11 @@ def check_late_supplement_shield(browser, directory, output):
                 route.abort()
 
         context.route('**/*', intercept)
-        context.add_init_script("""if (location.pathname.startsWith('/live/')) {
-            localStorage.setItem('kwip:shielded-sources', JSON.stringify(['strmfree']));
-        }""")
         page = context.new_page()
         with page.expect_request(origin + '/fixtures/strmfree.json'):
             assert page.goto(origin + EVENT, wait_until='domcontentloaded').ok
         frame = page.locator('iframe')
         shield = page.get_by_role('button', name='Shield', exact=True)
-        sandbox = 'allow-scripts allow-same-origin allow-presentation'
         expect(shield).to_have_attribute('aria-pressed', 'true')
         expect(frame).to_have_attribute('sandbox', sandbox)
         original_frame = frame.element_handle()
@@ -81,7 +109,7 @@ def check_late_supplement_shield(browser, directory, output):
         picker.get_by_role('button', name='strmfree', exact=True).click()
         expect(frame).to_have_attribute('src', first_url)
         expect(frame).to_have_attribute('sandbox', sandbox)
-        print('A delayed, same-name supplement preserves the original shield and iframe')
+        print('Shield survives a new embed path and a delayed, same-name supplement')
 
 
 def check_source_health(browser, origin):
@@ -609,6 +637,12 @@ export default {
                             expect(page.locator('iframe')).to_have_attribute('src', supplement_url)
                             expect(primary).to_contain_text('Degraded')
                             assert browser_requests == ['detail', 'generation'], browser_requests
+                        if mode == 'unchanged':
+                            expect(primary).to_have_css('text-decoration-line', 'none')
+                            primary.click()
+                            expect(primary).to_contain_text('Degraded')
+                            expect(primary).to_have_attribute('aria-pressed', 'true')
+                            expect(primary).to_have_css('text-decoration-line', 'underline')
                         if mode == 'expiry':
                             with page.expect_response('https://strmfree.pk/api/v1/streams'):
                                 page.clock.fast_forward(10 * 60_000)

@@ -383,26 +383,31 @@ const activeSourceKey = computed({
 })
 
 const { isShielded, toggleShield, migrateShield } = usePlayerShield()
-const shieldSourceKey = computed(() => {
+const shieldIdentity = computed(() => {
   const source = currentSource.value
-  return source?.kind === 'iframe' ? `source:${source.key}` : null
-})
-const shieldEnabled = computed(() => shieldSourceKey.value !== null && isShielded(shieldSourceKey.value))
-
-// Promote saved preferences from earlier releases to the source identity on first use.
-watchEffect(() => {
-  const source = currentSource.value
-  const key = shieldSourceKey.value
-  if (!source || key === null) return
+  if (source?.kind !== 'iframe') return null
 
   const entry = playerInput.value.sources.find(candidate => candidate.data === source.url)
   const substreamName = entry && 'substreamName' in entry && typeof entry.substreamName === 'string'
     ? entry.substreamName
     : undefined
-  const name = entry
-    ? sourceLabel({ data: entry.data, name: entry.name, substreamName }, 0).toLowerCase()
-    : source.label.trim().toLowerCase()
-  const aliases = [name, JSON.stringify([name, source.key])]
+  const name = sourceLabel({ data: source.url, name: entry?.name, substreamName }, 0).toLowerCase()
+  const variant = entry && 'sourceTag' in entry && typeof entry.sourceTag === 'string'
+    ? entry.sourceTag.trim().toLowerCase()
+    : ''
+  // Compare the provider and variant within a name, independent of picker order or embed path.
+  return { name, key: `name:${JSON.stringify([name, source.host, variant])}` }
+})
+const shieldEnabled = computed(() => shieldIdentity.value !== null && isShielded(shieldIdentity.value.key))
+
+// Promote preferences saved by earlier releases when their source is selected.
+watchEffect(() => {
+  const source = currentSource.value
+  const identity = shieldIdentity.value
+  if (!source || !identity) return
+
+  const { name, key } = identity
+  const aliases = [`source:${source.key}`, name, JSON.stringify([name, source.key])]
   const feedIndex = feedSources.value.findIndex(candidate => candidate.data === source.url)
   const feedSource = feedSources.value[feedIndex]
   if (feedSource) aliases.push(JSON.stringify([uriName.value, feedSource.name.trim().toLowerCase(), feedIndex]))
@@ -410,7 +415,7 @@ watchEffect(() => {
 })
 
 function toggleCurrentShield() {
-  if (shieldSourceKey.value !== null) toggleShield(shieldSourceKey.value)
+  if (shieldIdentity.value) toggleShield(shieldIdentity.value.key)
 }
 
 const playerControlClass = 'inline-flex min-h-11 min-w-11 items-center justify-center rounded-listing border text-xs font-medium hover:border-muted md:min-h-8 md:min-w-8'
@@ -746,7 +751,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             <NuxtLink
               v-if="categorySlug"
               :to="`/c/${categorySlug}`"
-              class="rounded bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-fg hover:underline"
+              class="rounded-listing bg-surface-2 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center px-2.5 py-0.5 font-medium text-fg hover:underline"
             >
               {{ detail.category_name }}
             </NuxtLink>
@@ -773,7 +778,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
           <button
-            v-if="shieldSourceKey !== null"
+            v-if="shieldIdentity !== null"
             type="button"
             :aria-pressed="shieldEnabled"
             aria-describedby="player-shield-description"
@@ -809,7 +814,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
               <span aria-hidden="true">?</span>
             </button>
           </template>
-          <p v-if="shieldSourceKey !== null" id="player-shield-description" class="basis-full text-xs text-muted">
+          <p v-if="shieldIdentity !== null" id="player-shield-description" class="basis-full text-xs text-muted">
             Shield reloads this player to block popups and page redirects.
           </p>
           <p v-if="playerHelpOpen && currentSource?.kind === 'iframe'" class="basis-full text-xs text-muted">

@@ -249,7 +249,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
       </h1>
 
       <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
-        <span v-if="detail.tag" class="rounded bg-surface-2 px-2.5 py-0.5 font-medium text-fg">
+        <span v-if="detail.tag" class="rounded-listing bg-surface-2 px-2.5 py-0.5 font-medium text-fg">
           {{ detail.tag }}
         </span>
         <time v-if="formattedEventDate" :datetime="isoEventDate" class="listing-numeric">
