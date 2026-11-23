@@ -34,9 +34,11 @@ a fixed reason and the tick's refresh outcome is unchanged.
 
 ## Budget
 
-A reconciliation tick uses at most four subrequests and a dispatch tick nine. Alerting may add at most two:
-one read or write of the alert key, one explaining call (search, comment or close). Search for the open
-issue by label, not by listing issues.
+A reconciliation tick uses at most four subrequests and a dispatch tick nine. Alerting is budgeted by state:
+zero extra on a healthy tick, and at most **five** on a tick whose manifest age is already past the 15-minute
+grace, covering the `backoff.json` read, the alert-state read, the labelled-issue search, the one creating
+call and the state write. Cache what you can — carry the backoff read from the same tick rather than
+re-reading it. Search for the open issue by label with a single request, never by listing issues.
 
 ## Scope
 
