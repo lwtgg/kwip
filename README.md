@@ -135,19 +135,37 @@ procedure](worker-cron/README.md#recover-a-stalled-or-legacy-reservation).
 The GitHub schedule stays enabled and both triggers use the existing
 concurrency group.
 
-The approved ceiling is ten subrequests per tick on Workers Paid, against
+The approved ceiling is sixteen subrequests per tick on Workers Paid, against
 the deployment budget of 1,000 subrequests per invocation. A fresh tick
-without a pending attempt reads both the manifest and reservation. A
+reads the manifest and alert state. A
 reconciliation tick uses at most four subrequests. A dispatch tick uses nine,
 with a tenth if GitHub explicitly rejects the dispatch and the Worker releases
-the reservation.
+the reservation. Alerting adds at most five requests after the 15-minute
+manifest-age grace; unknown-age failures persist an independent grace timestamp.
+A definitive issue-create rejection allows one cleanup write so repaired tokens
+can retry on a later tick: five extras normally, six only for rejected-create cleanup.
+Routine healthy ticks add none. The publisher's `collector-state.json` is authoritative
+for `paused: true` and future `retryNotBefore` suppression. Recovery with an open alert
+uses the recovery path described in [the watchdog runbook](worker-cron/README.md#watchdog).
 
 Merge the workflow input `cron_attempt` to `main` before deploying the updated
 pinger, so GitHub accepts and labels its dispatches.
 
-Provision `GITHUB_REFRESH_TOKEN` as a fine-grained GitHub token for
-`lwtgg/kwip` with **Actions: Read and write**. Install it directly with
-Wrangler. `R2_CREDENTIALS` is the production entry from the publisher's
+Provision separate fine-grained GitHub tokens for `lwtgg/kwip`:
+
+- `GITHUB_REFRESH_TOKEN`: **Actions: Read and write** for dispatch and workflow reads.
+  Also grant **Issues: Read and write** if it will serve as the alert fallback.
+- `GITHUB_ALERT_TOKEN`: **Issues: Read and write** for issue search, reads, creation,
+  comments and recovery close. This independent credential keeps alerts working
+  when the refresh token is missing or expired; it needs no Actions permission.
+
+Issue calls use `GITHUB_ALERT_TOKEN` when present, falling back to
+`GITHUB_REFRESH_TOKEN` only when the alert secret is absent. A rejected alert
+credential is not retried with the refresh token. With no alert token, the current
+Actions-only refresh token cannot create issues until it gains Issues permission;
+that fallback cannot report its own absence or expiry. Configure the independent
+alert token for production, and provision the `feed-stale` label before enabling
+alerts. Install both secrets directly with Wrangler. `R2_CREDENTIALS` is the production entry from the publisher's
 `.r2-credentials.json` shape. Use a `kwip-feed-prod`-scoped R2 Object Read &
 Write credential for the cooldown object. From the repository root:
 
@@ -155,6 +173,7 @@ Write credential for the cooldown object. From the repository root:
 pnpm --dir worker-cron --ignore-workspace install --frozen-lockfile
 pnpm --dir worker-cron check
 pnpm exec wrangler secret put GITHUB_REFRESH_TOKEN --config worker-cron/wrangler.jsonc
+pnpm exec wrangler secret put GITHUB_ALERT_TOKEN --config worker-cron/wrangler.jsonc
 jq -ce 'if has("bucket") then . else .["kwip-feed-prod"] end | select(.bucket == "kwip-feed-prod")' .r2-credentials.json |
   pnpm exec wrangler secret put R2_CREDENTIALS --config worker-cron/wrangler.jsonc
 pnpm exec wrangler deploy --config worker-cron/wrangler.jsonc

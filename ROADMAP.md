@@ -80,3 +80,13 @@ chip as the second provider, our primary stays the default, and no event page ca
 began refusing TLS from here (`curl` and Chromium both `000`, connection reset) about twenty minutes after
 the publish, so embed playback is unproven in production and the frame stays lazy and inert meanwhile.
 Re-check `https://zlive.st/embed/<id>` when their host returns.
+
+**Direction (owner, 2026-11-23): steal Apple Sports, on the web.** The owner rejects the current look and
+wants the Apple Sports iOS treatment rebuilt as a website: score-forward cards, team logos at the centre,
+huge compact tabular numerals, team-colour tinting behind each card, favourites driving the top of the
+screen, one game sheet with dense numbers underneath, minimal chrome and no onboarding. Public reading to
+start from: Apple's own press release, Lickability's critique (vibrant label stacking, the variable-width
+display axis, the collapsing nav) and Six Colors' comparison with ESPN. Constraints that survive: we host
+nothing, the banner stays below the player, mint keeps one action, and the fixture list's date strip stays
+the spine. Depends on crest art, and scores need a provider — start with crest and numeral layout, slot real
+scores in when §4's provider exists.

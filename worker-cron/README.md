@@ -20,9 +20,9 @@ lookups, it logs `decision: "stalled"` with the reason and keeps checking. A con
 tick after a release, the Worker checks every active workflow status before
 attempting a new dispatch.
 
-The ten-subrequest ceiling in `wrangler.jsonc` is approved for this Worker
+The sixteen-subrequest ceiling in `wrangler.jsonc` is approved for this Worker
 on Workers Paid against a budget of 1,000 subrequests per invocation. A
-fresh tick without a pending attempt reads the manifest and reservation.
+routine healthy tick reads the manifest and alert state.
 A reconciliation tick uses at most four subrequests. A dispatch tick uses
 nine, with a tenth for the conditional release if GitHub explicitly rejects
 the dispatch.
@@ -73,3 +73,105 @@ that sends it.
    If the conditional write returns HTTP 412, repeat the inspection using
    the new record and ETag. After clearing, restore the five-minute trigger
    and check the next `feed_refresh_tick` log.
+
+
+## Watchdog
+
+The cron logs one `feed_refresh_tick` record containing the unchanged refresh
+outcome, a separate `alert` result, and `refreshSubrequests`, `alertSubrequests`
+and total `subrequests`. Alert errors use fixed reason codes and never include
+response bodies, exception text or credentials.
+
+After manifest age exceeds 15 minutes, the publisher's authoritative
+`collector-state.json` is read once and carried through the tick. `paused: true`
+suppresses notifications, as does a future `retryNotBefore` without any pause
+flag. Expired backoff does not suppress alerts. No separate operator hold is
+needed: the watchdog uses the same state as `scripts/collect-publish-feed.mjs`.
+A malformed or unreadable collector state fails closed; legacy `backoff.json`
+is not read.
+
+The watchdog pages on two consecutive observations past 45 minutes, a stalled
+reservation, two consecutive explicit dispatch rejections, rejected or missing
+credentials, or a paused/disabled workflow. Workflow metadata is checked on a
+non-notifying stale tick; a disabled observation is saved for the following tick.
+A missing manifest has no trustworthy age: use the existing dispatch reservation
+as the first observation and wait until it is over 15 minutes old. Failures that
+prevent reading the manifest or reservation instead persist an independent
+`firstFailureAt` in alert state, and page after 15 minutes of continued failure.
+This grace survives isolate restarts and missed ticks. During observation, three
+extra calls read the hold, read alert state, and conditionally save the timestamp;
+GitHub is not contacted before grace expires. A fresh manifest resets the failure
+observation as a recovery tick, so a later failure receives its own grace. A missing or expired refresh token can still be reported through the independent
+alert token. If no working alert credential is available, a fixed alert error
+remains in Worker logs.
+The `WATCHDOG_STATE` binding accesses the same bucket independently of the S3
+secret so malformed or revoked S3 credentials do not disable alert storage.
+
+`cron-feed-alert.json` is separate from the dispatch reservation. A single
+labelled search (`repo:lwtgg/kwip is:issue is:open label:feed-stale`) finds an
+existing issue, including after an isolate restart. Incomplete searches fail
+closed. Notifications use title `Feed refresh stalled`, label `feed-stale`,
+manifest age, generation, reservation key and known run URL. Existing issues
+receive at most one comment in 30 minutes, with GitHub's `updated_at` used as
+an additional throttle when state is lost.
+
+Before create/comment/close, a conditional R2 write reserves the mutation.
+Overlapping ticks cannot both create an issue or post a comment. A lost create
+response leaves `pendingCreate`; later ticks search rather than creating again.
+A definitive create rejection (4xx other than 408 or 499) conditionally clears
+that intent with one cleanup write. This is a bounded sixth alert request; the
+next tick can search and retry after the token or permissions are repaired.
+A 403 is reported once that tick as `missing-issues-scope`, without a same-tick
+POST retry. Timeouts, redirects, 408/499 and 5xx remain ambiguous and retain
+intent to avoid duplicate issues. If an ambiguous create never becomes visible,
+confirm that it did not succeed before manually clearing `cron-feed-alert.json`.
+A failed cleanup logs `intentResetError` and keeps intent for reconciliation.
+
+Tick state includes the alert lifecycle. A healthy tick has a fresh manifest
+and no open, pending, or recovering alert; it spends its normal second read on
+alert state instead of the reservation and performs no extra requests or writes.
+The next stale tick can still clear any reservation whose manifest advanced.
+A fresh manifest with an unresolved alert or independent failure observation enters recovery and stays there until
+the issue and its durable state are reconciled. Recovery searches and closes the
+issue in one PATCH, appending a line with manifest age and what recovered, then
+clears alert state. Recovery has a separate budget of at most five extra requests.
+An empty search never discards uncertain creation intent: recovery keeps searching
+without opening another issue. The next healthy tick again uses zero extras.
+
+Budget (including failed calls): ordinary healthy = two total, zero extra;
+13–15-minute stale with known age = refresh only; older stale = at most five extras.
+Unknown-age failures use three observation calls during grace and at most five
+notification calls afterwards; recovery of an unpaged observation uses one extra
+state-clear call. The usual
+older stale path is collector-state read + state read + optional workflow metadata probe
++ state write (four). Create/comment uses collector-state read + state read + search +
+conditional state write + mutation (five). Recovery uses state read + search +
+conditional state write + close + state clear: six total including manifest,
+four extra beyond a normal healthy tick (five if a direct lookup is needed
+when search temporarily omits a known issue). An explicit dispatch rejection can
+still use ten refresh requests. A definitive issue-create rejection adds one
+conditional cleanup write to the five-call alert path, for a maximum of sixteen
+requests overall; other alert paths retain their five-extra ceiling.
+
+Rollout uses two fine-grained credentials scoped to `lwtgg/kwip`, plus an existing
+`feed-stale` label. `GITHUB_REFRESH_TOKEN` needs **Actions: Read and write** for
+workflow metadata, run lookup and dispatch. `GITHUB_ALERT_TOKEN` needs **Issues:
+Read and write** for issue search/read/create/comment/close, and needs no Actions
+permission. Issue calls prefer the alert token so a missing, expired or forbidden
+refresh token does not disable the alarm. Workflow calls always use the refresh
+token. If the alert secret is absent, issue calls fall back to the refresh token,
+which then also needs **Issues: Read and write**. A present but rejected alert
+token is not retried with the refresh credential. The fallback alone cannot
+report its own missing/expired token, so configure the independent alert secret
+for production. Do not deploy the site. From the repository root:
+
+```sh
+pnpm exec wrangler secret put GITHUB_REFRESH_TOKEN --config worker-cron/wrangler.jsonc
+pnpm exec wrangler secret put GITHUB_ALERT_TOKEN --config worker-cron/wrangler.jsonc
+pnpm --dir worker-cron check
+pnpm exec wrangler deploy --config worker-cron/wrangler.jsonc
+```
+
+The deployed secrets' scopes cannot be verified by reading local GitHub CLI
+credentials. If either token's scope is unconfirmed, leave the cron
+Worker undeployed and have the owner run the commands above after verification.

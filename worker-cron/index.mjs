@@ -1,4 +1,5 @@
 import { AwsClient } from 'aws4fetch'
+import { runAlerts } from './watchdog.mjs'
 
 const maxAgeMs = 12 * 60_000
 const maxClockSkewMs = 60_000
@@ -87,9 +88,9 @@ function bucketClient(env, request) {
       const value = parseJson(await response.text())
       return { value, etag: response.headers.get('etag') }
     },
-    async writeReservation(value, previous) {
+    async writeReservation(value, previous, key = cooldownKey) {
       const headers = previous ? { 'If-Match': previous.etag } : { 'If-None-Match': '*' }
-      const response = await call(cooldownKey, {
+      const response = await call(key, {
         method: 'PUT',
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify(value),
@@ -106,21 +107,38 @@ async function discardBody(response) {
   await response.body?.cancel().catch(() => {})
 }
 
-export async function runTick(env, now, request = fetch) {
+export async function runTick(env, now, request = fetch, context) {
   let ageMs = null
   let stage = 'manifest'
   let dispatch = 'skipped'
   let dispatchStatus
   let recordUnresolved
   try {
-    const bucket = bucketClient(env, request)
-    const manifest = await bucket.read('current.json')
+    // Read through the native binding when deployed, so malformed S3 secrets
+    // do not hide the manifest age or force alert I/O before the grace boundary.
+    let bucket
+    let manifest
+    if (context && env.WATCHDOG_STATE) {
+      context.countBinding()
+      const current = await env.WATCHDOG_STATE.get('current.json')
+      manifest = current ? { value: parseJson(await current.text()) } : null
+    } else {
+      bucket = bucketClient(env, request)
+      if (context) context.bucket = bucket
+      manifest = await bucket.read('current.json')
+    }
+    if (context) context.manifest = manifest?.value
     if (manifest && (!manifest.value || typeof manifest.value !== 'object' || Array.isArray(manifest.value))) {
       throw new TickFailure('invalid-manifest-json')
     }
     const verifiedAt = manifest?.value.listsVerifiedAt
     const freshness = decideRefresh(verifiedAt, now)
     ageMs = freshness.ageMs
+    bucket ??= bucketClient(env, request)
+    if (context) context.bucket = bucket
+    // The watchdog spends the normal second healthy read on alert state.
+    // A fresh manifest still releases an old reservation on the next stale tick.
+    if (context && freshness.decision === 'fresh') return { ...freshness, dispatch }
 
     stage = 'cooldown-read'
     const cooldown = await bucket.read(cooldownKey)
@@ -128,6 +146,7 @@ export async function runTick(env, now, request = fetch) {
       throw new TickFailure('invalid-cooldown-etag')
     }
     const record = cooldown?.value
+    if (context) context.reservation = record
     // Older deployments stored only the end of the visibility window.
     const legacyAttemptAt = Number.isSafeInteger(record?.until) ? record.until - legacyCooldownMs : null
     const attemptAt = record?.attemptAt ?? legacyAttemptAt
@@ -187,6 +206,7 @@ export async function runTick(env, now, request = fetch) {
         }
         const run = parseJson(await response.text())
         if (run?.id !== runId) throw new TickFailure('invalid-run-identity')
+        if (run.conclusion === 'action_required') throw new TickFailure('workflow-paused')
         if (run.status === 'completed') return await release(cooldown, 'attempt-dead')
         if (activeStatuses.includes(run.status)) {
           if (misses) {
@@ -339,9 +359,22 @@ export async function runTick(env, now, request = fetch) {
   }
 }
 
+export async function runWatchdogTick(env, now, request = fetch) {
+  let subrequests = 0
+  const context = { countBinding: () => { subrequests++ } }
+  const counted = (...args) => { subrequests++; return request(...args) }
+  const result = await runTick(env, now, counted, context)
+  let refreshSubrequests = subrequests
+  // DECISIONS.md rule 23 puts the best-effort alarm in the pinger; preserve the refresh outcome.
+  const alert = await runAlerts(env, now, result, context, counted)
+  if (result.decision === 'fresh') refreshSubrequests = Math.min(2, subrequests)
+  return { ...result, alert, refreshSubrequests, subrequests,
+    alertSubrequests: subrequests - refreshSubrequests }
+}
+
 export default {
   async scheduled(_controller, env) {
-    const result = await runTick(env, Date.now())
+    const result = await runWatchdogTick(env, Date.now())
     console.log(JSON.stringify({ event: 'feed_refresh_tick', ...result }))
   },
 }

@@ -29,6 +29,16 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   const logs = new EventEmitter()
   let redirectAt
   let reservation
+  let alertRecord
+  let hold
+  let manifestValue = {}
+  let issueRecord
+  let runStatus = 'completed'
+  let issueFailure
+  let workflowFailure
+  let issuePosts = 0
+  let lastAlert
+  let lastMetrics
   const redirect = () => new Response(null, {
     status: 302, headers: { Location: 'https://redirect.invalid/secret' },
   })
@@ -40,6 +50,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       R2_BUCKET: bucket,
       R2_CREDENTIALS: JSON.stringify(credentials),
       GITHUB_REFRESH_TOKEN: 'workerd-github-token',
+      GITHUB_ALERT_TOKEN: 'workerd-alert-token',
     },
     handleStructuredLogs({ message }) {
       if (message.includes('feed_refresh_tick')) logs.emit('tick', message)
@@ -49,7 +60,14 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       const signed = request.headers.get('authorization')
       seen.push({ method: request.method, host: url.host, path: url.pathname, auth: signed })
       if (url.origin === endpoint) {
-        if (url.pathname.endsWith('/current.json')) return Response.json({})
+        if (url.pathname.endsWith('/current.json')) return Response.json(manifestValue)
+        if (url.pathname.endsWith('/collector-state.json')) return hold ? Response.json(hold) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        if (url.pathname.endsWith('/cron-feed-alert.json')) {
+          if (request.method === 'GET') return alertRecord ? Response.json(alertRecord, { headers: { ETag: '"alert"' } }) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
+          assert.equal(request.headers.get(alertRecord ? 'if-match' : 'if-none-match'), alertRecord ? '"alert"' : '*')
+          alertRecord = await request.json()
+          return new Response(null, { headers: { ETag: '"alert"' } })
+        }
         if (request.method === 'GET') {
           return reservation
             ? Response.json(reservation, { headers: { ETag: '"reserved"' } })
@@ -62,6 +80,25 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
         return new Response(null, { headers: { ETag: '"reserved"' } })
       }
       if (url.host === 'api.github.com') {
+        assert.equal(signed, url.pathname.includes('/actions/') ? 'Bearer workerd-github-token' : 'Bearer workerd-alert-token')
+        if (url.pathname.endsWith('/actions/workflows/feed-refresh.yml')) return workflowFailure
+          ? new Response(null, { status: workflowFailure }) : Response.json({ state: 'active' })
+        if (url.pathname === '/search/issues') {
+          assert.match(url.searchParams.get('q'), /label:feed-stale/)
+          return Response.json({ total_count: issueRecord?.state === 'open' ? 1 : 0, incomplete_results: false,
+            items: issueRecord?.state === 'open' ? [issueRecord] : [] })
+        }
+        if (url.pathname.endsWith('/issues')) {
+          issuePosts++
+          if (issueFailure) return new Response(null, { status: issueFailure })
+          issueRecord = { ...await request.json(), number: 7, state: 'open', repository_url: 'https://api.github.com/repos/lwtgg/kwip', updated_at: new Date().toISOString() }
+          return Response.json(issueRecord, { status: 201 })
+        }
+        if (url.pathname.endsWith('/issues/7/comments')) return Response.json({ id: 1 }, { status: 201 })
+        if (url.pathname.endsWith('/issues/7') && request.method === 'PATCH') {
+          Object.assign(issueRecord, await request.json())
+          return Response.json(issueRecord)
+        }
         if (url.pathname.endsWith('/runs')) {
           if (redirectAt === 'list-runs') return redirect()
           if (reservation) {
@@ -73,7 +110,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
           }
           return Response.json({ total_count: 0, workflow_runs: [] })
         }
-        if (url.pathname.endsWith('/actions/runs/42')) return Response.json({ id: 42, status: 'completed' })
+        if (url.pathname.endsWith('/actions/runs/42')) return Response.json({ id: 42, status: runStatus })
         if (url.pathname.endsWith('/dispatches')) {
           return redirectAt === 'dispatch' ? redirect() : new Response(null, { status: 204 })
         }
@@ -83,42 +120,189 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   }))
   t.after(() => mf.dispose())
   const worker = await mf.getWorker()
-  async function tick(phase) {
+  async function tick(phase, budget = 'normal') {
     redirectAt = phase
     seen.length = 0
     const logged = once(logs, 'tick', { signal: AbortSignal.timeout(5_000) })
     const result = await worker.scheduled({ cron: '*/5 * * * *' })
     assert.equal(result.outcome, 'ok')
     const [line] = await logged
-    assert.doesNotMatch(line, /workerd-r2-key|workerd-r2-secret|workerd-github-token/)
+    assert.doesNotMatch(line, /workerd-r2-key|workerd-r2-secret|workerd-github-token|workerd-alert-token/)
     assert.ok(seen.every(({ host }) => host === 'api.github.com' || host === new URL(endpoint).host))
-    return JSON.parse(line)
+    const { alert, refreshSubrequests, alertSubrequests, subrequests, ...resultRecord } = JSON.parse(line)
+    lastAlert = alert
+    lastMetrics = { refreshSubrequests, alertSubrequests, subrequests }
+    assert.equal(subrequests, seen.length)
+    if (budget === 'cleanup') {
+      assert.equal(alertSubrequests, 6)
+      assert.equal(seen.filter((call) => call.method === 'PUT' && call.path.endsWith('/cron-feed-alert.json')).length, 2)
+      assert.equal(seen.filter((call) => call.method === 'POST' && call.path.endsWith('/issues')).length, 1)
+    } else {
+      assert.ok(alertSubrequests <= 5, 'normal alert paths must retain the five-request ceiling')
+    }
+    return resultRecord
   }
 
   assert.deepEqual(await tick(), {
     event: 'feed_refresh_tick', ageMs: null, decision: 'dispatch', dispatch: 'accepted', status: 204,
   })
-  assert.equal(seen.length, 9)
+  assert.equal(lastMetrics.refreshSubrequests, 9)
   assert.match(seen[0].auth, /^AWS4-HMAC-SHA256 /)
-  assert.equal(seen.at(-1).method, 'POST')
+  assert.ok(seen.some((call) => call.path.endsWith('/dispatches') && call.method === 'POST'))
 
   for (const phase of ['list-runs', 'dispatch']) {
     const result = await tick(phase)
     assert.equal(result.stage, phase)
     assert.equal(result.status, 302)
-    assert.equal(seen.length, phase === 'list-runs' ? 3 : 10)
+    assert.equal(lastMetrics.refreshSubrequests, phase === 'list-runs' ? 3 : 10)
   }
 
   reservation = { attemptAt: Date.now() - 11 * 60_000, attemptId: 'test-attempt' }
   const failure = await tick('list-runs')
   assert.equal(failure.stage, 'reconcile-run')
   assert.equal(failure.status, 302)
-  assert.equal(seen.length, 4)
+  assert.equal(lastMetrics.refreshSubrequests, 4)
   assert.equal(reservation.unresolvedTicks, 1)
   assert.equal((await tick()).decision, 'run-identified')
   assert.equal(reservation.runId, 42)
-  assert.equal(seen.length, 4)
+  assert.equal(lastMetrics.refreshSubrequests, 4)
   assert.equal((await tick()).decision, 'attempt-dead')
   assert.ok(Number.isSafeInteger(reservation.clearedAt))
-  assert.equal(seen.length, 4)
+  assert.equal(lastMetrics.refreshSubrequests, 4)
+
+  // Same bundled scheduled handler: durable state and all issue mutation paths.
+  reservation = { attemptAt: Date.now() - 40 * 60_000, runId: 42 }
+  runStatus = 'in_progress'
+  manifestValue = { listsVerifiedAt: new Date(Date.now() - 46 * 60_000).toISOString(), commitId: 'workerd-generation' }
+  for (const publisherHold of [{ paused: true }, { retryNotBefore: new Date(Date.now() + 30 * 60_000).toISOString() }]) {
+    hold = publisherHold
+    alertRecord = { hardTicks: 1, verifiedAt: manifestValue.listsVerifiedAt }
+    await tick()
+    assert.equal(lastAlert.action, 'none')
+    assert.equal(lastMetrics.alertSubrequests, 3)
+    assert.equal(seen.filter((call) => call.path.endsWith('/collector-state.json')).length, 1)
+    assert.equal(seen.some((call) => call.path.endsWith('/backoff.json') || call.path === '/search/issues'), false)
+  }
+  hold = undefined
+  alertRecord = undefined
+  workflowFailure = 503
+  assert.equal((await tick()).decision, 'active-run')
+  assert.equal(lastAlert.reason, 'alert-workflow-state-failed')
+  assert.equal(alertRecord.hardTicks, 1)
+  assert.equal(lastMetrics.alertSubrequests, 4)
+  assert.equal((await tick()).decision, 'active-run')
+  assert.equal(lastAlert.action, 'create')
+  assert.equal(alertRecord.hardTicks, 2)
+  assert.equal(lastMetrics.alertSubrequests, 5)
+  assert.equal(issueRecord.title, 'Feed refresh stalled')
+  await tick()
+  assert.equal(lastAlert.action, 'none')
+  issueRecord.updated_at = new Date(Date.now() - 31 * 60_000).toISOString()
+  alertRecord.notifiedAt = Date.now() - 31 * 60_000
+  await tick()
+  assert.equal(lastAlert.action, 'comment')
+  assert.equal(lastMetrics.alertSubrequests, 5)
+  manifestValue.listsVerifiedAt = new Date().toISOString()
+  await tick()
+  assert.equal(lastAlert.action, 'close')
+  assert.equal(issueRecord.state, 'closed')
+  assert.match(issueRecord.body, /Recovered: manifest age 0 minutes/)
+  await tick()
+  assert.equal(lastMetrics.alertSubrequests, 0)
+  assert.equal(lastMetrics.subrequests, 2)
+
+  manifestValue.listsVerifiedAt = new Date(Date.now() - 60 * 60_000).toISOString()
+  alertRecord = { hardTicks: 1, verifiedAt: manifestValue.listsVerifiedAt }
+  const postsBeforeRejection = issuePosts
+  issueFailure = 403
+  await tick(undefined, 'cleanup')
+  assert.equal(lastAlert.reason, 'missing-issues-scope')
+  assert.equal(seen.filter((call) => call.path.endsWith('/issues') && call.method === 'POST').length, 1)
+
+  assert.equal(alertRecord.pendingCreate, undefined)
+  assert.equal(lastMetrics.alertSubrequests, 6)
+  issueFailure = undefined
+  await tick()
+  assert.equal(lastAlert.action, 'create')
+  await tick()
+  assert.equal(lastAlert.action, 'none')
+  assert.equal(issuePosts - postsBeforeRejection, 2)
+  assert.equal(issueRecord.state, 'open')
+
+  // Real native R2 bindings, including the returned ETag used by recovery CAS.
+  for (const scenario of ['invalid-s3', 'revoked-s3', 'recovery', 'invalid-manifest', 'missing-refresh', 'expired-refresh', 'forbidden-refresh']) {
+    const nativeLogs = new EventEmitter()
+    const refreshToken = scenario === 'missing-refresh' ? '' : scenario === 'expired-refresh' ? 'workerd-expired-refresh-token' : 'workerd-github-token'
+    let nativeIssue = scenario === 'recovery' ? { number: 7, state: 'open',
+      repository_url: 'https://api.github.com/repos/lwtgg/kwip', body: 'Incident' } : undefined
+    const native = new Miniflare(convertV4MiniflareOptions({
+      modules: true,
+      script: readFileSync(join(output, 'index.js'), 'utf8'), compatibilityDate,
+      r2Buckets: ['WATCHDOG_STATE'],
+      bindings: { R2_BUCKET: bucket, R2_CREDENTIALS: scenario === 'invalid-s3' ? '{}' : JSON.stringify(credentials),
+        GITHUB_REFRESH_TOKEN: refreshToken, GITHUB_ALERT_TOKEN: 'workerd-alert-token' },
+      handleStructuredLogs({ message }) { if (message.includes('feed_refresh_tick')) nativeLogs.emit('tick', message) },
+      outboundService: async (request) => {
+        const url = new URL(request.url)
+        if (url.origin === endpoint && ['missing-refresh', 'expired-refresh', 'forbidden-refresh'].includes(scenario)) {
+          return new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        }
+        if (url.origin === endpoint) return scenario === 'recovery'
+          ? Response.json({ listsVerifiedAt: new Date().toISOString() }) : new Response(null, { status: 403 })
+        assert.equal(request.headers.get('authorization'), url.pathname.includes('/actions/')
+          ? `Bearer ${refreshToken}` : 'Bearer workerd-alert-token')
+        if (url.pathname.includes('/actions/')) return new Response(null, { status: scenario === 'forbidden-refresh' ? 403 : 401 })
+        if (url.pathname === '/search/issues') return Response.json({ incomplete_results: false,
+          total_count: nativeIssue?.state === 'open' ? 1 : 0, items: nativeIssue?.state === 'open' ? [nativeIssue] : [] })
+        if (url.pathname.endsWith('/issues') && request.method === 'POST') {
+          nativeIssue = { ...await request.json(), number: 7, state: 'open', repository_url: 'https://api.github.com/repos/lwtgg/kwip' }
+          return Response.json(nativeIssue, { status: 201 })
+        }
+        if (request.method === 'PATCH') {
+          Object.assign(nativeIssue, await request.json())
+          return Response.json(nativeIssue)
+        }
+        return new Response(null, { status: 500 })
+      },
+    }))
+    t.after(() => native.dispose())
+    const nativeBucket = await native.getR2Bucket('WATCHDOG_STATE')
+    await nativeBucket.put('current.json', scenario === 'invalid-manifest' ? 'invalid JSON' : JSON.stringify({ listsVerifiedAt: new Date(Date.now() - (scenario === 'recovery' ? 0 : 60 * 60_000)).toISOString() }))
+    await nativeBucket.put('cron-feed-alert.json', JSON.stringify(scenario === 'recovery'
+      ? { issue: 7 } : { since: Date.now() - 20 * 60_000 }))
+    if (scenario === 'invalid-manifest') {
+      const observed = once(nativeLogs, 'tick', { signal: AbortSignal.timeout(5_000) })
+      assert.equal((await (await native.getWorker()).scheduled()).outcome, 'ok')
+      const [line] = await observed
+      const first = JSON.parse(line)
+      assert.equal(first.reason, 'invalid-manifest-json')
+      assert.equal(first.alert.action, 'none')
+      assert.equal(first.alertSubrequests, 3)
+      const saved = await (await nativeBucket.get('cron-feed-alert.json')).json()
+      assert.ok(Number.isSafeInteger(saved.firstFailureAt))
+      // Advance the durable observation past grace without waiting on wall time.
+      await nativeBucket.put('cron-feed-alert.json', JSON.stringify({ ...saved, firstFailureAt: Date.now() - 16 * 60_000 }))
+    }
+    const logged = once(nativeLogs, 'tick', { signal: AbortSignal.timeout(5_000) })
+    assert.equal((await (await native.getWorker()).scheduled()).outcome, 'ok')
+    const [line] = await logged
+    const record = JSON.parse(line)
+    assert.equal(record.alert.action, scenario === 'recovery' ? 'close' : 'create')
+    assert.ok(record.alertSubrequests <= 5)
+    if (scenario === 'recovery') {
+      assert.equal(nativeIssue.state, 'closed')
+      assert.deepEqual(await (await nativeBucket.get('cron-feed-alert.json')).json(), {})
+    } else {
+      const expectedReason = scenario === 'invalid-s3' ? 'invalid-r2-credentials'
+        : scenario === 'invalid-manifest' ? 'invalid-manifest-json'
+          : scenario === 'missing-refresh' ? 'missing-github-token' : 'http-error'
+      assert.equal(record.reason, expectedReason)
+      const expectedAlert = scenario === 'invalid-s3' ? /invalid-r2-credentials/
+        : scenario === 'invalid-manifest' ? /feed-state-unavailable/
+          : scenario === 'missing-refresh' ? /missing-github-token/
+            : ['expired-refresh', 'forbidden-refresh'].includes(scenario) ? /github-token-rejected/ : /r2-credentials-rejected/
+      assert.match(nativeIssue.body, expectedAlert)
+    }
+  }
+
 })
