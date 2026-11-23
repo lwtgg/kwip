@@ -50,3 +50,8 @@ stale/empty/error states qualifying themselves. See `PRODUCT.md` and `docs/redes
 Dead-stream health signal, per-event poster quality, 390 px sweep, archive search, per-category OG art.
 
 "Not live" is verified in `tests/notLive_browser.py` against intercepted status endpoints at both widths: only a confirmed-offline variant is chipped, it stays selectable, a failed status leaves liveness unknown and unlabelled, and failover prefers a live equal-quality variant. The provider status endpoint is the only source of `false`.
+
+**Deferred:** crest card art. `tim-streams`/`strmfree`/`strmcrnr` all derive card art from public
+league CDNs (ESPN `a.espncdn.com/i/teamlogos/...` verified `200`, soccer by numeric id). Same composite is
+reachable from our `name` and `colors`, but it needs a curated team-alias table and two extra requests per
+card, so it waits until the supplement work lands.
