@@ -29,7 +29,7 @@ export function decideAlert(result, previous = {}, now, hold = {}) {
   const rejected = result.dispatch === 'failed' && result.status >= 400 && result.status < 500 && result.status !== 408
   state.rejections = rejected ? (previous.rejections ?? 0) + 1 : 0
   const gracePassed = result.ageMs === null ? now - (unknownFailure ? state.firstFailureAt : state.since) >= 15 * minute : result.ageMs > 15 * minute
-  const suppressed = hold.paused === true || hold.hold === true || Date.parse(hold.retryNotBefore) > now
+  const suppressed = publisherHeld(hold, now)
   let reason
   if (unknownFailure && gracePassed) reason = 'feed-state-unavailable'
   if (state.hardTicks >= 2) reason = 'manifest-too-old'
@@ -55,6 +55,10 @@ export function definitiveCreateRejection(status) {
   return Number.isInteger(status) && status >= 400 && status < 500 && status !== 408 && status !== 499
 }
 
+function publisherHeld(state, now) {
+  return state.paused === true || Date.parse(state.retryNotBefore) > now
+}
+
 function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -72,11 +76,11 @@ export async function runAlerts(env, now, result, context, request) {
     if (!bucket) return { action: 'error', reason: 'alert-storage-unavailable' }
     let hold = {}
     if (!healthy) {
-      stage = 'backoff-read'
+      stage = 'collector-state-read'
       // Carry this value throughout the tick; never read it a second time.
-      const backoff = await bucket.read('backoff.json')
-      if (backoff && !object(backoff.value)) throw new Error('invalid-backoff')
-      hold = backoff?.value ?? {}
+      const collector = await bucket.read('collector-state.json')
+      if (collector && !object(collector.value)) throw new Error('invalid-collector-state')
+      hold = collector?.value ?? {}
     }
     stage = 'state-read'
     const stored = await bucket.read(alertKey)
@@ -100,12 +104,12 @@ export async function runAlerts(env, now, result, context, request) {
       return { action: cleared ? 'reset' : 'conflict' }
     }
     let output = { action: 'none' }
-    const github = async (url, options = {}) => {
-      if (!env.GITHUB_REFRESH_TOKEN) throw new Error('missing-github-token')
+    const github = async (url, options = {}, token = env.GITHUB_ALERT_TOKEN || env.GITHUB_REFRESH_TOKEN) => {
+      if (!token) throw new Error('missing-github-token')
       const response = await request(url, {
         redirect: 'manual', signal: AbortSignal.timeout(10_000), ...options,
         headers: {
-          Accept: 'application/vnd.github+json', Authorization: `Bearer ${env.GITHUB_REFRESH_TOKEN}`,
+          Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`,
           'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'kwip-feed-cron',
           'Content-Type': 'application/json',
         },
@@ -120,9 +124,9 @@ export async function runAlerts(env, now, result, context, request) {
     // Probe on non-notifying stale ticks and persist a disabled observation;
     // the following tick can notify without exceeding the five-call budget.
     if (!healthy && !unknownFailure && action === 'none' && env.GITHUB_REFRESH_TOKEN &&
-        hold.paused !== true && hold.hold !== true && !(Date.parse(hold.retryNotBefore) > now)) {
+        !publisherHeld(hold, now)) {
       stage = 'workflow-state'
-      const workflow = await github(`${repo}/actions/workflows/feed-refresh.yml`)
+      const workflow = await github(`${repo}/actions/workflows/feed-refresh.yml`, {}, env.GITHUB_REFRESH_TOKEN)
       const metadata = await workflow.json()
       if (typeof metadata.state !== 'string') throw new Error('invalid-workflow-state')
       state.workflowDisabled = metadata.state === 'disabled_manually' || metadata.state === 'disabled_inactivity' || metadata.state === 'disabled' || metadata.state === 'paused'

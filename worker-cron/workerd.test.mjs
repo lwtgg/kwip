@@ -49,6 +49,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       R2_BUCKET: bucket,
       R2_CREDENTIALS: JSON.stringify(credentials),
       GITHUB_REFRESH_TOKEN: 'workerd-github-token',
+      GITHUB_ALERT_TOKEN: 'workerd-alert-token',
     },
     handleStructuredLogs({ message }) {
       if (message.includes('feed_refresh_tick')) logs.emit('tick', message)
@@ -59,7 +60,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       seen.push({ method: request.method, host: url.host, path: url.pathname, auth: signed })
       if (url.origin === endpoint) {
         if (url.pathname.endsWith('/current.json')) return Response.json(manifestValue)
-        if (url.pathname.endsWith('/backoff.json')) return hold ? Response.json(hold) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        if (url.pathname.endsWith('/collector-state.json')) return hold ? Response.json(hold) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
         if (url.pathname.endsWith('/cron-feed-alert.json')) {
           if (request.method === 'GET') return alertRecord ? Response.json(alertRecord, { headers: { ETag: '"alert"' } }) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
           assert.equal(request.headers.get(alertRecord ? 'if-match' : 'if-none-match'), alertRecord ? '"alert"' : '*')
@@ -78,6 +79,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
         return new Response(null, { headers: { ETag: '"reserved"' } })
       }
       if (url.host === 'api.github.com') {
+        assert.equal(signed, url.pathname.includes('/actions/') ? 'Bearer workerd-github-token' : 'Bearer workerd-alert-token')
         if (url.pathname.endsWith('/actions/workflows/feed-refresh.yml')) return Response.json({ state: 'active' })
         if (url.pathname === '/search/issues') {
           assert.match(url.searchParams.get('q'), /label:feed-stale/)
@@ -116,20 +118,26 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   }))
   t.after(() => mf.dispose())
   const worker = await mf.getWorker()
-  async function tick(phase) {
+  async function tick(phase, budget = 'normal') {
     redirectAt = phase
     seen.length = 0
     const logged = once(logs, 'tick', { signal: AbortSignal.timeout(5_000) })
     const result = await worker.scheduled({ cron: '*/5 * * * *' })
     assert.equal(result.outcome, 'ok')
     const [line] = await logged
-    assert.doesNotMatch(line, /workerd-r2-key|workerd-r2-secret|workerd-github-token/)
+    assert.doesNotMatch(line, /workerd-r2-key|workerd-r2-secret|workerd-github-token|workerd-alert-token/)
     assert.ok(seen.every(({ host }) => host === 'api.github.com' || host === new URL(endpoint).host))
     const { alert, refreshSubrequests, alertSubrequests, subrequests, ...resultRecord } = JSON.parse(line)
     lastAlert = alert
     lastMetrics = { refreshSubrequests, alertSubrequests, subrequests }
     assert.equal(subrequests, seen.length)
-    assert.ok(alertSubrequests <= (alert.stage === 'create' && alert.reason === 'missing-issues-scope' ? 6 : 5))
+    if (budget === 'cleanup') {
+      assert.equal(alertSubrequests, 6)
+      assert.equal(seen.filter((call) => call.method === 'PUT' && call.path.endsWith('/cron-feed-alert.json')).length, 2)
+      assert.equal(seen.filter((call) => call.method === 'POST' && call.path.endsWith('/issues')).length, 1)
+    } else {
+      assert.ok(alertSubrequests <= 5, 'normal alert paths must retain the five-request ceiling')
+    }
     return resultRecord
   }
 
@@ -164,6 +172,16 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   reservation = { attemptAt: Date.now() - 40 * 60_000, runId: 42 }
   runStatus = 'in_progress'
   manifestValue = { listsVerifiedAt: new Date(Date.now() - 46 * 60_000).toISOString(), commitId: 'workerd-generation' }
+  for (const publisherHold of [{ paused: true }, { retryNotBefore: new Date(Date.now() + 30 * 60_000).toISOString() }]) {
+    hold = publisherHold
+    alertRecord = { hardTicks: 1, verifiedAt: manifestValue.listsVerifiedAt }
+    await tick()
+    assert.equal(lastAlert.action, 'none')
+    assert.equal(lastMetrics.alertSubrequests, 3)
+    assert.equal(seen.filter((call) => call.path.endsWith('/collector-state.json')).length, 1)
+    assert.equal(seen.some((call) => call.path.endsWith('/backoff.json') || call.path === '/search/issues'), false)
+  }
+  hold = undefined
   alertRecord = undefined
   await tick()
   assert.equal(lastAlert.action, 'none')
@@ -191,7 +209,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   alertRecord = { hardTicks: 1, verifiedAt: manifestValue.listsVerifiedAt }
   const postsBeforeRejection = issuePosts
   issueFailure = 403
-  await tick()
+  await tick(undefined, 'cleanup')
   assert.equal(lastAlert.reason, 'missing-issues-scope')
   assert.equal(seen.filter((call) => call.path.endsWith('/issues') && call.method === 'POST').length, 1)
 
@@ -206,8 +224,9 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   assert.equal(issueRecord.state, 'open')
 
   // Real native R2 bindings, including the returned ETag used by recovery CAS.
-  for (const scenario of ['invalid-s3', 'revoked-s3', 'recovery', 'invalid-manifest']) {
+  for (const scenario of ['invalid-s3', 'revoked-s3', 'recovery', 'invalid-manifest', 'missing-refresh', 'expired-refresh', 'forbidden-refresh']) {
     const nativeLogs = new EventEmitter()
+    const refreshToken = scenario === 'missing-refresh' ? '' : scenario === 'expired-refresh' ? 'workerd-expired-refresh-token' : 'workerd-github-token'
     let nativeIssue = scenario === 'recovery' ? { number: 7, state: 'open',
       repository_url: 'https://api.github.com/repos/lwtgg/kwip', body: 'Incident' } : undefined
     const native = new Miniflare(convertV4MiniflareOptions({
@@ -215,12 +234,18 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       script: readFileSync(join(output, 'index.js'), 'utf8'), compatibilityDate,
       r2Buckets: ['WATCHDOG_STATE'],
       bindings: { R2_BUCKET: bucket, R2_CREDENTIALS: scenario === 'invalid-s3' ? '{}' : JSON.stringify(credentials),
-        GITHUB_REFRESH_TOKEN: 'workerd-github-token' },
+        GITHUB_REFRESH_TOKEN: refreshToken, GITHUB_ALERT_TOKEN: 'workerd-alert-token' },
       handleStructuredLogs({ message }) { if (message.includes('feed_refresh_tick')) nativeLogs.emit('tick', message) },
       outboundService: async (request) => {
         const url = new URL(request.url)
+        if (url.origin === endpoint && ['missing-refresh', 'expired-refresh', 'forbidden-refresh'].includes(scenario)) {
+          return new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        }
         if (url.origin === endpoint) return scenario === 'recovery'
           ? Response.json({ listsVerifiedAt: new Date().toISOString() }) : new Response(null, { status: 403 })
+        assert.equal(request.headers.get('authorization'), url.pathname.includes('/actions/')
+          ? `Bearer ${refreshToken}` : 'Bearer workerd-alert-token')
+        if (url.pathname.includes('/actions/')) return new Response(null, { status: scenario === 'forbidden-refresh' ? 403 : 401 })
         if (url.pathname === '/search/issues') return Response.json({ incomplete_results: false,
           total_count: nativeIssue?.state === 'open' ? 1 : 0, items: nativeIssue?.state === 'open' ? [nativeIssue] : [] })
         if (url.pathname.endsWith('/issues') && request.method === 'POST') {
@@ -262,8 +287,15 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       assert.equal(nativeIssue.state, 'closed')
       assert.deepEqual(await (await nativeBucket.get('cron-feed-alert.json')).json(), {})
     } else {
-      assert.equal(record.reason, scenario === 'invalid-s3' ? 'invalid-r2-credentials' : scenario === 'invalid-manifest' ? 'invalid-manifest-json' : 'http-error')
-      assert.match(nativeIssue.body, scenario === 'invalid-s3' ? /invalid-r2-credentials/ : scenario === 'invalid-manifest' ? /feed-state-unavailable/ : /r2-credentials-rejected/)
+      const expectedReason = scenario === 'invalid-s3' ? 'invalid-r2-credentials'
+        : scenario === 'invalid-manifest' ? 'invalid-manifest-json'
+          : scenario === 'missing-refresh' ? 'missing-github-token' : 'http-error'
+      assert.equal(record.reason, expectedReason)
+      const expectedAlert = scenario === 'invalid-s3' ? /invalid-r2-credentials/
+        : scenario === 'invalid-manifest' ? /feed-state-unavailable/
+          : scenario === 'missing-refresh' ? /missing-github-token/
+            : ['expired-refresh', 'forbidden-refresh'].includes(scenario) ? /github-token-rejected/ : /r2-credentials-rejected/
+      assert.match(nativeIssue.body, expectedAlert)
     }
   }
 

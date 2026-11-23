@@ -72,7 +72,7 @@ export function simulation() {
   const request = async (input, options) => {
     const request = new Request(input, options)
     const url = new URL(request.url)
-    calls.push({ method: request.method, path: url.pathname, url: request.url, body: options?.body })
+    calls.push({ method: request.method, path: url.pathname, url: request.url, body: options?.body, auth: request.headers.get('authorization') })
     const failure = fail?.(request)
     if (failure instanceof Error) throw failure
     if (failure) return failure
@@ -164,7 +164,7 @@ for (const [label, status] of [['forbidden', 403], ['expired', 401], ['server', 
   })
 }
 
-for (const key of ['backoff.json', alertKey]) {
+for (const key of ['collector-state.json', alertKey]) {
   test(`alert R2 read failure for ${key} is contained`, async () => {
     const sim = simulation()
     sim.generationAt = now - 60 * minute
@@ -179,14 +179,14 @@ for (const key of ['backoff.json', alertKey]) {
 test('hold is read once and suppresses alerting; a single 5xx stays silent', async () => {
   const sim = simulation()
   sim.generationAt = now - 60 * minute
-  sim.put('backoff.json', { paused: true })
+  sim.put('collector-state.json', { paused: true })
   sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
   let result = await sim.tick()
   assert.equal(result.alert.action, 'none')
-  assert.equal(sim.calls.filter((c) => c.path.endsWith('/backoff.json')).length, 1)
+  assert.equal(sim.calls.filter((c) => c.path.endsWith('/collector-state.json')).length, 1)
   assert.equal(sim.calls.some((c) => c.path === '/search/issues'), false)
   sim.generationAt = now - 20 * minute
-  sim.objects.delete('backoff.json')
+  sim.objects.delete('collector-state.json')
   sim.fail = (r) => r.url.includes('/runs') ? new Response(null, { status: 503 }) : undefined
   result = await sim.tick()
   assert.equal(result.alert.action, 'none')
@@ -309,7 +309,12 @@ for (const mutation of ['create', 'comment', 'close']) {
       assert.equal(result.decision, mutation === 'close' ? 'fresh' : 'dispatch')
       assert.equal(result.alert.action, 'error')
       assert.equal(result.alert.reason, failure === 403 ? 'missing-issues-scope' : `alert-${mutation}-failed`)
-      assert.ok(result.alertSubrequests <= (mutation === 'create' && failure === 403 ? 6 : 5))
+      if (mutation === 'create' && failure === 403) {
+        assert.equal(result.alertSubrequests, 6)
+        assert.equal(sim.calls.filter((c) => c.method === 'PUT' && c.path.endsWith(`/${alertKey}`)).length, 2)
+      } else {
+        assert.ok(result.alertSubrequests <= 5, 'normal alert paths retain the five-request ceiling')
+      }
       assert.equal(sim.calls.filter((c) => c.path.includes('/issues') && c.method !== 'GET').length, 1)
       assert.doesNotMatch(JSON.stringify(result), /private-secret/)
     })
@@ -348,7 +353,7 @@ test('grace ticks use no extra requests, including a missing manifest before res
   const result = await sim.tick()
   assert.equal(result.alert.action, 'grace')
   assert.equal(result.alertSubrequests, 0)
-  assert.equal(sim.calls.some((c) => c.path.endsWith('/backoff.json')), false)
+  assert.equal(sim.calls.some((c) => c.path.endsWith('/collector-state.json')), false)
   sim.fail = (r) => r.url.endsWith('/current.json') ? new Response('<Code>NoSuchKey</Code>', { status: 404 }) : undefined
   const missing = await sim.tick(now + 5 * minute)
   assert.equal(missing.ageMs, null)
@@ -521,13 +526,110 @@ test('a recovered transient unknown-age failure resets the next failure episode'
 
 test('an unknown-age failure still respects an explicit hold while observing finite grace', async () => {
   const sim = simulation()
-  sim.put('backoff.json', { paused: true })
+  sim.put('collector-state.json', { paused: true })
   sim.fail = (r) => r.url.endsWith('/current.json') ? new Response(null, { status: 503 }) : undefined
   await sim.tick()
   const held = await sim.tick(now + 20 * minute)
   assert.equal(held.alert.action, 'none')
   assert.equal(held.alertSubrequests, 3)
   assert.equal(sim.calls.some((c) => c.path === '/search/issues'), false)
-  sim.objects.delete('backoff.json')
+  sim.objects.delete('collector-state.json')
   assert.equal((await sim.tick(now + 25 * minute)).alert.action, 'create')
+})
+
+for (const hold of [{ paused: true }, { retryNotBefore: new Date(now + 30 * minute).toISOString() }]) {
+  test(`publisher collector-state ${JSON.stringify(hold)} suppresses alerts without another hold key`, async () => {
+    const sim = simulation()
+    sim.generationAt = now - 60 * minute
+    sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+    sim.put('collector-state.json', hold)
+    const held = await sim.tick()
+    assert.equal(held.alert.action, 'none')
+    assert.equal(held.alertSubrequests, 3)
+    assert.equal(sim.calls.filter((c) => c.path.endsWith('/collector-state.json')).length, 1)
+    assert.equal(sim.calls.some((c) => c.path.endsWith('/backoff.json')), false)
+    assert.equal(sim.calls.some((c) => c.path === '/search/issues'), false)
+    sim.objects.delete('collector-state.json')
+    assert.equal((await sim.tick(now + 5 * minute)).alert.action, 'create')
+  })
+}
+
+test('legacy backoff.json is not authoritative over the publisher state', async () => {
+  const sim = simulation()
+  sim.generationAt = now - 60 * minute
+  sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+  sim.put('collector-state.json', {})
+  sim.put('backoff.json', { paused: true })
+  assert.equal((await sim.tick()).alert.action, 'create')
+  assert.equal(sim.calls.some((c) => c.path.endsWith('/backoff.json')), false)
+})
+
+for (const failure of ['missing', 401, 403]) {
+  test(`independent alert token reports ${failure} refresh token`, async () => {
+    const sim = simulation()
+    sim.generationAt = now - 30 * minute
+    const credentials = { ...env, GITHUB_ALERT_TOKEN: 'private-alert-token',
+      GITHUB_REFRESH_TOKEN: failure === 'missing' ? '' : env.GITHUB_REFRESH_TOKEN }
+    sim.fail = (r) => r.url.includes('/actions/') ? new Response(null, { status: failure }) : undefined
+    const result = await runWatchdogTick(credentials, now, sim.request)
+    assert.equal(result.reason, failure === 'missing' ? 'missing-github-token' : 'http-error')
+    assert.equal(result.alert.action, 'create')
+    assert.equal(result.alertSubrequests, 5)
+    assert.match(sim.issues[0].body, failure === 'missing' ? /missing-github-token/ : /github-token-rejected/)
+    const issueCalls = sim.calls.filter((c) => c.path === '/search/issues' || c.path.includes('/issues'))
+    assert.equal(issueCalls.length, 2)
+    assert.ok(issueCalls.every((c) => c.auth === 'Bearer private-alert-token'))
+  })
+}
+
+test('issue search, create, comment and recovery use alert credentials while workflow metadata uses refresh credentials', async () => {
+  const sim = simulation()
+  const credentials = { ...env, GITHUB_ALERT_TOKEN: 'private-alert-token' }
+  sim.generationAt = now - 20 * minute
+  await runWatchdogTick(credentials, now, sim.request)
+  const metadata = sim.calls.find((c) => c.path.endsWith('/actions/workflows/feed-refresh.yml'))
+  assert.equal(metadata.auth, `Bearer ${env.GITHUB_REFRESH_TOKEN}`)
+  sim.generationAt = now - 60 * minute
+  sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+  assert.equal((await runWatchdogTick(credentials, now, sim.request)).alert.action, 'create')
+  sim.issues[0].updated_at = new Date(now - 31 * minute).toISOString()
+  assert.equal((await runWatchdogTick(credentials, now + 31 * minute, sim.request)).alert.action, 'comment')
+  sim.generationAt = now + 36 * minute
+  assert.equal((await runWatchdogTick(credentials, now + 36 * minute, sim.request)).alert.action, 'close')
+  assert.ok(sim.calls.filter((c) => c.path === '/search/issues' || c.path.includes('/issues'))
+    .every((c) => c.auth === 'Bearer private-alert-token'))
+})
+
+test('known-issue lookup and close use the independent token even without a refresh token', async () => {
+  const sim = simulation()
+  sim.issues.push(issue())
+  sim.put(alertKey, { issue: 7 })
+  sim.fail = (r) => r.url.includes('/search/issues') ? Response.json({ total_count: 0, incomplete_results: false, items: [] }) : undefined
+  const result = await runWatchdogTick({ ...env, GITHUB_REFRESH_TOKEN: '', GITHUB_ALERT_TOKEN: 'private-alert-token' }, now, sim.request)
+  assert.equal(result.alert.action, 'close')
+  assert.equal(result.alertSubrequests, 5)
+  assert.ok(sim.calls.filter((c) => c.path === '/search/issues' || c.path.includes('/issues'))
+    .every((c) => c.auth === 'Bearer private-alert-token'))
+})
+
+test('an absent alert token falls back to refresh credentials', async () => {
+  const sim = simulation()
+  sim.generationAt = now - 60 * minute
+  sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+  assert.equal((await sim.tick()).alert.action, 'create')
+  assert.ok(sim.calls.filter((c) => c.path === '/search/issues' || c.path.includes('/issues'))
+    .every((c) => c.auth === `Bearer ${env.GITHUB_REFRESH_TOKEN}`))
+})
+
+test('a present but rejected alert token is not retried with the refresh token', async () => {
+  const sim = simulation()
+  sim.generationAt = now - 60 * minute
+  sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+  sim.fail = (r) => r.url.includes('/search/issues') ? new Response(null, { status: 403 }) : undefined
+  const result = await runWatchdogTick({ ...env, GITHUB_ALERT_TOKEN: 'rejected-alert-token' }, now, sim.request)
+  assert.equal(result.alert.reason, 'missing-issues-scope')
+  const searches = sim.calls.filter((c) => c.path === '/search/issues')
+  assert.equal(searches.length, 1)
+  assert.equal(searches[0].auth, 'Bearer rejected-alert-token')
+  assert.ok(result.alertSubrequests <= 5)
 })

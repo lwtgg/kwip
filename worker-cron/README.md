@@ -82,11 +82,13 @@ outcome, a separate `alert` result, and `refreshSubrequests`, `alertSubrequests`
 and total `subrequests`. Alert errors use fixed reason codes and never include
 response bodies, exception text or credentials.
 
-After manifest age exceeds 15 minutes, `backoff.json` is read once. A deliberate
-`paused: true`, `hold: true`, or future `retryNotBefore` suppresses notifications.
-This key is the watchdog's operator hold; the publisher currently keeps its own
-provider backoff in `collector-state.json`. Set the watchdog hold as well when
-intentionally pausing publication. A malformed or unreadable hold fails closed.
+After manifest age exceeds 15 minutes, the publisher's authoritative
+`collector-state.json` is read once and carried through the tick. `paused: true`
+suppresses notifications, as does a future `retryNotBefore` without any pause
+flag. Expired backoff does not suppress alerts. No separate operator hold is
+needed: the watchdog uses the same state as `scripts/collect-publish-feed.mjs`.
+A malformed or unreadable collector state fails closed; legacy `backoff.json`
+is not read.
 
 The watchdog pages on two consecutive observations past 45 minutes, a stalled
 reservation, two consecutive explicit dispatch rejections, rejected or missing
@@ -99,8 +101,9 @@ prevent reading the manifest or reservation instead persist an independent
 This grace survives isolate restarts and missed ticks. During observation, three
 extra calls read the hold, read alert state, and conditionally save the timestamp;
 GitHub is not contacted before grace expires. A fresh manifest resets the failure
-observation as a recovery tick, so a later failure receives its own grace. A missing/expired GitHub token
-cannot deliver a GitHub issue; the fixed alert error remains in Worker logs.
+observation as a recovery tick, so a later failure receives its own grace. A missing or expired refresh token can still be reported through the independent
+alert token. If no working alert credential is available, a fixed alert error
+remains in Worker logs.
 The `WATCHDOG_STATE` binding accesses the same bucket independently of the S3
 secret so malformed or revoked S3 credentials do not disable alert storage.
 
@@ -140,8 +143,8 @@ Budget (including failed calls): ordinary healthy = two total, zero extra;
 Unknown-age failures use three observation calls during grace and at most five
 notification calls afterwards; recovery of an unpaged observation uses one extra
 state-clear call. The usual
-older stale path is backoff read + state read + optional workflow metadata probe
-+ state write (four). Create/comment uses backoff read + state read + search +
+older stale path is collector-state read + state read + optional workflow metadata probe
++ state write (four). Create/comment uses collector-state read + state read + search +
 conditional state write + mutation (five). Recovery uses state read + search +
 conditional state write + close + state clear: six total including manifest,
 four extra beyond a normal healthy tick (five if a direct lookup is needed
@@ -150,16 +153,25 @@ still use ten refresh requests. A definitive issue-create rejection adds one
 conditional cleanup write to the five-call alert path, for a maximum of sixteen
 requests overall; other alert paths retain their five-extra ceiling.
 
-Rollout requires a replacement fine-grained token scoped to `lwtgg/kwip` with
-both **Actions: Read and write** and **Issues: Read and write**, plus an existing
-`feed-stale` label. Do not deploy the site. From the repository root:
+Rollout uses two fine-grained credentials scoped to `lwtgg/kwip`, plus an existing
+`feed-stale` label. `GITHUB_REFRESH_TOKEN` needs **Actions: Read and write** for
+workflow metadata, run lookup and dispatch. `GITHUB_ALERT_TOKEN` needs **Issues:
+Read and write** for issue search/read/create/comment/close, and needs no Actions
+permission. Issue calls prefer the alert token so a missing, expired or forbidden
+refresh token does not disable the alarm. Workflow calls always use the refresh
+token. If the alert secret is absent, issue calls fall back to the refresh token,
+which then also needs **Issues: Read and write**. A present but rejected alert
+token is not retried with the refresh credential. The fallback alone cannot
+report its own missing/expired token, so configure the independent alert secret
+for production. Do not deploy the site. From the repository root:
 
 ```sh
 pnpm exec wrangler secret put GITHUB_REFRESH_TOKEN --config worker-cron/wrangler.jsonc
+pnpm exec wrangler secret put GITHUB_ALERT_TOKEN --config worker-cron/wrangler.jsonc
 pnpm --dir worker-cron check
 pnpm exec wrangler deploy --config worker-cron/wrangler.jsonc
 ```
 
-The deployed secret's scopes cannot be verified by reading local GitHub CLI
-credentials. If the replacement token's scope is unconfirmed, leave the cron
+The deployed secrets' scopes cannot be verified by reading local GitHub CLI
+credentials. If either token's scope is unconfirmed, leave the cron
 Worker undeployed and have the owner run the commands above after verification.
