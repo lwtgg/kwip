@@ -45,13 +45,13 @@ test('rejects a manifest body over the download cap', async (t) => {
   assert.equal(fetch.mock.callCount(), 1)
 })
 
-test('zlive health only reorders peers in the same quality and locale band', () => {
+test('health only reorders competing zlive bids in the same quality and locale band', () => {
   const primary = { name: 'Primary', default: true, type: 'iframe' as const,
     data: 'https://primary.example/player', sourceTag: 'FHD', locale: 'UK' }
   const alternate = (id: string, sourceTag = 'FHD', locale = 'UK') => ({
     ...primary, default: false, origin: 'zlive' as const, data: `https://zlive.st/embed/${id}`, sourceTag, locale,
   })
-  const sources = [primary, alternate('degraded'), alternate('backup'), alternate('us', 'FHD', 'US'), alternate('hd', 'HD')]
+  const sources = [primary, alternate('degraded'), alternate('peer'), alternate('us', 'FHD', 'US'), alternate('hd', 'HD')]
   const failed = { embedOk: false, manifestOk: false, sequence: 'unknown' as const, checkedAt: new Date().toISOString() }
   const options = usePlayerSources({ sources }, {
     'primary.example/player': failed,
@@ -59,4 +59,29 @@ test('zlive health only reorders peers in the same quality and locale band', () 
   })
   assert.deepEqual(options.map(({ url }) => url), [sources[0]!.data, sources[2]!.data, sources[1]!.data, sources[3]!.data, sources[4]!.data])
   assert.equal(options[1]?.host, 'zlive.st')
+})
+
+test('keeps the published zlive primary ahead of its healthy in-band backup', async (t) => {
+  const { fetchZliveListing, matchZliveSources } = await import('../scripts/publish-supplements.mjs')
+  const channels = ['Channel One FHD', 'Channel One FHD Backup 2'].map((name, index) => ({
+    id: `one-${index}`, name, quality: 'FHD', region: 'UK', sport: 'Sports', live: true,
+    url: `https://zlive.st/embed/one-${index}`,
+  }))
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ count: channels.length, channels }))
+  const listing = await fetchZliveListing(performance.now() + 1000)
+  const ours = { name: 'Ours', default: true, type: 'iframe' as const,
+    data: 'https://primary.example/player', sourceTag: 'FHD', locale: 'UK' }
+  const published = matchZliveSources({ name: 'Channel One', always_live: 1 }, listing, { sources: [ours] })
+  const [primaryUrl, backupUrl] = channels.map(({ url }) => url)
+  assert.deepEqual(published.map(({ data }) => data), [primaryUrl, backupUrl])
+
+  const failed = { embedOk: false, manifestOk: false, sequence: 'unknown' as const, checkedAt: new Date().toISOString() }
+  const health = {
+    'zlive.st/embed/one-0': failed,
+    'zlive.st/embed/one-1': { ...failed, embedOk: true },
+  }
+  const options = usePlayerSources({ sources: [ours, ...published] }, health)
+  assert.deepEqual(options.map(({ url }) => url), [ours.data, primaryUrl, backupUrl])
+  assert.equal(options[1]?.degraded, true)
+  assert.equal(options[2]?.degraded, undefined)
 })
