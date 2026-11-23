@@ -18,8 +18,10 @@ Page on sustained, human-fixable conditions:
 - `invalid-r2-credentials`, `missing-github-token`, or an expired token (401/403);
 - the workflow answering `paused` or disabled.
 
-Do not page while a deliberate hold is written to `backoff.json`, and do not page within the first
-15 minutes of new staleness. A single provider 5xx is normal and must stay silent.
+Do not page while the publisher is deliberately held — the authoritative flag is `paused: true` in
+`collector-state.json`, which the publisher writes for an explicit block; a `retryNotBefore` backoff alone
+is transient and stays silent too. Do not page within the first 15 minutes of new staleness. A single
+provider 5xx is normal and must stay silent.
 
 ## How it pages
 
@@ -36,15 +38,20 @@ a fixed reason and the tick's refresh outcome is unchanged.
 
 A reconciliation tick uses at most four subrequests and a dispatch tick nine. Alerting is budgeted by state:
 zero extra on a healthy tick, and at most **five** on a tick whose manifest age is already past the 15-minute
-grace, covering the `backoff.json` read, the alert-state read, the labelled-issue search, the one creating
-call and the state write. Cache what you can — carry the backoff read from the same tick rather than
+grace, covering the collector-state read, the alert-state read, the labelled-issue search, the one creating
+call and the state write. A tick that has to clean up after a rejected create may take one more, six total;
+assert both ceilings rather than loosening one. Cache what you can — carry the backoff read from the same tick rather than
 re-reading it. Search for the open issue by label with a single request, never by listing issues.
 
 ## Scope
 
-`GITHUB_REFRESH_TOKEN` currently carries Actions: Read and write only — opening an issue needs **Issues:
-Read and write**. Handle a 403 as `missing-issues-scope`, log it once, and do not retry that tick. Update
-README's provisioning step to require both scopes and say the alert is inert until the token is replaced.
+Alerting must not depend on the credential it is meant to report on: add a second secret,
+`GITHUB_ALERT_TOKEN`, used for the issue read/create/comment/close, and fall back to `GITHUB_REFRESH_TOKEN`
+only when it is absent. The refresh token carries Actions: Read and write only, so it must gain **Issues:
+Read and write** as well — otherwise a missing or expired refresh token takes the alarm with it, which is one
+of the conditions it has to report. Handle a 403 as `missing-issues-scope`, log it once, do not retry that
+tick. Document both tokens and their scopes in README.
+
 
 ## Constraints
 
