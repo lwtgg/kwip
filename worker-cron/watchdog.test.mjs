@@ -309,7 +309,7 @@ for (const mutation of ['create', 'comment', 'close']) {
       assert.equal(result.decision, mutation === 'close' ? 'fresh' : 'dispatch')
       assert.equal(result.alert.action, 'error')
       assert.equal(result.alert.reason, failure === 403 ? 'missing-issues-scope' : `alert-${mutation}-failed`)
-      assert.ok(result.alertSubrequests <= 5)
+      assert.ok(result.alertSubrequests <= (mutation === 'create' && failure === 403 ? 6 : 5))
       assert.equal(sim.calls.filter((c) => c.path.includes('/issues') && c.method !== 'GET').length, 1)
       assert.doesNotMatch(JSON.stringify(result), /private-secret/)
     })
@@ -395,4 +395,139 @@ test('a manually closed known issue permits the next sustained incident, without
   assert.equal(sim.issues.length, 1)
   assert.equal((await sim.tick(now + 5 * minute)).alert.action, 'create')
   assert.equal(sim.issues.filter((i) => i.state === 'open').length, 1)
+})
+
+for (const status of [400, 401, 403, 404, 422, 429]) {
+  test(`definitive create rejection ${status} clears intent and retries after repair`, async () => {
+    const sim = simulation()
+    sim.generationAt = now - 60 * minute
+    sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+    let posts = 0
+    sim.fail = (r) => {
+      if (r.method === 'POST' && r.url.endsWith('/issues') && ++posts === 1) return new Response(null, { status })
+    }
+    const rejected = await sim.tick()
+    assert.equal(rejected.alert.action, 'error')
+    assert.equal(sim.objects.get(alertKey).value.pendingCreate, undefined)
+    assert.equal(rejected.alertSubrequests, 6)
+    assert.equal((await sim.tick(now + 5 * minute)).alert.action, 'create')
+    assert.equal((await sim.tick(now + 10 * minute)).alert.action, 'none')
+    assert.equal(posts, 2)
+    assert.equal(sim.issues.length, 1)
+  })
+}
+
+for (const failure of ['unreadable', 'timeout', 'malformed', 'invalid-timestamp']) {
+  test(`independent failure observation gives ${failure} manifest a finite grace across restarts`, async () => {
+    const sim = simulation()
+    sim.fail = (r) => {
+      if (!r.url.endsWith('/current.json')) return
+      if (failure === 'unreadable') return new Response(null, { status: 503 })
+      if (failure === 'timeout') return new DOMException('private-secret', 'TimeoutError')
+      if (failure === 'malformed') return new Response('invalid JSON')
+      return Response.json({ listsVerifiedAt: 'invalid timestamp' })
+    }
+    for (const elapsed of [0, 5, 10, 15]) {
+      const result = await sim.tick(now + elapsed * minute)
+      assert.equal(result.ageMs, null)
+      assert.equal(result.decision, 'error')
+      assert.equal(result.alert.action, elapsed === 15 ? 'create' : 'none')
+      assert.equal(result.alertSubrequests, elapsed === 15 ? 5 : 3)
+      assert.equal(sim.objects.get(alertKey).value.firstFailureAt, now)
+      assert.doesNotMatch(JSON.stringify(result), /private-secret/)
+    }
+    assert.equal(sim.issues.length, 1)
+    assert.match(sim.issues[0].body, /feed-state-unavailable/)
+    assert.equal((await sim.tick(now + 20 * minute)).alert.action, 'none')
+    assert.equal(sim.issues.length, 1)
+    sim.fail = undefined
+    sim.generationAt = now + 25 * minute
+    assert.equal((await sim.tick(now + 25 * minute)).alert.action, 'close')
+    assert.equal((await sim.tick(now + 30 * minute)).alertSubrequests, 0)
+  })
+}
+
+for (const status of [302, 408, 499, 500, 503]) {
+  test(`ambiguous create ${status} retains intent and never blindly reposts`, async () => {
+    const sim = simulation()
+    sim.generationAt = now - 60 * minute
+    sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+    sim.fail = (r) => r.method === 'POST' && r.url.endsWith('/issues') ? new Response(null, { status }) : undefined
+    const result = await sim.tick()
+    assert.equal(result.alert.action, 'error')
+    assert.equal(result.alertSubrequests, 5)
+    assert.equal(sim.objects.get(alertKey).value.pendingCreate, true)
+    sim.fail = undefined
+    assert.equal((await sim.tick(now + 5 * minute)).alert.action, 'unconfirmed')
+    assert.equal(sim.issues.length, 0)
+  })
+}
+
+test('a definitive create rejection plus dispatch release stays inside the sixteen-request ceiling', async () => {
+  const sim = simulation()
+  sim.generationAt = now - 30 * minute
+  sim.fail = (r) => r.url.endsWith('/dispatches') || (r.method === 'POST' && r.url.endsWith('/issues')) ? new Response(null, { status: 403 }) : undefined
+  const result = await sim.tick()
+  assert.equal(result.status, 403)
+  assert.equal(result.alert.reason, 'missing-issues-scope')
+  assert.equal(result.refreshSubrequests, 10)
+  assert.equal(result.alertSubrequests, 6)
+  assert.equal(result.subrequests, 16)
+  assert.equal(sim.objects.get(alertKey).value.pendingCreate, undefined)
+})
+
+test('a failed create-intent cleanup is contained and preserves the primary rejection', async () => {
+  const sim = simulation()
+  sim.generationAt = now - 60 * minute
+  sim.put(alertKey, { hardTicks: 1, verifiedAt: new Date(now - 60 * minute).toISOString() })
+  let writes = 0
+  sim.fail = (r) => {
+    if (r.method === 'POST' && r.url.endsWith('/issues')) return new Response(null, { status: 403 })
+    if (r.method === 'PUT' && r.url.endsWith(alertKey) && ++writes === 2) return new Response(null, { status: 503 })
+  }
+  const result = await sim.tick()
+  assert.equal(result.dispatch, 'accepted')
+  assert.equal(result.alert.reason, 'missing-issues-scope')
+  assert.equal(result.alert.intentResetError, 'alert-state-write-failed')
+  assert.equal(result.alertSubrequests, 6)
+  assert.equal(sim.objects.get(alertKey).value.pendingCreate, true)
+})
+
+test('missed cron ticks do not restart the independent failure grace', async () => {
+  const sim = simulation()
+  sim.fail = (r) => r.url.endsWith('/current.json') ? new Response(null, { status: 503 }) : undefined
+  assert.equal((await sim.tick()).alert.action, 'none')
+  assert.equal((await sim.tick(now + 20 * minute)).alert.action, 'create')
+  assert.equal(sim.objects.get(alertKey).value.firstFailureAt, now)
+})
+
+test('a recovered transient unknown-age failure resets the next failure episode', async () => {
+  const sim = simulation()
+  const failure = (r) => r.url.endsWith('/current.json') ? new Response(null, { status: 503 }) : undefined
+  sim.fail = failure
+  await sim.tick()
+  sim.fail = undefined
+  sim.generationAt = now + 5 * minute
+  const recovery = await sim.tick(now + 5 * minute)
+  assert.equal(recovery.alert.action, 'reset')
+  assert.equal(recovery.alertSubrequests, 1)
+  assert.equal((await sim.tick(now + 10 * minute)).alertSubrequests, 0)
+  sim.fail = failure
+  const next = await sim.tick(now + 20 * minute)
+  assert.equal(next.alert.action, 'none')
+  assert.equal(sim.objects.get(alertKey).value.firstFailureAt, now + 20 * minute)
+  assert.equal(sim.issues.length, 0)
+})
+
+test('an unknown-age failure still respects an explicit hold while observing finite grace', async () => {
+  const sim = simulation()
+  sim.put('backoff.json', { paused: true })
+  sim.fail = (r) => r.url.endsWith('/current.json') ? new Response(null, { status: 503 }) : undefined
+  await sim.tick()
+  const held = await sim.tick(now + 20 * minute)
+  assert.equal(held.alert.action, 'none')
+  assert.equal(held.alertSubrequests, 3)
+  assert.equal(sim.calls.some((c) => c.path === '/search/issues'), false)
+  sim.objects.delete('backoff.json')
+  assert.equal((await sim.tick(now + 25 * minute)).alert.action, 'create')
 })

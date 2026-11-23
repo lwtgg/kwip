@@ -16,7 +16,7 @@
     "required": ["GITHUB_REFRESH_TOKEN", "R2_CREDENTIALS"]
   },
   "limits": {
-    "subrequests": 15
+    "subrequests": 16
   },
   "observability": {
     "enabled": true,

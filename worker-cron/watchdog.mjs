@@ -3,21 +3,35 @@ export const alertKey = 'cron-feed-alert.json'
 const repo = 'https://api.github.com/repos/lwtgg/kwip'
 const positive = (value) => Number.isSafeInteger(value) && value > 0
 
-export function alertBudget(ageMs, recovering = false) {
-  return recovering || (ageMs !== null && ageMs > 15 * minute) ? 5 : 0
+export function alertBudget(ageMs, recovering = false, observingFailure = false) {
+  return recovering || observingFailure || (ageMs !== null && ageMs > 15 * minute) ? 5 : 0
 }
 
 export function decideAlert(result, previous = {}, now, hold = {}) {
   const healthy = result.ageMs !== null && result.ageMs <= 12 * minute && result.decision === 'fresh'
   const state = { ...previous }
-  if (healthy) return { state: {}, action: positive(previous.issue) || previous.pendingCreate || previous.recovering ? 'close' : 'none', healthy: true }
+  if (healthy) {
+    const action = positive(previous.issue) || previous.pendingCreate || previous.recovering
+      ? 'close' : previous.firstFailureAt != null ? 'reset' : 'none'
+    return { state: {}, action, healthy: true }
+  }
+  const unknownFailure = result.ageMs === null && result.decision === 'error'
+  if (unknownFailure) {
+    // Persist independently of the unreadable manifest and reservation. Missed
+    // cron ticks or isolate restarts must never restart a permanent failure's grace.
+    state.firstFailureAt = Number.isSafeInteger(previous.firstFailureAt) &&
+      previous.firstFailureAt >= 0 && previous.firstFailureAt <= now ? previous.firstFailureAt : now
+  } else {
+    delete state.firstFailureAt
+  }
   state.since = previous.since ?? now
   state.hardTicks = result.ageMs > 45 * minute ? (previous.hardTicks ?? 0) + 1 : 0
   const rejected = result.dispatch === 'failed' && result.status >= 400 && result.status < 500 && result.status !== 408
   state.rejections = rejected ? (previous.rejections ?? 0) + 1 : 0
-  const gracePassed = result.ageMs === null ? now - state.since >= 15 * minute : result.ageMs > 15 * minute
+  const gracePassed = result.ageMs === null ? now - (unknownFailure ? state.firstFailureAt : state.since) >= 15 * minute : result.ageMs > 15 * minute
   const suppressed = hold.paused === true || hold.hold === true || Date.parse(hold.retryNotBefore) > now
   let reason
+  if (unknownFailure && gracePassed) reason = 'feed-state-unavailable'
   if (state.hardTicks >= 2) reason = 'manifest-too-old'
   if (result.decision === 'stalled') reason = 'stalled'
   if (state.rejections >= 2) reason = 'dispatch-rejected'
@@ -37,6 +51,10 @@ export function decideIssue(action, state, issues, now) {
   return { action: now - notifiedAt >= 30 * minute ? 'comment' : 'none', issue }
 }
 
+export function definitiveCreateRejection(status) {
+  return Number.isInteger(status) && status >= 400 && status < 500 && status !== 408 && status !== 499
+}
+
 function object(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -46,7 +64,8 @@ export async function runAlerts(env, now, result, context, request) {
   const healthy = result.decision === 'fresh' && result.ageMs <= 12 * minute
   const observedSince = context.reservation?.attemptAt
   const budgetAge = result.ageMs ?? (Number.isSafeInteger(observedSince) ? Math.max(0, now - observedSince) : null)
-  if (!healthy && !alertBudget(budgetAge)) return { action: 'grace' }
+  const unknownFailure = result.ageMs === null && result.decision === 'error'
+  if (!healthy && !alertBudget(budgetAge, false, unknownFailure)) return { action: 'grace' }
   let stage = 'state-read'
   try {
     const bucket = bindingStorage(env.WATCHDOG_STATE, context.countBinding) ?? context.bucket
@@ -75,6 +94,11 @@ export async function runAlerts(env, now, result, context, request) {
     // An ambiguous create is reconciled even when the manifest has recovered.
     if (healthy && previous.pendingCreate) action = 'close'
     if (healthy && action === 'none') return { action: 'none' }
+    if (healthy && action === 'reset') {
+      stage = 'state-write'
+      const cleared = await bucket.writeReservation({}, stored, alertKey)
+      return { action: cleared ? 'reset' : 'conflict' }
+    }
     let output = { action: 'none' }
     const github = async (url, options = {}) => {
       if (!env.GITHUB_REFRESH_TOKEN) throw new Error('missing-github-token')
@@ -88,14 +112,14 @@ export async function runAlerts(env, now, result, context, request) {
       })
       if (!response.ok) {
         await response.body?.cancel().catch(() => {})
-        throw new Error(response.status === 403 && stage !== 'workflow-state' ? 'missing-issues-scope' : 'alert-github-error')
+        throw Object.assign(new Error(response.status === 403 && stage !== 'workflow-state' ? 'missing-issues-scope' : 'alert-github-error'), { status: response.status })
       }
       return response
     }
     // Workflow state belongs to the workflow metadata, not its run statuses.
     // Probe on non-notifying stale ticks and persist a disabled observation;
     // the following tick can notify without exceeding the five-call budget.
-    if (!healthy && action === 'none' && env.GITHUB_REFRESH_TOKEN &&
+    if (!healthy && !unknownFailure && action === 'none' && env.GITHUB_REFRESH_TOKEN &&
         hold.paused !== true && hold.hold !== true && !(Date.parse(hold.retryNotBefore) > now)) {
       stage = 'workflow-state'
       const workflow = await github(`${repo}/actions/workflows/feed-refresh.yml`)
@@ -161,10 +185,29 @@ export async function runAlerts(env, now, result, context, request) {
         if (!claim) return { action: 'conflict' }
         stage = selected.action
         if (selected.action === 'create') {
-          const response = await github(`${repo}/issues`, { method: 'POST', body: JSON.stringify({
-            title: 'Feed refresh stalled', labels: ['feed-stale'], body,
-          }) })
-          await response.body?.cancel().catch(() => {})
+          try {
+            const response = await github(`${repo}/issues`, { method: 'POST', body: JSON.stringify({
+              title: 'Feed refresh stalled', labels: ['feed-stale'], body,
+            }) })
+            await response.body?.cancel().catch(() => {})
+          } catch (error) {
+            if (definitiveCreateRejection(error.status)) {
+              // GitHub definitely did not create an issue. One cleanup write
+              // permits a later tick to retry, without repeating this tick's POST.
+              // Timeouts, redirects and 5xx keep intent because acceptance is unknown.
+              delete state.pendingCreate
+              delete state.notifiedAt
+              const failure = { action: 'error', stage,
+                reason: error.status === 403 ? 'missing-issues-scope' : 'alert-create-failed' }
+              try {
+                const cleared = await bucket.writeReservation(state, claim, alertKey)
+                if (!cleared) return { ...failure, intentResetError: 'alert-state-conflict' }
+              } catch {
+                return { ...failure, intentResetError: 'alert-state-write-failed' }
+              }
+            }
+            throw error
+          }
         } else if (selected.action === 'comment') {
           const response = await github(`${repo}/issues/${selected.issue.number}/comments`, {
             method: 'POST', body: JSON.stringify({ body }),

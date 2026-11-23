@@ -124,6 +124,7 @@ export async function runTick(env, now, request = fetch, context) {
       manifest = current ? { value: parseJson(await current.text()) } : null
     } else {
       bucket = bucketClient(env, request)
+      if (context) context.bucket = bucket
       manifest = await bucket.read('current.json')
     }
     if (context) context.manifest = manifest?.value

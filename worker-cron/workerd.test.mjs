@@ -35,6 +35,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   let issueRecord
   let runStatus = 'completed'
   let issueFailure
+  let issuePosts = 0
   let lastAlert
   let lastMetrics
   const redirect = () => new Response(null, {
@@ -84,6 +85,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
             items: issueRecord?.state === 'open' ? [issueRecord] : [] })
         }
         if (url.pathname.endsWith('/issues')) {
+          issuePosts++
           if (issueFailure) return new Response(null, { status: issueFailure })
           issueRecord = { ...await request.json(), number: 7, state: 'open', repository_url: 'https://api.github.com/repos/lwtgg/kwip', updated_at: new Date().toISOString() }
           return Response.json(issueRecord, { status: 201 })
@@ -127,7 +129,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
     lastAlert = alert
     lastMetrics = { refreshSubrequests, alertSubrequests, subrequests }
     assert.equal(subrequests, seen.length)
-    assert.ok(alertSubrequests <= 5)
+    assert.ok(alertSubrequests <= (alert.stage === 'create' && alert.reason === 'missing-issues-scope' ? 6 : 5))
     return resultRecord
   }
 
@@ -187,13 +189,24 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
 
   manifestValue.listsVerifiedAt = new Date(Date.now() - 60 * 60_000).toISOString()
   alertRecord = { hardTicks: 1, verifiedAt: manifestValue.listsVerifiedAt }
+  const postsBeforeRejection = issuePosts
   issueFailure = 403
   await tick()
   assert.equal(lastAlert.reason, 'missing-issues-scope')
   assert.equal(seen.filter((call) => call.path.endsWith('/issues') && call.method === 'POST').length, 1)
 
+  assert.equal(alertRecord.pendingCreate, undefined)
+  assert.equal(lastMetrics.alertSubrequests, 6)
+  issueFailure = undefined
+  await tick()
+  assert.equal(lastAlert.action, 'create')
+  await tick()
+  assert.equal(lastAlert.action, 'none')
+  assert.equal(issuePosts - postsBeforeRejection, 2)
+  assert.equal(issueRecord.state, 'open')
+
   // Real native R2 bindings, including the returned ETag used by recovery CAS.
-  for (const scenario of ['invalid-s3', 'revoked-s3', 'recovery']) {
+  for (const scenario of ['invalid-s3', 'revoked-s3', 'recovery', 'invalid-manifest']) {
     const nativeLogs = new EventEmitter()
     let nativeIssue = scenario === 'recovery' ? { number: 7, state: 'open',
       repository_url: 'https://api.github.com/repos/lwtgg/kwip', body: 'Incident' } : undefined
@@ -223,9 +236,22 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
     }))
     t.after(() => native.dispose())
     const nativeBucket = await native.getR2Bucket('WATCHDOG_STATE')
-    await nativeBucket.put('current.json', JSON.stringify({ listsVerifiedAt: new Date(Date.now() - (scenario === 'recovery' ? 0 : 60 * 60_000)).toISOString() }))
+    await nativeBucket.put('current.json', scenario === 'invalid-manifest' ? 'invalid JSON' : JSON.stringify({ listsVerifiedAt: new Date(Date.now() - (scenario === 'recovery' ? 0 : 60 * 60_000)).toISOString() }))
     await nativeBucket.put('cron-feed-alert.json', JSON.stringify(scenario === 'recovery'
       ? { issue: 7 } : { since: Date.now() - 20 * 60_000 }))
+    if (scenario === 'invalid-manifest') {
+      const observed = once(nativeLogs, 'tick', { signal: AbortSignal.timeout(5_000) })
+      assert.equal((await (await native.getWorker()).scheduled()).outcome, 'ok')
+      const [line] = await observed
+      const first = JSON.parse(line)
+      assert.equal(first.reason, 'invalid-manifest-json')
+      assert.equal(first.alert.action, 'none')
+      assert.equal(first.alertSubrequests, 3)
+      const saved = await (await nativeBucket.get('cron-feed-alert.json')).json()
+      assert.ok(Number.isSafeInteger(saved.firstFailureAt))
+      // Advance the durable observation past grace without waiting on wall time.
+      await nativeBucket.put('cron-feed-alert.json', JSON.stringify({ ...saved, firstFailureAt: Date.now() - 16 * 60_000 }))
+    }
     const logged = once(nativeLogs, 'tick', { signal: AbortSignal.timeout(5_000) })
     assert.equal((await (await native.getWorker()).scheduled()).outcome, 'ok')
     const [line] = await logged
@@ -236,8 +262,8 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       assert.equal(nativeIssue.state, 'closed')
       assert.deepEqual(await (await nativeBucket.get('cron-feed-alert.json')).json(), {})
     } else {
-      assert.equal(record.reason, scenario === 'invalid-s3' ? 'invalid-r2-credentials' : 'http-error')
-      assert.match(nativeIssue.body, scenario === 'invalid-s3' ? /invalid-r2-credentials/ : /r2-credentials-rejected/)
+      assert.equal(record.reason, scenario === 'invalid-s3' ? 'invalid-r2-credentials' : scenario === 'invalid-manifest' ? 'invalid-manifest-json' : 'http-error')
+      assert.match(nativeIssue.body, scenario === 'invalid-s3' ? /invalid-r2-credentials/ : scenario === 'invalid-manifest' ? /feed-state-unavailable/ : /r2-credentials-rejected/)
     }
   }
 

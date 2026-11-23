@@ -135,13 +135,15 @@ procedure](worker-cron/README.md#recover-a-stalled-or-legacy-reservation).
 The GitHub schedule stays enabled and both triggers use the existing
 concurrency group.
 
-The approved ceiling is fifteen subrequests per tick on Workers Paid, against
+The approved ceiling is sixteen subrequests per tick on Workers Paid, against
 the deployment budget of 1,000 subrequests per invocation. A fresh tick
 reads the manifest and alert state. A
 reconciliation tick uses at most four subrequests. A dispatch tick uses nine,
 with a tenth if GitHub explicitly rejects the dispatch and the Worker releases
 the reservation. Alerting adds at most five requests after the 15-minute
-manifest-age grace; routine healthy ticks add none. Recovery with an open alert
+manifest-age grace; unknown-age failures persist an independent grace timestamp.
+A definitive issue-create rejection allows one cleanup write so repaired tokens
+can retry on a later tick. Routine healthy ticks add none. Recovery with an open alert
 uses the recovery path described in [the watchdog runbook](worker-cron/README.md#watchdog).
 
 Merge the workflow input `cron_attempt` to `main` before deploying the updated

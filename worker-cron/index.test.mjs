@@ -459,7 +459,7 @@ test('a search sweep restarts at the skew-adjusted origin as time moves forward'
 test('the scheduled entrypoint exposes only a cron handler and logs one controlled record', async (t) => {
   assert.deepEqual(Object.keys(worker), ['scheduled'])
   const raw = 'r2-test-key r2-test-secret github-test-token'
-  const http = fixture(new Response(raw), new DOMException(raw, 'TimeoutError'))
+  const http = fixture(new Response(raw), missing(), missing(), written(), new DOMException(raw, 'TimeoutError'), missing(), missing(), written())
   t.mock.method(globalThis, 'fetch', http.fetch)
   const log = t.mock.method(console, 'log', () => {})
   await worker.scheduled({ scheduledTime: now }, env)
@@ -467,10 +467,10 @@ test('the scheduled entrypoint exposes only a cron handler and logs one controll
   assert.equal(log.mock.callCount(), 2)
   for (const [i, { arguments: [line] }] of log.mock.calls.entries()) {
     const { alert, alertSubrequests, refreshSubrequests, subrequests, ...logged } = JSON.parse(line)
-    assert.equal(alert.action, 'grace')
-    assert.equal(alertSubrequests, 0)
+    assert.equal(alert.action, 'none')
+    assert.equal(alertSubrequests, 3)
     assert.equal(refreshSubrequests, 1)
-    assert.equal(subrequests, 1)
+    assert.equal(subrequests, 4)
     assert.deepEqual(logged, {
       event: 'feed_refresh_tick', ageMs: null, decision: 'error', dispatch: 'skipped', stage: 'manifest',
       reason: i === 0 ? 'invalid-manifest-json' : 'request-timeout',
