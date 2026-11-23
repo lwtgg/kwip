@@ -90,3 +90,10 @@ display axis, the collapsing nav) and Six Colors' comparison with ESPN. Constrai
 nothing, the banner stays below the player, mint keeps one action, and the fixture list's date strip stays
 the spine. Depends on crest art, and scores need a provider — start with crest and numeral layout, slot real
 scores in when §4's provider exists.
+
+**Shipped 2026-11-23.** The watchdog is deployed on `kwip-feed-cron` (`6462c1de`, merged `549c94a`). A live
+tick logged `decision: fresh`, `alert.action: none`, `alertSubrequests: 0`, so healthy ticks pay nothing.
+Still owed by the owner: `GITHUB_ALERT_TOKEN` does not exist yet, so alerting falls back to the refresh token
+and will log `missing-issues-scope` on the first page. Create a fine-grained token for `lwtgg/kwip` with
+Issues: Read and write, then `wrangler secret put GITHUB_ALERT_TOKEN --config worker-cron/wrangler.jsonc`
+and give the refresh token Issues: Read and write as well.
