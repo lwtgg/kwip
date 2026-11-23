@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useStreams } from '~/composables/useFeed'
 
 const { siteName } = useRuntimeConfig().public
@@ -36,12 +37,30 @@ const categories = computed(() => {
   }
   return visible
 })
+
+const categoryNav = ref<HTMLElement>()
+const showMoreCategories = ref(false)
+let categoryNavObserver: ResizeObserver | undefined
+
+function updateCategoryOverflow() {
+  const nav = categoryNav.value
+  showMoreCategories.value = !!nav && nav.scrollWidth - nav.clientWidth - nav.scrollLeft > 1
+}
+
+watch(categories, updateCategoryOverflow, { flush: 'post' })
+onMounted(() => {
+  if (!categoryNav.value) return
+  categoryNavObserver = new ResizeObserver(updateCategoryOverflow)
+  categoryNavObserver.observe(categoryNav.value)
+  updateCategoryOverflow()
+})
+onBeforeUnmount(() => categoryNavObserver?.disconnect())
 </script>
 
 <template>
   <div class="flex min-h-(--shell-min-height) flex-col bg-bg text-fg">
     <header class="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur-sm">
-      <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div class="mx-auto grid max-w-7xl grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6 md:grid-cols-[auto_minmax(0,1fr)_auto]">
         <NuxtLink
           to="/"
           class="inline-flex shrink-0 items-center min-h-11 hover:opacity-90"
@@ -56,39 +75,7 @@ const categories = computed(() => {
           >
         </NuxtLink>
 
-        <nav
-          aria-label="Category jump bar"
-          class="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-0.5"
-        >
-          <NuxtLink
-            to="/"
-            :aria-current="route.path === '/' ? 'page' : undefined"
-            class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1 text-xs font-medium whitespace-nowrap"
-            :class="
-              route.path === '/'
-                ? 'bg-surface-2 text-fg underline underline-offset-4'
-                : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
-            "
-          >
-            All
-          </NuxtLink>
-          <NuxtLink
-            v-for="cat in categories"
-            :key="cat.id"
-            :to="`/c/${cat.slug}`"
-            :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
-            class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1 text-xs font-medium whitespace-nowrap"
-            :class="
-              isCategoryActive(cat.slug)
-                ? 'bg-surface-2 text-fg underline underline-offset-4'
-                : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
-            "
-          >
-            {{ cat.name }}
-          </NuxtLink>
-        </nav>
-
-        <div class="flex shrink-0 items-center gap-2">
+        <div class="flex items-center justify-self-end gap-2 md:col-start-3 md:row-start-1">
           <NuxtLink
             to="/mirrors"
             aria-label="Mirror domains"
@@ -168,6 +155,55 @@ const categories = computed(() => {
               <path :d="isCompact ? 'M7 10h10M7 14h10' : 'M7 8h10M7 16h10'" />
             </svg>
           </button>
+        </div>
+
+        <div class="relative col-span-2 min-w-0 pr-6 md:col-span-1 md:col-start-2 md:row-start-1">
+          <nav
+            ref="categoryNav"
+            aria-label="Category jump bar"
+            @scroll.passive="updateCategoryOverflow"
+            class="flex min-w-0 items-center gap-1.5 overflow-x-auto py-0.5"
+          >
+            <NuxtLink
+              to="/"
+              :aria-current="route.path === '/' ? 'page' : undefined"
+              class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1 text-xs font-medium whitespace-nowrap"
+              :class="
+                route.path === '/'
+                  ? 'bg-surface-2 text-fg underline underline-offset-4'
+                  : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
+              "
+            >
+              All
+            </NuxtLink>
+            <NuxtLink
+              v-for="cat in categories"
+              :key="cat.id"
+              :to="`/c/${cat.slug}`"
+              :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
+              class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1 text-xs font-medium whitespace-nowrap"
+              :class="
+                isCategoryActive(cat.slug)
+                  ? 'bg-surface-2 text-fg underline underline-offset-4'
+                  : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
+              "
+            >
+              {{ cat.name }}
+            </NuxtLink>
+          </nav>
+          <svg
+            v-if="showMoreCategories"
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="pointer-events-none absolute right-0 top-1/2 size-4 -translate-y-1/2 text-muted"
+          >
+            <path d="m9 6 6 6-6 6" />
+          </svg>
         </div>
       </div>
     </header>

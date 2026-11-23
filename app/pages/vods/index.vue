@@ -147,6 +147,7 @@ useSeoMeta({
       <StateBlock
         v-if="totalVods === 0"
         variant="empty"
+        show-current-events
         message="No archived event replays are listed right now."
       />
 

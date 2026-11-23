@@ -97,7 +97,13 @@
 @layer base {
   :root {
     color-scheme: dark;
-    scroll-padding-top: calc(var(--spacing-target) + 2 * var(--spacing-3) + var(--focus-scroll-gutter));
+    --category-scrollbar-size: var(--spacing-2);
+    --header-row-clearance: calc(var(--spacing-target) + 2 * var(--spacing-3) + var(--spacing-1) + var(--category-scrollbar-size) + var(--focus-scroll-gutter));
+    scroll-padding-top: calc(var(--header-row-clearance) + var(--spacing-target) + var(--spacing-2));
+
+    @media (width >= 48rem) {
+      scroll-padding-top: var(--header-row-clearance);
+    }
   }
   :root.light,
   :root[data-theme="light"] { color-scheme: light; }
@@ -124,7 +130,22 @@
 
   nav.overflow-x-auto {
     scroll-padding-inline: var(--spacing-2);
+    scrollbar-width: thin;
     scrollbar-color: var(--color-control) var(--color-bg);
+
+    @supports selector(::-webkit-scrollbar) {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+
+      &::-webkit-scrollbar {
+        height: var(--category-scrollbar-size);
+      }
+
+      &::-webkit-scrollbar-thumb {
+        background: var(--color-control);
+        border-radius: var(--radius-control);
+      }
+    }
   }
 
   nav.overflow-x-auto a:focus-visible {

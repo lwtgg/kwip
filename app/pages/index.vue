@@ -119,6 +119,9 @@ const hasVisibleStreams = computed(() =>
 
 const heroStream = computed(() => heroEntry.value?.stream ?? null)
 const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
+const otherLiveStreams = computed(() =>
+  liveNowStreams.value.filter(stream => stream.uri_name !== heroStream.value?.uri_name),
+)
 
 const nextUpStreams = computed(() => {
   if (activeFilter.value !== 'all') return []
@@ -354,9 +357,9 @@ useSeoMeta({
 
         <!-- Live now rail -->
         <Rail
-          v-if="activeFilter !== 'upcoming' && liveNowStreams.length > 0"
+          v-if="activeFilter !== 'upcoming' && otherLiveStreams.length > 0"
           :title="isStale ? 'Last listed availability' : 'Live now'"
-          :streams="liveNowStreams"
+          :streams="otherLiveStreams"
           :now="nowSeconds"
           :stale="isStale"
         />
