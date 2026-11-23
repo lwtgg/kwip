@@ -55,3 +55,10 @@ Dead-stream health signal, per-event poster quality, 390 px sweep, archive searc
 league CDNs (ESPN `a.espncdn.com/i/teamlogos/...` verified `200`, soccer by numeric id). Same composite is
 reachable from our `name` and `colors`, but it needs a curated team-alias table and two extra requests per
 card, so it waits until the supplement work lands.
+
+**Idea (owner, 2026-11-23): a Stats view.** Live player and team statistics inside the player surface,
+for supported live and recorded events, as a tab next to the sources rather than a page away. The
+directory already knows the two teams from the fixture name, and league summary APIs publish the same
+figures, so this is a read of someone else's JSON, not new media. Open questions before it can be
+briefed: which leagues actually carry per-player data, how it is attributed when our name match is a
+guess, refresh cadence, and what the view shows for the 24/7 channels that have no fixture at all.
