@@ -65,3 +65,10 @@ directory already knows the two teams from the fixture name, and league summary 
 figures, so this is a read of someone else's JSON, not new media. Open questions before it can be
 briefed: which leagues actually carry per-player data, how it is attributed when our name match is a
 guess, refresh cadence, and what the view shows for the 24/7 channels that have no fixture at all.
+
+**Parked mid-flight (2026-11-23).** `task/47-zlive` (commit `c3eb865`, brief `.prompts/47-zlive-supplement.md`)
+implements zlive as a 24/7 supplement. The implementer's gate passed and `pnpm test` (143) plus `pnpm build`
+re-verify green on the branch, tree clean, nothing merged or deployed. The review against
+`.prompts/47-review.md` never completed — the reviewer sat in model-capacity retries. Next session: finish
+that review, iterate to pass, then merge, gate, upload with `/tmp/kwip-flip.toml`, deploy and verify.
+Production is `c334cc52` (restore layout).
