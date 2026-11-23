@@ -32,6 +32,9 @@ Competitors make far more than their quality justifies. Research is done (`docs/
 
 Score, clock, period, lineups, per-player numbers, driven from the match rather than the listing. Two layers: match state next to the player, and a stats panel that appears only when a game is on. Needs a data provider with a usable free tier.
 
+The owner asked for the per-player layer on 2026-11-23; the shape is noted under §6 (a Stats view on the
+player surface). It needs a data provider first, so §2's provider work is the dependency.
+
 ## 5. De-vibecoding
 
 The design pass fixed the mechanics; the look is still generic. Target the things that read as generated: default type scale, evenly rounded cards, one accent doing every job, no editorial hierarchy, no texture. Budget a real art direction pass with reference sets, not another item list.
