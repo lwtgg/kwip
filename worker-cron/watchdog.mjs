@@ -1,0 +1,216 @@
+const minute = 60_000
+export const alertKey = 'cron-feed-alert.json'
+const repo = 'https://api.github.com/repos/lwtgg/kwip'
+const positive = (value) => Number.isSafeInteger(value) && value > 0
+
+export function alertBudget(ageMs, recovering = false) {
+  return recovering || (ageMs !== null && ageMs > 15 * minute) ? 5 : 0
+}
+
+export function decideAlert(result, previous = {}, now, hold = {}) {
+  const healthy = result.ageMs !== null && result.ageMs <= 12 * minute && result.decision === 'fresh'
+  const state = { ...previous }
+  if (healthy) return { state: {}, action: positive(previous.issue) || previous.pendingCreate || previous.recovering ? 'close' : 'none', healthy: true }
+  state.since = previous.since ?? now
+  state.hardTicks = result.ageMs > 45 * minute ? (previous.hardTicks ?? 0) + 1 : 0
+  const rejected = result.dispatch === 'failed' && result.status >= 400 && result.status < 500 && result.status !== 408
+  state.rejections = rejected ? (previous.rejections ?? 0) + 1 : 0
+  const gracePassed = result.ageMs === null ? now - state.since >= 15 * minute : result.ageMs > 15 * minute
+  const suppressed = hold.paused === true || hold.hold === true || Date.parse(hold.retryNotBefore) > now
+  let reason
+  if (state.hardTicks >= 2) reason = 'manifest-too-old'
+  if (result.decision === 'stalled') reason = 'stalled'
+  if (state.rejections >= 2) reason = 'dispatch-rejected'
+  if (['manifest', 'cooldown-read', 'cooldown-write', 'cooldown-release'].includes(result.stage) && [401, 403].includes(result.status)) reason = 'r2-credentials-rejected'
+  if (previous.workflowDisabled) reason = 'workflow-disabled'
+  if (['invalid-r2-credentials', 'missing-github-token', 'workflow-paused', 'workflow-disabled'].includes(result.reason)) reason = result.reason
+  if (['list-runs', 'reconcile-run', 'dispatch'].includes(result.stage) && [401, 403].includes(result.status)) reason = 'github-token-rejected'
+  return { state, healthy: false, reason, action: !suppressed && gracePassed && reason ? 'notify' : 'none' }
+}
+
+export function decideIssue(action, state, issues, now) {
+  const issue = issues[0]
+  if (action === 'close') return issue ? { action: 'close', issue } : { action: 'none' }
+  if (action !== 'notify') return { action: 'none' }
+  if (!issue) return { action: state.pendingCreate || state.issue ? 'unconfirmed' : 'create' }
+  const notifiedAt = Math.max(state.notifiedAt ?? 0, Date.parse(issue.updated_at) || 0)
+  return { action: now - notifiedAt >= 30 * minute ? 'comment' : 'none', issue }
+}
+
+function object(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+}
+
+// All alert failures are contained here. No provider response or credential is logged.
+export async function runAlerts(env, now, result, context, request) {
+  const healthy = result.decision === 'fresh' && result.ageMs <= 12 * minute
+  const observedSince = context.reservation?.attemptAt
+  const budgetAge = result.ageMs ?? (Number.isSafeInteger(observedSince) ? Math.max(0, now - observedSince) : null)
+  if (!healthy && !alertBudget(budgetAge)) return { action: 'grace' }
+  let stage = 'state-read'
+  try {
+    const bucket = bindingStorage(env.WATCHDOG_STATE, context.countBinding) ?? context.bucket
+    if (!bucket) return { action: 'error', reason: 'alert-storage-unavailable' }
+    let hold = {}
+    if (!healthy) {
+      stage = 'backoff-read'
+      // Carry this value throughout the tick; never read it a second time.
+      const backoff = await bucket.read('backoff.json')
+      if (backoff && !object(backoff.value)) throw new Error('invalid-backoff')
+      hold = backoff?.value ?? {}
+    }
+    stage = 'state-read'
+    const stored = await bucket.read(alertKey)
+    if (stored && (!object(stored.value) || !/^"[^"]+"$/.test(stored.etag ?? ''))) throw new Error('invalid-alert-state')
+    const previous = stored?.value ?? (Number.isSafeInteger(observedSince) ? { since: observedSince } : {})
+    // A new verification starts new consecutive-failure counters, even when
+    // healthy ticks intentionally did not write stale bookkeeping back to R2.
+    const generation = context.manifest?.listsVerifiedAt
+    const history = generation && previous.verifiedAt !== generation
+      ? { ...previous, hardTicks: 0, rejections: 0, since: now } : previous
+    const decision = decideAlert(result, history, now, hold)
+    const state = decision.state
+    if (!healthy && generation) state.verifiedAt = generation
+    let action = decision.action
+    // An ambiguous create is reconciled even when the manifest has recovered.
+    if (healthy && previous.pendingCreate) action = 'close'
+    if (healthy && action === 'none') return { action: 'none' }
+    let output = { action: 'none' }
+    const github = async (url, options = {}) => {
+      if (!env.GITHUB_REFRESH_TOKEN) throw new Error('missing-github-token')
+      const response = await request(url, {
+        redirect: 'manual', signal: AbortSignal.timeout(10_000), ...options,
+        headers: {
+          Accept: 'application/vnd.github+json', Authorization: `Bearer ${env.GITHUB_REFRESH_TOKEN}`,
+          'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'kwip-feed-cron',
+          'Content-Type': 'application/json',
+        },
+      })
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {})
+        throw new Error(response.status === 403 && stage !== 'workflow-state' ? 'missing-issues-scope' : 'alert-github-error')
+      }
+      return response
+    }
+    // Workflow state belongs to the workflow metadata, not its run statuses.
+    // Probe on non-notifying stale ticks and persist a disabled observation;
+    // the following tick can notify without exceeding the five-call budget.
+    if (!healthy && action === 'none' && env.GITHUB_REFRESH_TOKEN &&
+        hold.paused !== true && hold.hold !== true && !(Date.parse(hold.retryNotBefore) > now)) {
+      stage = 'workflow-state'
+      const workflow = await github(`${repo}/actions/workflows/feed-refresh.yml`)
+      const metadata = await workflow.json()
+      if (typeof metadata.state !== 'string') throw new Error('invalid-workflow-state')
+      state.workflowDisabled = metadata.state === 'disabled_manually' || metadata.state === 'disabled_inactivity' || metadata.state === 'disabled' || metadata.state === 'paused'
+    }
+    if (action !== 'none') {
+      stage = 'search'
+      const query = new URLSearchParams({ q: 'repo:lwtgg/kwip is:issue is:open label:feed-stale', per_page: '1', sort: 'created', order: 'asc' })
+      const search = await github(`https://api.github.com/search/issues?${query}`)
+      const found = await search.json()
+      if (!Array.isArray(found.items) || found.incomplete_results !== false || !Number.isSafeInteger(found.total_count) ||
+          found.total_count < found.items.length || (found.total_count > 0 && !found.items.length) ||
+          found.items.some((issue) => !positive(issue.number) || issue.state !== 'open' || issue.pull_request ||
+            issue.repository_url !== repo)) throw new Error('invalid-issue-search')
+      let selected = decideIssue(action, previous, found.items, now)
+      if (!found.items.length && previous.pendingCreate && !positive(previous.issue)) {
+        // An empty search is not proof that a pending create failed, even on
+        // recovery: GitHub search can lag behind an accepted mutation.
+        return { action: 'unconfirmed', reason: 'alert-create-unconfirmed' }
+      }
+      if (!found.items.length && positive(previous.issue)) {
+        stage = 'issue-read'
+        const response = await github(`${repo}/issues/${previous.issue}`)
+        const known = await response.json()
+        if (known.number !== previous.issue || !['open', 'closed'].includes(known.state)) throw new Error('invalid-known-issue')
+        if (known.state === 'open') {
+          selected = healthy ? decideIssue(action, previous, [known], now) : { action: 'none', issue: known }
+        } else {
+          delete state.issue
+          delete state.pendingCreate
+          selected = { action: 'none' }
+        }
+      }
+      output = { action: selected.action, ...(selected.issue ? { issue: selected.issue.number } : {}) }
+      if (selected.issue) {
+        state.issue = selected.issue.number
+        delete state.pendingCreate
+      }
+      if (selected.action === 'unconfirmed') {
+        state.pendingCreate = true
+        // Never repeat a possibly accepted create after a timeout, crash, or index lag.
+        // Search on subsequent ticks; an operator can clear the key after confirming absence.
+        output.reason = 'alert-create-unconfirmed'
+      }
+      const runId = context.reservation?.runId
+      const body = [
+        `Reason: ${decision.reason ?? result.reason ?? result.decision}`,
+        `Manifest age: ${result.ageMs === null ? 'unknown' : `${Math.floor(result.ageMs / minute)} minutes`}`,
+        `Last generation: ${context.manifest?.commitId ?? 'unknown'}`,
+        'Reservation: cron-dispatch-cooldown.json',
+        ...(positive(runId) ? [`Run: https://github.com/lwtgg/kwip/actions/runs/${runId}`] : []),
+      ].join('\n')
+      if (['create', 'comment', 'close'].includes(selected.action)) {
+        // Persist intent before a mutation. CAS excludes overlapping ticks and also
+        // throttles comments when GitHub accepts one but its response is lost.
+        if (selected.action === 'create') state.pendingCreate = true
+        state.notifiedAt = now
+        if (selected.action === 'close') state.recovering = true
+        stage = 'state-write'
+        const claim = await bucket.writeReservation(state, stored, alertKey)
+        if (!claim) return { action: 'conflict' }
+        stage = selected.action
+        if (selected.action === 'create') {
+          const response = await github(`${repo}/issues`, { method: 'POST', body: JSON.stringify({
+            title: 'Feed refresh stalled', labels: ['feed-stale'], body,
+          }) })
+          await response.body?.cancel().catch(() => {})
+        } else if (selected.action === 'comment') {
+          const response = await github(`${repo}/issues/${selected.issue.number}/comments`, {
+            method: 'POST', body: JSON.stringify({ body }),
+          })
+          await response.body?.cancel().catch(() => {})
+        } else {
+          const recovery = `Recovered: manifest age ${Math.floor(result.ageMs / minute)} minutes; feed verification resumed.`
+          const response = await github(`${repo}/issues/${selected.issue.number}`, {
+            method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'completed',
+              body: `${selected.issue.body ?? ''}\n\n${recovery}` }),
+          })
+          await response.body?.cancel().catch(() => {})
+          stage = 'state-write'
+          const cleared = await bucket.writeReservation({}, claim, alertKey)
+          if (!cleared) return { ...output, reason: 'alert-state-conflict' }
+        }
+        return output
+      }
+    }
+    // No mutation was needed; persist observations for the next stale tick.
+    stage = 'state-write'
+    if (healthy && !Object.keys(previous).length) return output
+    const saved = await bucket.writeReservation(state, stored, alertKey)
+    return saved ? output : { action: 'conflict' }
+  } catch (error) {
+    const reasons = ['missing-issues-scope', 'missing-github-token', 'invalid-issue-search', 'alert-create-unconfirmed']
+    return { action: 'error', stage, reason: reasons.includes(error.message) ? error.message : `alert-${stage}-failed` }
+  }
+}
+
+// The binding keeps invalid S3 credentials observable without a second secret.
+function bindingStorage(binding, count = () => {}) {
+  if (!binding) return undefined
+  return {
+    async read(key) {
+      count()
+      const value = await binding.get(key)
+      return value ? { value: await value.json(), etag: value.httpEtag } : null
+    },
+    async writeReservation(value, previous, key) {
+      count()
+      const saved = await binding.put(key, JSON.stringify(value), {
+        onlyIf: new Headers(previous ? { 'If-Match': previous.etag } : { 'If-None-Match': '*' }),
+        httpMetadata: { contentType: 'application/json' },
+      })
+      return saved ? { etag: saved.httpEtag } : null
+    },
+  }
+}

@@ -29,6 +29,14 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   const logs = new EventEmitter()
   let redirectAt
   let reservation
+  let alertRecord
+  let hold
+  let manifestValue = {}
+  let issueRecord
+  let runStatus = 'completed'
+  let issueFailure
+  let lastAlert
+  let lastMetrics
   const redirect = () => new Response(null, {
     status: 302, headers: { Location: 'https://redirect.invalid/secret' },
   })
@@ -49,7 +57,14 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       const signed = request.headers.get('authorization')
       seen.push({ method: request.method, host: url.host, path: url.pathname, auth: signed })
       if (url.origin === endpoint) {
-        if (url.pathname.endsWith('/current.json')) return Response.json({})
+        if (url.pathname.endsWith('/current.json')) return Response.json(manifestValue)
+        if (url.pathname.endsWith('/backoff.json')) return hold ? Response.json(hold) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
+        if (url.pathname.endsWith('/cron-feed-alert.json')) {
+          if (request.method === 'GET') return alertRecord ? Response.json(alertRecord, { headers: { ETag: '"alert"' } }) : new Response('<Code>NoSuchKey</Code>', { status: 404 })
+          assert.equal(request.headers.get(alertRecord ? 'if-match' : 'if-none-match'), alertRecord ? '"alert"' : '*')
+          alertRecord = await request.json()
+          return new Response(null, { headers: { ETag: '"alert"' } })
+        }
         if (request.method === 'GET') {
           return reservation
             ? Response.json(reservation, { headers: { ETag: '"reserved"' } })
@@ -62,6 +77,22 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
         return new Response(null, { headers: { ETag: '"reserved"' } })
       }
       if (url.host === 'api.github.com') {
+        if (url.pathname.endsWith('/actions/workflows/feed-refresh.yml')) return Response.json({ state: 'active' })
+        if (url.pathname === '/search/issues') {
+          assert.match(url.searchParams.get('q'), /label:feed-stale/)
+          return Response.json({ total_count: issueRecord?.state === 'open' ? 1 : 0, incomplete_results: false,
+            items: issueRecord?.state === 'open' ? [issueRecord] : [] })
+        }
+        if (url.pathname.endsWith('/issues')) {
+          if (issueFailure) return new Response(null, { status: issueFailure })
+          issueRecord = { ...await request.json(), number: 7, state: 'open', repository_url: 'https://api.github.com/repos/lwtgg/kwip', updated_at: new Date().toISOString() }
+          return Response.json(issueRecord, { status: 201 })
+        }
+        if (url.pathname.endsWith('/issues/7/comments')) return Response.json({ id: 1 }, { status: 201 })
+        if (url.pathname.endsWith('/issues/7') && request.method === 'PATCH') {
+          Object.assign(issueRecord, await request.json())
+          return Response.json(issueRecord)
+        }
         if (url.pathname.endsWith('/runs')) {
           if (redirectAt === 'list-runs') return redirect()
           if (reservation) {
@@ -73,7 +104,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
           }
           return Response.json({ total_count: 0, workflow_runs: [] })
         }
-        if (url.pathname.endsWith('/actions/runs/42')) return Response.json({ id: 42, status: 'completed' })
+        if (url.pathname.endsWith('/actions/runs/42')) return Response.json({ id: 42, status: runStatus })
         if (url.pathname.endsWith('/dispatches')) {
           return redirectAt === 'dispatch' ? redirect() : new Response(null, { status: 204 })
         }
@@ -92,33 +123,122 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
     const [line] = await logged
     assert.doesNotMatch(line, /workerd-r2-key|workerd-r2-secret|workerd-github-token/)
     assert.ok(seen.every(({ host }) => host === 'api.github.com' || host === new URL(endpoint).host))
-    return JSON.parse(line)
+    const { alert, refreshSubrequests, alertSubrequests, subrequests, ...resultRecord } = JSON.parse(line)
+    lastAlert = alert
+    lastMetrics = { refreshSubrequests, alertSubrequests, subrequests }
+    assert.equal(subrequests, seen.length)
+    assert.ok(alertSubrequests <= 5)
+    return resultRecord
   }
 
   assert.deepEqual(await tick(), {
     event: 'feed_refresh_tick', ageMs: null, decision: 'dispatch', dispatch: 'accepted', status: 204,
   })
-  assert.equal(seen.length, 9)
+  assert.equal(lastMetrics.refreshSubrequests, 9)
   assert.match(seen[0].auth, /^AWS4-HMAC-SHA256 /)
-  assert.equal(seen.at(-1).method, 'POST')
+  assert.ok(seen.some((call) => call.path.endsWith('/dispatches') && call.method === 'POST'))
 
   for (const phase of ['list-runs', 'dispatch']) {
     const result = await tick(phase)
     assert.equal(result.stage, phase)
     assert.equal(result.status, 302)
-    assert.equal(seen.length, phase === 'list-runs' ? 3 : 10)
+    assert.equal(lastMetrics.refreshSubrequests, phase === 'list-runs' ? 3 : 10)
   }
 
   reservation = { attemptAt: Date.now() - 11 * 60_000, attemptId: 'test-attempt' }
   const failure = await tick('list-runs')
   assert.equal(failure.stage, 'reconcile-run')
   assert.equal(failure.status, 302)
-  assert.equal(seen.length, 4)
+  assert.equal(lastMetrics.refreshSubrequests, 4)
   assert.equal(reservation.unresolvedTicks, 1)
   assert.equal((await tick()).decision, 'run-identified')
   assert.equal(reservation.runId, 42)
-  assert.equal(seen.length, 4)
+  assert.equal(lastMetrics.refreshSubrequests, 4)
   assert.equal((await tick()).decision, 'attempt-dead')
   assert.ok(Number.isSafeInteger(reservation.clearedAt))
-  assert.equal(seen.length, 4)
+  assert.equal(lastMetrics.refreshSubrequests, 4)
+
+  // Same bundled scheduled handler: durable state and all issue mutation paths.
+  reservation = { attemptAt: Date.now() - 40 * 60_000, runId: 42 }
+  runStatus = 'in_progress'
+  manifestValue = { listsVerifiedAt: new Date(Date.now() - 46 * 60_000).toISOString(), commitId: 'workerd-generation' }
+  alertRecord = undefined
+  await tick()
+  assert.equal(lastAlert.action, 'none')
+  await tick()
+  assert.equal(lastAlert.action, 'create')
+  assert.equal(lastMetrics.alertSubrequests, 5)
+  assert.equal(issueRecord.title, 'Feed refresh stalled')
+  await tick()
+  assert.equal(lastAlert.action, 'none')
+  issueRecord.updated_at = new Date(Date.now() - 31 * 60_000).toISOString()
+  alertRecord.notifiedAt = Date.now() - 31 * 60_000
+  await tick()
+  assert.equal(lastAlert.action, 'comment')
+  assert.equal(lastMetrics.alertSubrequests, 5)
+  manifestValue.listsVerifiedAt = new Date().toISOString()
+  await tick()
+  assert.equal(lastAlert.action, 'close')
+  assert.equal(issueRecord.state, 'closed')
+  assert.match(issueRecord.body, /Recovered: manifest age 0 minutes/)
+  await tick()
+  assert.equal(lastMetrics.alertSubrequests, 0)
+  assert.equal(lastMetrics.subrequests, 2)
+
+  manifestValue.listsVerifiedAt = new Date(Date.now() - 60 * 60_000).toISOString()
+  alertRecord = { hardTicks: 1, verifiedAt: manifestValue.listsVerifiedAt }
+  issueFailure = 403
+  await tick()
+  assert.equal(lastAlert.reason, 'missing-issues-scope')
+  assert.equal(seen.filter((call) => call.path.endsWith('/issues') && call.method === 'POST').length, 1)
+
+  // Real native R2 bindings, including the returned ETag used by recovery CAS.
+  for (const scenario of ['invalid-s3', 'revoked-s3', 'recovery']) {
+    const nativeLogs = new EventEmitter()
+    let nativeIssue = scenario === 'recovery' ? { number: 7, state: 'open',
+      repository_url: 'https://api.github.com/repos/lwtgg/kwip', body: 'Incident' } : undefined
+    const native = new Miniflare(convertV4MiniflareOptions({
+      modules: true,
+      script: readFileSync(join(output, 'index.js'), 'utf8'), compatibilityDate,
+      r2Buckets: ['WATCHDOG_STATE'],
+      bindings: { R2_BUCKET: bucket, R2_CREDENTIALS: scenario === 'invalid-s3' ? '{}' : JSON.stringify(credentials),
+        GITHUB_REFRESH_TOKEN: 'workerd-github-token' },
+      handleStructuredLogs({ message }) { if (message.includes('feed_refresh_tick')) nativeLogs.emit('tick', message) },
+      outboundService: async (request) => {
+        const url = new URL(request.url)
+        if (url.origin === endpoint) return scenario === 'recovery'
+          ? Response.json({ listsVerifiedAt: new Date().toISOString() }) : new Response(null, { status: 403 })
+        if (url.pathname === '/search/issues') return Response.json({ incomplete_results: false,
+          total_count: nativeIssue?.state === 'open' ? 1 : 0, items: nativeIssue?.state === 'open' ? [nativeIssue] : [] })
+        if (url.pathname.endsWith('/issues') && request.method === 'POST') {
+          nativeIssue = { ...await request.json(), number: 7, state: 'open', repository_url: 'https://api.github.com/repos/lwtgg/kwip' }
+          return Response.json(nativeIssue, { status: 201 })
+        }
+        if (request.method === 'PATCH') {
+          Object.assign(nativeIssue, await request.json())
+          return Response.json(nativeIssue)
+        }
+        return new Response(null, { status: 500 })
+      },
+    }))
+    t.after(() => native.dispose())
+    const nativeBucket = await native.getR2Bucket('WATCHDOG_STATE')
+    await nativeBucket.put('current.json', JSON.stringify({ listsVerifiedAt: new Date(Date.now() - (scenario === 'recovery' ? 0 : 60 * 60_000)).toISOString() }))
+    await nativeBucket.put('cron-feed-alert.json', JSON.stringify(scenario === 'recovery'
+      ? { issue: 7 } : { since: Date.now() - 20 * 60_000 }))
+    const logged = once(nativeLogs, 'tick', { signal: AbortSignal.timeout(5_000) })
+    assert.equal((await (await native.getWorker()).scheduled()).outcome, 'ok')
+    const [line] = await logged
+    const record = JSON.parse(line)
+    assert.equal(record.alert.action, scenario === 'recovery' ? 'close' : 'create')
+    assert.ok(record.alertSubrequests <= 5)
+    if (scenario === 'recovery') {
+      assert.equal(nativeIssue.state, 'closed')
+      assert.deepEqual(await (await nativeBucket.get('cron-feed-alert.json')).json(), {})
+    } else {
+      assert.equal(record.reason, scenario === 'invalid-s3' ? 'invalid-r2-credentials' : 'http-error')
+      assert.match(nativeIssue.body, scenario === 'invalid-s3' ? /invalid-r2-credentials/ : /r2-credentials-rejected/)
+    }
+  }
+
 })

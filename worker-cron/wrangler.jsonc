@@ -11,11 +11,12 @@
   "vars": {
     "R2_BUCKET": "kwip-feed-prod"
   },
+  "r2_buckets": [{ "binding": "WATCHDOG_STATE", "bucket_name": "kwip-feed-prod" }],
   "secrets": {
     "required": ["GITHUB_REFRESH_TOKEN", "R2_CREDENTIALS"]
   },
   "limits": {
-    "subrequests": 10
+    "subrequests": 15
   },
   "observability": {
     "enabled": true,

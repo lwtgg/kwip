@@ -135,18 +135,22 @@ procedure](worker-cron/README.md#recover-a-stalled-or-legacy-reservation).
 The GitHub schedule stays enabled and both triggers use the existing
 concurrency group.
 
-The approved ceiling is ten subrequests per tick on Workers Paid, against
+The approved ceiling is fifteen subrequests per tick on Workers Paid, against
 the deployment budget of 1,000 subrequests per invocation. A fresh tick
-without a pending attempt reads both the manifest and reservation. A
+reads the manifest and alert state. A
 reconciliation tick uses at most four subrequests. A dispatch tick uses nine,
 with a tenth if GitHub explicitly rejects the dispatch and the Worker releases
-the reservation.
+the reservation. Alerting adds at most five requests after the 15-minute
+manifest-age grace; routine healthy ticks add none. Recovery with an open alert
+uses the recovery path described in [the watchdog runbook](worker-cron/README.md#watchdog).
 
 Merge the workflow input `cron_attempt` to `main` before deploying the updated
 pinger, so GitHub accepts and labels its dispatches.
 
 Provision `GITHUB_REFRESH_TOKEN` as a fine-grained GitHub token for
-`lwtgg/kwip` with **Actions: Read and write**. Install it directly with
+`lwtgg/kwip` with **Actions: Read and write** and **Issues: Read and write**.
+Alert creation is inert until the existing Actions-only token is replaced.
+Provision the `feed-stale` issue label before enabling alerts. Install it directly with
 Wrangler. `R2_CREDENTIALS` is the production entry from the publisher's
 `.r2-credentials.json` shape. Use a `kwip-feed-prod`-scoped R2 Object Read &
 Write credential for the cooldown object. From the repository root:

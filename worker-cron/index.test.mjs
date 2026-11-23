@@ -466,7 +466,12 @@ test('the scheduled entrypoint exposes only a cron handler and logs one controll
   await worker.scheduled({ scheduledTime: now + 5 * minute }, env)
   assert.equal(log.mock.callCount(), 2)
   for (const [i, { arguments: [line] }] of log.mock.calls.entries()) {
-    assert.deepEqual(JSON.parse(line), {
+    const { alert, alertSubrequests, refreshSubrequests, subrequests, ...logged } = JSON.parse(line)
+    assert.equal(alert.action, 'grace')
+    assert.equal(alertSubrequests, 0)
+    assert.equal(refreshSubrequests, 1)
+    assert.equal(subrequests, 1)
+    assert.deepEqual(logged, {
       event: 'feed_refresh_tick', ageMs: null, decision: 'error', dispatch: 'skipped', stage: 'manifest',
       reason: i === 0 ? 'invalid-manifest-json' : 'request-timeout',
     })
