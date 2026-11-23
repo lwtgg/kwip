@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useStreams } from '~/composables/useFeed'
 
 const { siteName } = useRuntimeConfig().public
@@ -36,20 +37,33 @@ const categories = computed(() => {
   }
   return visible
 })
-function revealSportLink(event: FocusEvent) {
-  if (event.target instanceof HTMLAnchorElement) {
-    event.target.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
-  }
+
+const categoryNav = ref<HTMLElement>()
+const showMoreCategories = ref(false)
+let categoryNavObserver: ResizeObserver | undefined
+
+function updateCategoryOverflow() {
+  const nav = categoryNav.value
+  showMoreCategories.value = !!nav && nav.scrollWidth - nav.clientWidth - nav.scrollLeft > 1
 }
+
+watch(categories, updateCategoryOverflow, { flush: 'post' })
+onMounted(() => {
+  if (!categoryNav.value) return
+  categoryNavObserver = new ResizeObserver(updateCategoryOverflow)
+  categoryNavObserver.observe(categoryNav.value)
+  updateCategoryOverflow()
+})
+onBeforeUnmount(() => categoryNavObserver?.disconnect())
 </script>
 
 <template>
   <div class="flex min-h-(--shell-min-height) flex-col bg-bg text-fg">
-    <header class="sticky top-0 z-40 border-b border-border bg-bg">
-      <div class="mx-auto flex max-w-fixtures flex-wrap items-center justify-between gap-x-2 gap-y-1 px-4 py-2 sm:px-6 md:flex-nowrap">
+    <header class="sticky top-0 z-40 border-b border-border bg-bg/95 backdrop-blur-sm">
+      <div class="mx-auto grid max-w-7xl grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6 md:grid-cols-[auto_minmax(0,1fr)_auto]">
         <NuxtLink
           to="/"
-          class="inline-flex shrink-0 items-center min-h-target hover:opacity-90"
+          class="inline-flex shrink-0 items-center min-h-11 hover:opacity-90"
         >
           <img
             src="/logo.png"
@@ -61,19 +75,12 @@ function revealSportLink(event: FocusEvent) {
           >
         </NuxtLink>
 
-        <div class="flex shrink-0 items-center gap-2">
-          <NuxtLink
-            to="/vods"
-            :aria-current="route.path === '/vods' ? 'page' : undefined"
-            class="inline-flex min-h-target items-center rounded-control px-2 text-metadata font-medium text-fg hover:underline"
-          >
-            Archive
-          </NuxtLink>
+        <div class="flex items-center justify-self-end gap-2 md:col-start-3 md:row-start-1">
           <NuxtLink
             to="/mirrors"
             aria-label="Mirror domains"
             title="Mirror domains"
-            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
+            class="inline-flex h-target w-target items-center justify-center rounded-listing border border-control-surface bg-surface text-muted hover:border-control hover:text-fg"
           >
             <svg
               aria-hidden="true"
@@ -95,7 +102,7 @@ function revealSportLink(event: FocusEvent) {
             type="button"
             :aria-label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
             :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
+            class="inline-flex h-target w-target items-center justify-center rounded-listing border border-control-surface bg-surface text-muted hover:border-control hover:text-fg"
             @click="toggleTheme"
           >
             <svg
@@ -132,7 +139,7 @@ function revealSportLink(event: FocusEvent) {
             :aria-pressed="isCompact"
             :aria-label="isCompact ? 'Compact layout' : 'Comfortable layout'"
             :title="densityAction"
-            class="inline-flex size-target items-center justify-center rounded-control border border-control-canvas text-muted hover:border-control hover:bg-surface-2 hover:text-fg"
+            class="inline-flex h-target w-target items-center justify-center rounded-[var(--radius)] border border-control-surface bg-surface text-muted hover:border-control hover:text-fg"
             @click="toggleDensity"
           >
             <svg
@@ -149,39 +156,55 @@ function revealSportLink(event: FocusEvent) {
             </svg>
           </button>
         </div>
-        <nav
-          aria-label="Category jump bar"
-          class="sport-scroll flex min-w-0 basis-full items-center gap-1 overflow-x-auto md:flex-1"
-          @focusin="revealSportLink"
-        >
-          <NuxtLink
-            to="/"
-            :aria-current="route.path === '/' ? 'page' : undefined"
-            class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 text-metadata font-medium whitespace-nowrap"
-            :class="
-              route.path === '/'
-                ? 'bg-surface-2 text-fg underline underline-offset-4'
-                : 'text-muted hover:bg-surface-2 hover:text-fg'
-            "
-          >
-            All
-          </NuxtLink>
-          <NuxtLink
-            v-for="cat in categories"
-            :key="cat.id"
-            :to="`/c/${cat.slug}`"
-            :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
-            class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 text-metadata font-medium whitespace-nowrap"
-            :class="
-              isCategoryActive(cat.slug)
-                ? 'bg-surface-2 text-fg underline underline-offset-4'
-                : 'text-muted hover:bg-surface-2 hover:text-fg'
-            "
-          >
-            {{ cat.name }}
-          </NuxtLink>
-        </nav>
 
+        <div class="relative col-span-2 min-w-0 pr-6 md:col-span-1 md:col-start-2 md:row-start-1">
+          <nav
+            ref="categoryNav"
+            aria-label="Category jump bar"
+            @scroll.passive="updateCategoryOverflow"
+            class="flex min-w-0 items-center gap-1.5 overflow-x-auto py-0.5"
+          >
+            <NuxtLink
+              to="/"
+              :aria-current="route.path === '/' ? 'page' : undefined"
+              class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1 text-xs font-medium whitespace-nowrap"
+              :class="
+                route.path === '/'
+                  ? 'bg-surface-2 text-fg underline underline-offset-4'
+                  : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
+              "
+            >
+              All
+            </NuxtLink>
+            <NuxtLink
+              v-for="cat in categories"
+              :key="cat.id"
+              :to="`/c/${cat.slug}`"
+              :aria-current="isCategoryActive(cat.slug) ? 'page' : undefined"
+              class="shrink-0 inline-flex min-h-target min-w-target items-center justify-center rounded-control px-3 py-1 text-xs font-medium whitespace-nowrap"
+              :class="
+                isCategoryActive(cat.slug)
+                  ? 'bg-surface-2 text-fg underline underline-offset-4'
+                  : 'bg-surface text-muted hover:bg-surface-2 hover:text-fg'
+              "
+            >
+              {{ cat.name }}
+            </NuxtLink>
+          </nav>
+          <svg
+            v-if="showMoreCategories"
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="pointer-events-none absolute right-0 top-1/2 size-4 -translate-y-1/2 text-muted"
+          >
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+        </div>
       </div>
     </header>
 
@@ -190,12 +213,12 @@ function revealSportLink(event: FocusEvent) {
     </div>
 
     <footer class="mt-(--footer-gap) border-t border-border bg-surface">
-      <div class="mx-auto flex max-w-fixtures flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
+      <div class="mx-auto flex max-w-7xl flex-col items-start justify-between gap-4 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:px-6">
         <p>{{ siteName }} · Live sports event directory</p>
         <nav aria-label="Footer navigation" class="flex flex-wrap items-center gap-4">
-          <NuxtLink to="/vods" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Archive</NuxtLink>
-          <NuxtLink to="/about" class="inline-flex min-h-target min-w-target items-center hover:text-fg">About</NuxtLink>
-          <NuxtLink to="/mirrors" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Mirrors</NuxtLink>
+          <NuxtLink to="/vods" class="hover:text-fg inline-flex min-h-11 items-center">Archive</NuxtLink>
+          <NuxtLink to="/about" class="hover:text-fg inline-flex min-h-11 items-center">About</NuxtLink>
+          <NuxtLink to="/mirrors" class="hover:text-fg inline-flex min-h-11 items-center">Mirrors</NuxtLink>
         </nav>
       </div>
     </footer>

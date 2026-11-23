@@ -106,7 +106,7 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-fixtures space-y-(--category-section-gap) px-4 py-(--page-padding) sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--category-section-gap) px-4 py-(--page-padding) sm:px-6">
     <div class="flex flex-col justify-between gap-x-4 gap-y-(--stack-gap) sm:flex-row sm:items-center">
       <div class="space-y-1">
         <nav aria-label="Breadcrumb" class="text-xs text-muted">
@@ -114,7 +114,7 @@ useSeoMeta({
           <span class="mx-1.5">/</span>
           <span class="text-fg">{{ categoryTitle }}</span>
         </nav>
-        <h1 class="text-event font-semibold text-fg">
+        <h1 class="listing-display text-2xl text-fg sm:text-3xl">
           {{ categoryTitle }}
         </h1>
       </div>
@@ -169,14 +169,14 @@ useSeoMeta({
         "
       />
 
-      <div v-else class="fixture-list">
+      <div v-else class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">
         <StreamCard
           v-for="stream in filteredStreams"
           :key="stream.id"
           :stream="stream"
           heading-level="h2"
-          :stale="isStale"
           :now="nowSeconds"
+          :stale="isStale"
         />
       </div>
     </template>

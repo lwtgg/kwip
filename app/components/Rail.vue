@@ -7,18 +7,17 @@ const props = withDefaults(
     category?: string
     streams: FeedStreamItem[]
     now?: number
+    stale?: boolean
     linkBase?: string
     metricLabel?: 'viewers' | 'views'
-    featuredUri?: string
-    stale?: boolean
-    replayDateMap?: Record<number, string>
+    countdownMap?: Record<number, string>
   }>(),
   {
     category: undefined,
     now: undefined,
     linkBase: '/live',
     metricLabel: 'viewers',
-    replayDateMap: undefined,
+    countdownMap: undefined,
   },
 )
 
@@ -38,30 +37,45 @@ const categoryHref = computed(() => {
 </script>
 
 <template>
-  <section v-if="streams.length" class="space-y-(--card-gap)">
-    <div class="flex flex-wrap items-center gap-x-4">
-      <h2 class="text-section font-semibold text-fg">{{ title }}</h2>
+  <section v-if="streams.length > 0" class="space-y-(--card-gap)">
+    <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
+      <h2 class="listing-display text-lg text-fg">
+        <NuxtLink
+          v-if="categoryHref"
+          :to="categoryHref"
+          class="inline-flex items-center gap-1.5 min-h-11 hover:underline"
+        >
+          <span>{{ title }}</span>
+          <span aria-hidden="true" class="text-sm text-muted">→</span>
+        </NuxtLink>
+        <span v-else>{{ title }}</span>
+      </h2>
       <NuxtLink
         v-if="categoryHref"
         :to="categoryHref"
-        class="inline-flex min-h-target items-center gap-1 text-metadata font-medium text-muted hover:text-fg hover:underline"
+        class="inline-flex min-h-target items-center gap-1 text-xs font-medium text-muted hover:underline"
       >
-        {{ linkBase === '/vods' ? `${category} replays` : `All ${category} events` }}
-        <span aria-hidden="true">→</span>
+        View all <span class="listing-numeric">({{ streams.length }})</span>
       </NuxtLink>
     </div>
-    <div class="fixture-list">
-      <StreamCard
+
+    <div
+      class="flex flex-col gap-(--rail-gap) md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:p-(--focus-scroll-gutter) md:has-[:focus-visible]:snap-none"
+    >
+      <div
         v-for="stream in streams"
         :key="stream.id"
-        :stream="stream"
-        :now="now"
-        :to="`${linkBase}/${stream.uri_name}`"
-        :metric-label="metricLabel"
-        :replay-date="replayDateMap?.[stream.id]"
-        :stale="stale"
-        :featured="featuredUri === stream.uri_name"
-      />
+        class="w-full md:w-72 md:shrink-0 md:snap-start xl:w-80"
+      >
+        <StreamCard
+          :stream="stream"
+          :now="now"
+          :stale="stale"
+          :to="`${linkBase}/${stream.uri_name}`"
+          :metric-label="metricLabel"
+          :countdown="countdownMap?.[stream.id] || ''"
+        />
+      </div>
     </div>
   </section>
 </template>

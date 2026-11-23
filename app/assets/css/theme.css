@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme {
+@theme static {
   --color-bg: #0c100f;
   --color-surface: #1b201e;
   --color-surface-2: #2c3430;
@@ -15,8 +15,11 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --default-font-family: var(--font-sans);
   --radius: var(--radius-card);
-  --radius-control: 0.5rem;
-  --radius-card: 0.75rem;
+  --radius-control: 0.375rem;
+  --radius-card: 0.375rem;
+  --radius-panel: 0.5rem;
+  --radius-listing: var(--radius-control);
+  --font-display: var(--font-sans);
   --spacing-1: 0.25rem;
   --spacing-2: 0.5rem;
   --spacing-3: 0.75rem;
@@ -24,34 +27,31 @@
   --spacing-6: 1.5rem;
   --spacing-8: 2rem;
   --spacing-target: 2.75rem;
-  --spacing-fixture: 4.75rem;
-  --spacing-fixture-time: 5rem;
-  --spacing-fixture-poster: 3rem;
-  --container-fixtures: 64rem;
-  --text-section: 1.375rem;
-  --text-section--line-height: 1.75rem;
-  --text-event: 1.75rem;
-  --text-event--line-height: 2.125rem;
-  --text-fixture: 1.0625rem;
-  --text-fixture--line-height: 1.5rem;
   --text-metadata: 0.8125rem;
   --text-metadata--line-height: 1.125rem;
-  --shadow-overlay: 0 6px 20px rgb(0 0 0 / 0.14);
+  --text-feature: clamp(2rem, 5vw, 4.5rem);
+  --text-feature--line-height: 1.08;
+  --spacing-feature-art: 20rem;
+  --spacing-listing-thumb: 4.5rem;
 }
 
 :root {
   --focus-ring: var(--color-accent);
   --focus-ring-width: 0.125rem;
-  --divider-width: 1px;
   --focus-ring-inset: calc(-1 * var(--focus-ring-width));
+  --focus-scroll-gutter: calc(2 * var(--focus-ring-width));
+  --card-pad: 0.875rem;
   --card-gap: 0.5rem;
+  --grid-gap: 1rem;
+  --rail-gap: 1rem;
   /* Layout density sets the shell minimum, page padding, section gaps, and heading stacks. */
   --page-padding: 1.5rem;
   --section-gap: 2rem;
   --stack-gap: 1rem;
   --shell-min-height: 100dvh;
   --related-heading-gap: 0.75rem;
-  --replay-header-gap: 0.75rem;
+  --player-tools-padding: var(--spacing-4);
+  --replay-header-gap: var(--spacing-4);
   --category-section-gap: 1.5rem;
   --footer-gap: 3rem;
   --banner-leaderboard-width: 970px;
@@ -63,13 +63,16 @@
 }
 
 [data-density='compact'] {
-  --spacing-fixture: 3.75rem;
+  --card-pad: 0.625rem;
   --card-gap: 0.25rem;
+  --grid-gap: 0.625rem;
+  --rail-gap: 0.625rem;
   --page-padding: 0.5rem;
   --section-gap: 0.5rem;
   --stack-gap: 0.25rem;
   --shell-min-height: 0;
   --related-heading-gap: 0.1875rem;
+  --player-tools-padding: var(--spacing-1);
   --replay-header-gap: 0.1875rem;
   --category-section-gap: 0.375rem;
   --footer-gap: 0.75rem;
@@ -94,11 +97,12 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --header-clearance: calc(var(--spacing-4) + var(--divider-width) + 2 * var(--focus-ring-width));
-    scroll-padding-top: calc(2 * var(--spacing-target) + var(--spacing-1) + var(--header-clearance));
+    --category-scrollbar-size: var(--spacing-2);
+    --header-row-clearance: calc(var(--spacing-target) + 2 * var(--spacing-3) + var(--spacing-1) + var(--category-scrollbar-size) + var(--focus-scroll-gutter));
+    scroll-padding-top: calc(var(--header-row-clearance) + var(--spacing-target) + var(--spacing-2));
 
     @media (width >= 48rem) {
-      scroll-padding-top: calc(var(--spacing-target) + var(--header-clearance));
+      scroll-padding-top: var(--header-row-clearance);
     }
   }
   :root.light,
@@ -115,8 +119,8 @@
   }
 
   ::selection {
-    background: var(--color-accent);
-    color: var(--color-accent-fg);
+    background: var(--color-fg);
+    color: var(--color-bg);
   }
 
   :focus-visible {
@@ -126,7 +130,22 @@
 
   nav.overflow-x-auto {
     scroll-padding-inline: var(--spacing-2);
+    scrollbar-width: thin;
     scrollbar-color: var(--color-control) var(--color-bg);
+
+    @supports selector(::-webkit-scrollbar) {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+
+      &::-webkit-scrollbar {
+        height: var(--category-scrollbar-size);
+      }
+
+      &::-webkit-scrollbar-thumb {
+        background: var(--color-control);
+        border-radius: var(--radius-control);
+      }
+    }
   }
 
   nav.overflow-x-auto a:focus-visible {
@@ -142,57 +161,28 @@
   }
 }
 
-@utility fixture-row {
-  display: grid;
-  grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) var(--spacing-fixture-poster);
-  align-items: center;
-  min-block-size: var(--spacing-fixture);
-  gap: var(--spacing-3);
-  padding: var(--spacing-2) var(--spacing-3);
-
-  &[data-featured] {
-    grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) auto;
-
-    &[data-wide-matchup] {
-      @media (width < 40rem) {
-        grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr);
-        row-gap: var(--spacing-2);
-
-        .fixture-action {
-          grid-column-start: 2;
-        }
-      }
-    }
-
-    @media (width >= 40rem) {
-      grid-template-columns: var(--spacing-fixture-time) minmax(0, 1fr) auto var(--spacing-fixture-poster);
-    }
-  }
+@utility listing-display {
+  font-family: var(--font-display);
+  font-weight: 850;
 }
 
-@utility fixture-list {
-  background: var(--color-surface);
-  border-radius: var(--radius-card);
-
-  & > * + * {
-    border-block-start: thin solid var(--color-border);
-  }
-
-  & > :first-child {
-    border-start-start-radius: inherit;
-    border-start-end-radius: inherit;
-  }
-
-  & > :last-child {
-    border-end-start-radius: inherit;
-    border-end-end-radius: inherit;
-  }
+@utility listing-numeric {
+  font-variant-numeric: tabular-nums;
 }
 
-@utility sport-scroll {
-  background:
-    linear-gradient(var(--color-bg), var(--color-bg)) left / var(--spacing-3) 100% local no-repeat,
-    linear-gradient(var(--color-bg), var(--color-bg)) right / var(--spacing-3) 100% local no-repeat,
-    linear-gradient(to right, var(--color-border), transparent) left / var(--spacing-3) 100% scroll no-repeat,
-    linear-gradient(to left, var(--color-border), transparent) right / var(--spacing-3) 100% scroll no-repeat;
+@utility listing-rule {
+  border-block-end: thin solid var(--color-border);
+  padding-block-end: var(--card-gap);
+}
+
+@utility listing-hero {
+  border-block-start: thin solid var(--listing-hero-rule, var(--color-border));
+}
+
+@utility listing-live {
+  --listing-hero-rule: var(--color-accent);
+}
+
+@utility listing-hero-art {
+  contain: size;
 }

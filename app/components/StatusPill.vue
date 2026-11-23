@@ -39,10 +39,10 @@ const accessibleTime = computed(() => {
 </script>
 
 <template>
-  <span class="text-metadata font-medium text-muted tabular-nums">
+  <span class="inline-flex flex-wrap items-center gap-x-1 rounded-control bg-surface-2 px-2.5 py-0.5 text-metadata font-semibold text-fg tabular-nums">
     <!-- The clock moves between the server render and hydration. -->
     <time v-if="statusTime" :datetime="statusTime.toISOString()" :aria-label="accessibleTime" data-allow-mismatch="text attribute">{{ status.text }}</time>
     <span v-else :aria-label="status.aria" data-allow-mismatch="text attribute">{{ status.text }}</span>
-    <span v-if="stale" class="block">Unconfirmed</span>
+    <span v-if="stale" class="text-muted">· Unconfirmed</span>
   </span>
 </template>

@@ -102,6 +102,7 @@ function replaceHostTokens<T>(value: T, host: string): T {
 // for seed reads and SSR after the upstream or R2 budgets are exhausted.
 export const FEED_DEADLINES_MS = {
   upstream: 1_500,
+  fallbackUpstream: 1_000,
   identity: 300,
   cacheMatch: 250,
   snapshot: 1_000,
@@ -154,8 +155,8 @@ async function fetchFromBase<T extends { success: boolean }>(
   stage: 'primary' | 'mirror' | 'seed',
   assets?: FeedAssets,
   onRequestError?: () => void,
+  duration: number = stage === 'seed' ? FEED_DEADLINES_MS.seed : FEED_DEADLINES_MS.upstream,
 ): Promise<T> {
-  const duration = stage === 'seed' ? FEED_DEADLINES_MS.seed : FEED_DEADLINES_MS.upstream
   const payload = await withinFeedDeadline(endpoint, stage, duration, async (signal) => {
     let payload: unknown
     if (assets && URL.canParse(url) && new URL(url).origin === requestUrl.origin) {
@@ -230,16 +231,18 @@ export async function fetchFeed<T extends { success: boolean }>(
   const resolveUrl = (base: string) => resolveEndpointUrl(base, requestUrl, endpoint)
   const primaryUrl = resolveUrl(config.feedBase || '/fixtures')
   const mirrorUrl = config.feedMirrorBase ? resolveUrl(config.feedMirrorBase) : null
+  // A fallback batch still needs time for the snapshot retry and seed before SSR.
+  const upstreamBudget = snapshotFallback?.upstreamOnly ? FEED_DEADLINES_MS.fallbackUpstream : FEED_DEADLINES_MS.upstream
   let networkFailure = false
   try {
     return await fetchFromBase<T>(fetcher, primaryUrl, requestUrl, host, endpoint.kind, 'primary', assets, () => {
       networkFailure = true
-    })
+    }, upstreamBudget)
   } catch (err) {
     let upstreamError = err
     if ((networkFailure || err instanceof FeedTimeoutError) && mirrorUrl && mirrorUrl !== primaryUrl) {
       try {
-        return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, endpoint.kind, 'mirror', assets)
+        return await fetchFromBase<T>(fetcher, mirrorUrl, requestUrl, host, endpoint.kind, 'mirror', assets, undefined, upstreamBudget)
       } catch (error) {
         upstreamError = error
       }

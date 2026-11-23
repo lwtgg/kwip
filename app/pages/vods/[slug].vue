@@ -83,10 +83,10 @@ const detail = computed<FeedVodDetail | null>(() => {
 
 function humanizeSlug(rawSlug: string): string {
   const last = rawSlug.split('/').filter(Boolean).pop() || ''
-  if (!last) return 'Event Replay'
+  if (!last) return 'Event replay'
   return last
     .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .replace(/^\w/, (ch) => ch.toUpperCase())
 }
 
 // Review #11: every state renders the page `h1`, including loading, error, and empty.
@@ -164,6 +164,7 @@ const isoEventDate = computed(() =>
   parsedEventDate.value ? parsedEventDate.value.toISOString() : undefined,
 )
 
+const placeholderColor = computed(() => detail.value?.colors?.[0] || 'var(--color-surface-2)')
 
 function vodToCardItem(vod: FeedVodItem, fallbackCat: string): FeedStreamItem {
   return {
@@ -225,29 +226,37 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
 </script>
 
 <template>
-  <div class="mx-auto max-w-fixtures space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+    <StateBlock
+      v-if="isStale && detail"
+      variant="stale"
+      message="Archive listings may be out of date. The last update was more than 20 minutes ago."
+      @retry="handleRetryFeed"
+    />
+
     <!-- Header rendered in all states so loading, error, and empty still expose the page h1 -->
     <div class="space-y-(--replay-header-gap)">
-      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-2 text-xs text-muted">
+      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <NuxtLink to="/" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Home</NuxtLink>
         <span>/</span>
         <NuxtLink to="/vods" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Archive</NuxtLink>
+        <span>/</span>
+        <span class="truncate text-fg">{{ pageHeading }}</span>
       </nav>
 
-      <h1 class="text-event font-semibold text-fg">
+      <h1 class="listing-display wrap-anywhere text-2xl text-fg sm:text-3xl">
         {{ pageHeading }}
       </h1>
 
-      <div v-if="detail" class="flex flex-wrap items-center gap-3 text-xs text-muted">
-        <span v-if="detail.tag" class="rounded-control bg-surface-2 px-3 py-1 font-medium text-fg">
+      <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
+        <span v-if="detail.tag" class="rounded-listing bg-surface-2 px-2.5 py-0.5 font-medium text-fg">
           {{ detail.tag }}
         </span>
-        <time v-if="formattedEventDate" :datetime="isoEventDate" class="tabular-nums">
-          {{ formattedEventDate }}
+        <time v-if="formattedEventDate" :datetime="isoEventDate" class="listing-numeric">
+          <span v-if="detail.tag">· </span>{{ formattedEventDate }}
         </time>
-        <span class="tabular-nums">{{ formatViewersExact(detail.views ?? 0) }} views</span>
+        <span class="listing-numeric">· {{ formatViewersExact(detail.views ?? 0) }} views</span>
       </div>
-      <StateBlock v-if="isStale && detail" variant="stale" @retry="handleRetryFeed" />
     </div>
 
     <StateBlock
@@ -270,9 +279,9 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
 
     <template v-else>
       <!-- VOD player -->
-      <section aria-label="Replay player" class="overflow-hidden rounded-card bg-surface">
+      <section aria-label="Replay player" class="space-y-2.5">
         <template v-if="detail.source?.type === 'playlist' && detail.source.data && !sourceFailed">
-          <div class="relative aspect-video w-full overflow-hidden bg-black">
+          <div class="relative aspect-video w-full overflow-hidden rounded-listing border border-border bg-black">
             <video
               :key="`${detail.source.data}-${retryNonce}`"
               :src="detail.source.data"
@@ -284,14 +293,15 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
               @error="sourceFailed = true"
             ></video>
           </div>
-          <p class="p-3 text-metadata text-muted">
-            If the replay does not play, try Safari or another browser that supports HLS.
+          <p class="text-xs text-muted">
+            Native HLS stream — use Safari or an HLS-capable browser if it won't play.
           </p>
         </template>
 
         <div
           v-else-if="detail.source?.type === 'link' && detail.source.data"
-          class="relative aspect-video w-full overflow-hidden rounded-control border border-border bg-surface"
+          class="relative aspect-video w-full overflow-hidden rounded-panel bg-surface"
+          :style="{ backgroundColor: placeholderColor }"
         >
           <img
             v-if="detail.poster && !posterError"
@@ -307,15 +317,15 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
             @error="posterError = true"
           >
           <div class="absolute inset-0 grid place-items-center p-3">
-            <div class="flex max-w-full flex-col items-center gap-2 rounded-card bg-surface p-3 text-center">
-              <p class="text-metadata font-medium text-fg">
+            <div class="flex max-w-full flex-col items-center gap-2 rounded-panel bg-surface p-3 text-center">
+              <p class="text-xs font-medium text-muted">
                 External replay source
               </p>
               <a
                 :href="detail.source.data"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="inline-flex items-center min-h-target gap-2 rounded-control bg-accent px-4 py-2 wrap-anywhere text-sm font-semibold text-accent-fg hover:underline"
+                class="inline-flex min-h-target items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-accent-fg hover:underline"
               >
                 <span>Open at source · {{ detail.tag || detail.name }}</span>
                 <svg
@@ -326,7 +336,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  class="size-4 shrink-0"
+                  class="h-4 w-4"
                 >
                   <path d="M7 17 17 7M7 7h10v10" />
                 </svg>
@@ -346,7 +356,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
         <div
           v-else
           role="alert"
-          class="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-control border border-border bg-surface p-6 text-center"
+          class="flex aspect-video w-full flex-col items-center justify-center gap-4 rounded-panel bg-surface p-6 text-center"
         >
           <div class="max-w-md space-y-1.5">
             <p class="text-base font-semibold text-fg">
@@ -358,14 +368,13 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
           </div>
           <button
             type="button"
-            class="min-h-target rounded-control bg-accent px-4 wrap-anywhere text-sm font-semibold text-accent-fg hover:underline"
+            class="min-h-target rounded-control border border-control bg-surface-2 px-4 py-2 text-sm font-medium text-fg hover:underline"
             @click="handleRetrySource"
           >
             Retry source
           </button>
         </div>
       </section>
-
 
       <!-- Recommended VODs rail when non-empty -->
       <Rail
@@ -375,7 +384,7 @@ if (!detail.value && !(validFeedPath('vods', slug.value) && isSnapshotUnavailabl
         :now="nowSeconds"
         link-base="/vods"
         metric-label="views"
-        :replay-date-map="recommendedDateMap"
+        :countdown-map="recommendedDateMap"
       />
     </template>
   </div>

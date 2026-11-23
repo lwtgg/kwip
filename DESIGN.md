@@ -1,10 +1,10 @@
 # Design
 
-**Current system: fixture list (2026-11-22).** The product facts are in `PRODUCT.md`; the audit and the
-chosen direction are in `docs/redesign-45a.md`. System face only (SF stack), Touchline tokens in
-`app/assets/css/theme.css`, fixed time/status column, sentence-case matchups, one mint action, selected
-source at the frame edge, reserved banner below the player. The P0/P1 lists below are historical: they
-describe the pre-redesign surfaces and are kept for the reasoning, not as a backlog.
+**Current system: broadcast listings on Touchline.** The home page has a featured event card, a
+compact next-up strip and event rails. Category and replay pages use cards. The SF system stack and
+Touchline tokens live in `app/assets/css/theme.css`. Selected sources sit at the player edge and
+reserved banners follow the featured event or player. See `PRODUCT.md` for product constraints and
+`docs/redesign-45a.md` for the palette audit. The P0/P1 lists below are historical.
 
 ---
 

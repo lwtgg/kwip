@@ -548,7 +548,7 @@ test('one healthy upstream endpoint cannot mix with seed data in the sitemap', a
     },
   } } } })
   await nextTurn()
-  for (const budget of [FEED_DEADLINES_MS.snapshot, FEED_DEADLINES_MS.upstream, FEED_DEADLINES_MS.upstream]) {
+  for (const budget of [FEED_DEADLINES_MS.snapshot, FEED_DEADLINES_MS.fallbackUpstream, FEED_DEADLINES_MS.fallbackUpstream]) {
     context.mock.timers.tick(budget)
     await nextTurn()
   }
