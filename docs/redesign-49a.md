@@ -80,7 +80,7 @@ The central fact becomes the scheduled start time in compact tabular system nume
 
 | Data state | Primary fact | Supporting line |
 |---|---|---|
-| Future known start | Local start time, e.g. `19:30` | `Today · PDT` or explicit date/timezone; locale-appropriate formatting. |
+| Future known start | UTC start time, e.g. `19:30` | `Today · UTC` or explicit date/timezone; locale-appropriate formatting. |
 | Within scheduled window | `Live` | Start time; live is schedule-derived, not a source-health guarantee. |
 | 24/7 | `24/7` | Channel identity, in its own group. |
 | Ended | `Ended` | Event date; replay link only when actually available. |
@@ -97,21 +97,42 @@ Proposed anatomy, read in DOM order as event identity, time/state, supporting fa
 └────────────────────────────────────────────┘
 ```
 
-The card is one link to `/live/<uri>`, with no nested source buttons. At narrow widths or enlarged text, time may stack beneath the name while keeping its visual role. “Central” describes information priority, not a requirement to squeeze three rigid columns into 320 px. Do not force two crests into this version: `FeedStreamItem` has one name and no opponent or crest fields. If structured data arrives later, two genuine opponent identities can flank the fact without changing this v1 contract. Non-match events and channels keep the same complete-name fallback.
+The card is one link to `/live/<uri>`, with no nested source buttons and a minimum 44 px target in either density. At viewport widths of 480 px and wider, the timing column is fixed at 4.5rem; below 480 px, timing stacks under the name. The name wraps to two lines, then clamps with an ellipsis; retain the complete name in the link’s accessible name and on the event page. Optional art is 4:3 on the trailing edge, never leading. Reserve its geometry when present and keep the same treatment in both densities. Desktop uses exactly two card columns inside the bounded content width; smaller screens use one. Store these geometry values as semantic tokens during implementation.
+
+“Central” describes information priority, not a requirement to squeeze three rigid columns into 320 px. Do not force two crests into this version: `FeedStreamItem` has one name and no opponent or crest fields. If structured data arrives later, two genuine opponent identities can flank the fact without changing this v1 contract. Non-match events and channels keep the same complete-name fallback.
 
 ### Colour without team-colour data
 
-Use existing `colors[]` only as poster-derived decorative seeds, never as asserted team colours. Validate the values, mix them conservatively into the theme surface using centrally defined tokens, and keep foreground/muted text on a controlled backing. If a seed is absent, malformed or cannot pass contrast, use the neutral Touchline surface. A neutral card is preferable to false identity. Do not sample images in the browser or add an extraction dependency.
+Use existing `colors[]` only as poster-derived decorative seeds, never as asserted team colours. Apply this deterministic pipeline:
+
+1. Select `colors[0]` when present and non-empty, otherwise `colors[1]`. Accept only a complete case-insensitive `#rgb` or `#rrggbb` string (`^#(?:[0-9a-f]{3}|[0-9a-f]{6})$`). A selected but malformed seed falls back to the neutral surface; do not search for another valid seed.
+2. Expand shorthand, convert sRGB to HSL, preserve hue, cap saturation at 45%, and clamp lightness to 14–18% in dark or 88–92% in light. Values already within a range stay unchanged.
+3. Convert back to sRGB and composite over the current theme’s `surface` at one shared token strength: proposed `--card-tint-strength: 0.5` (50% tint, 50% surface, per-channel sRGB compositing). The same strength applies in both themes and densities; no per-card overrides.
+4. Calculate WCAG contrast for both `fg` and `muted` against the final composite. If either is below 4.5:1, reject the tint and use the unmodified theme `surface`. Missing seeds also use `surface`. Apply this gate to any hover/selected background variant as well; large text does not waive the 4.5:1 tint gate.
+
+Keep opaque token-backed text on this controlled backing. Do not sample images in the browser or add an extraction dependency. A neutral card is preferable to false identity.
 
 Tint is static and subordinate; mint remains the action/focus colour. Text stacking can reproduce the reference’s layered hierarchy using opaque token-backed text, without copying native vibrancy or relying on blend modes over unpredictable images. Both themes must bound tint independently. Any new tint-strength, time-size or layout tokens belong in `theme.css` during implementation, not arbitrary component values.
 
 ### Relevant first, without favourites
 
-Within the selected date and category: scheduled live first, nearest upcoming next, ended events last if present. Keep existing viewer ordering within scheduled live initially; break equal counts by kickoff then stable event identity. Upcoming sorts by start then identity. Put 24/7 outside date-dependent groups, below scheduled live and upcoming, and label it clearly. Deduplicate promoted entries rather than repeating a spotlight in another rail. This changes home selection and requires an explicit implementation spec update before code.
+Within the selected category and status filter, use this group order: **live by viewers descending; upcoming by start ascending; unknown time by name ascending; 24/7; ended newest first** (end timestamp descending). Break live ties by start then event URI; upcoming/ended ties by URI. Name sorting uses a fixed English locale and URI as a tie-breaker; use the same name order for 24/7. Classify 24/7 before inspecting timestamps so channels cannot leak into scheduled groups. Missing/invalid start or an unusable schedule window belongs to unknown time, never inferred live or ended.
+
+Date membership applies to scheduled groups as defined below. Unknown-time and 24/7 groups are undated and labelled separately, after upcoming and before ended in the stated order; they do not acquire a fabricated date. Status filters retain their meaning: Live includes scheduled live and 24/7; Upcoming includes only scheduled upcoming; All includes every eligible group.
+
+Deduplicate by event URI across all groups, retaining the first occurrence in that group order. A promoted entry is the first eligible card in its own group, not a second copy above it; count it once and never repeat it in another rail or group. This changes home selection and requires an explicit implementation spec update before code.
 
 No stars, “For you,” favourites prompts, account screen or storage substitute in v1. Useful defaults replace the ranking benefit of favourites, not personalization itself. No score service, extra backend or database is introduced.
 
-The **date strip is proposed web functionality**, absent today. Show Today and dates actually represented by the loaded schedule, as ordinary reachable links with a selected state and visible overflow. Keep All/Live/Upcoming as distinct status filters. Define selected days in one displayed timezone; the implementation must make SSR and hydration agree before localizing. A day without entries is an empty selection with a Today escape, not a fabricated fixture calendar. Unknown schedule times and 24/7 stay explicitly separate. Archive remains at `/vods`; choosing yesterday must not silently invent replay availability or fetch unsupported history.
+The **date strip is proposed web functionality**, absent today. Its URL contract is `?date=YYYY-MM-DD`. The single display zone is **UTC**, documented beside the strip and used for start times, day membership and Today on both SSR and client. Scheduled event membership is the UTC calendar date of `starts_at`, including events whose window crosses midnight. Do not relocalize into a browser zone. Use locale-aware formatting with `timeZone: 'UTC'`.
+
+Default to today. An absent date, malformed format, impossible date or repeated date query falls back to today with a visible notice: “Showing today in UTC. Choose a date from the schedule.” A valid date outside the loaded schedule remains a valid empty selection; do not silently redirect it to another date. Persist the existing `filter` query when changing dates, and persist `date` when changing All/Live/Upcoming; canonical host behavior remains unchanged.
+
+Offer date links only for dates represented in the loaded schedule, not a generated calendar. Today remains the default and a recovery link even when absent from that schedule; it is not advertised as a populated date. Selected links have an explicit current state and visible overflow. A day without entries has a Today/clear-filter escape. Unknown-time and 24/7 groups are separately labelled undated listings, not evidence that the selected day has scheduled events. Archive remains at `/vods`; choosing yesterday must not invent replay availability or fetch unsupported history.
+
+### Directory banner eligibility
+
+For existing directory banner placements, insert a banner only after the **first populated group**, and only when that group has **three or more unique visible cards** after date/status filtering and URI deduplication. A promoted card counts once as part of its own group. Never insert a banner between that entry and the rest of its group. If the first populated group has one or two cards, omit the directory banner for that selection; a later larger group does not make it eligible. Render nothing before an empty selection, including no empty banner reservation. Once eligible, retain the fixed slot dimensions whether the creative loads or is blocked. This does not add category/replay placements. The event banner remains below the player and its source controls under decision 22.
 
 ### Game sheet becomes an event URL
 
@@ -121,14 +142,14 @@ An event listing links to our event page, which links out to or frames a third-p
 
 ## Page inventory
 
-All treatments below are proposed; shared anatomy applies at phone and desktop widths, with bounded desktop reading width and additional columns only when names remain legible.
+All treatments below are proposed; shared anatomy applies at phone and desktop widths, with one card column on smaller screens and exactly two on desktop inside the bounded reading width.
 
 | Surface | Intended treatment |
 |---|---|
-| Home `/` | Quiet shell; date strip and existing status filters; live/next-up event board before directory banner; separate 24/7 group. No large poster hero and no repeated featured event. |
+| Home `/` | Quiet shell; UTC date strip and persistent status filters; live, upcoming, unknown time, 24/7, ended in the defined order. Banner only after the first populated group if it contains at least three unique visible cards. No large poster hero or repeated promoted entry. |
 | Category `/c/<category>` | Same timing anchor and card anatomy, scoped title and date/status controls; no four-column miniature poster catalogue. Keep category and Home exits. |
 | Event/player `/live/<uri>` | Larger identity/time header, reserved player, adjacent selected source and alternatives, local help; banner after player controls, related events afterward. Upcoming/unavailable state occupies the same player geometry. |
-| Archive `/vods` | Same recognition grammar with replay label and event date; preserve league grouping and actual archive filtering. Existing archive banner follows useful content, never masquerades as a replay. |
+| Archive `/vods` | Same recognition grammar with replay label and event date; preserve league grouping and actual archive filtering. Existing archive banner follows the first populated group only if it contains at least three unique visible cards; otherwise omit it. Never masquerades as a replay. |
 | Replay `/vods/<slug>` | Match identity and real date, then supported third-party playback/link treatment. No invented result. Existing playlist `<video>` branch is a separate playback-policy question; this audit does not remove it or authorize a new native player. No new banner placement. |
 | Stale, across routes | Keep known listings and local Refresh with last-update context; every affected card qualifies availability. No fresh-looking Live urgency or moving progress. Alerting is separate from this UI. |
 | Empty, date/filter/category/archive | Keep heading and controls; say what selection is empty, offer Today/current events or a clear-filter escape. No illustration that displaces recovery. |
@@ -145,9 +166,11 @@ These are acceptance criteria, not measurements from this task.
 
 | Constraint | Required behavior | Evidence before implementation ships |
 |---|---|---|
-| Tinted text | Normal text ≥4.5:1; large text ≥3:1; meaningful controls/focus ≥3:1 against adjacent surfaces. No colour-only status/selection. | Measure composite backgrounds for both themes, normal/hover/selected/focus, worst-case seeds and neutral fallback. Test without colour. |
+| Tinted text | Use the seed/HSL/50% composite pipeline above; both `fg` and `muted` must reach ≥4.5:1 or reject tint for `surface`. Meaningful controls/focus ≥3:1 against adjacent surfaces. No colour-only status/selection. | Measure composite backgrounds for both themes, normal/hover/selected/focus, shorthand/long hex, invalid and missing seeds, clamp boundaries and neutral fallback. Test without colour. |
 | CLS and numerals | Reserve art, crest/fallback if ever supported, timing column, player and banner geometry. Tabular numerals plus enough width for locale/timezone prevent ticking or hydration shifts. | Slow/failed artwork, SSR→hydration and clock-boundary capture; aim for CLS 0 from these elements, total ≤0.1. Recheck 200% text without rigid clipping. |
-| Banner position | Event banner stays below player and source controls. Directory banners follow useful listings. Existing slots remain fixed: desktop 970×90, mobile 320×100; no creative-driven resizing. | Ad on/off/blocked, mobile/desktop; inspect order and reserved geometry. No automatic advertiser navigation on home. |
+| Banner position | Event banner stays below player and source controls. Existing directory slots appear only after the first populated group with ≥3 unique visible cards; omit if that first group has <3. Never split a promoted entry from its group or precede an empty selection. Eligible slots stay fixed: desktop 970×90, mobile 320×100. | Check first-group counts 0/1/2/3, duplicate URIs, promotion, filtered results and a later larger group; ad on/off/blocked at mobile/desktop. No automatic advertiser navigation on home. |
+| Card geometry | Fixed 4.5rem timing column at viewport ≥480 px; timing below name at <480 px. Name clamps to two lines with ellipsis; complete accessible name retained. Optional 4:3 art trails; desktop has two bounded columns. Target ≥44 px in both densities. | Capture 479/480 px boundary, two-column desktop, long names, art absent/failed and 200% text. |
+| Ordering and dates | URI dedupe; live/viewers, upcoming/start, unknown/name, 24/7, ended/newest. `?date=YYYY-MM-DD` uses UTC start-date membership and preserves status query. Missing/invalid date gives Today plus visible notice; valid unloaded dates are empty. | Check UTC midnight/cross-midnight, repeated/impossible/absent dates, valid unloaded date, query persistence, tie-breakers, duplicates and promoted entry appearing once. |
 | Density | Comfortable/compact change spacing only. Same fields, type, card structure, media allocation, ordering and ≥44 px control targets. | Compare both densities; no title/metadata hiding or card-to-row structural switch. |
 | Reduced motion | No animated tint, shader, pulsing status or entrance required. User-triggered transitions respect reduced motion. | OS preference on/off; state remains understandable with motion absent. |
 | Focus | Visible ring survives source remounts; no clipping in cards/date overflow; sticky shell cannot obscure focused controls. Preserve semantic links and selected-state text. | Keyboard through date/status controls, cards, source fallback and help; inspect both themes and densities. |
@@ -171,13 +194,14 @@ Preserve the **actual** current palette rather than silently restoring 45a’s p
 This audit recommends a direction; it does not supersede DECISIONS.md or rewrite DESIGN.md. Only the orchestrator may record binding decision changes. Before implementation, reconcile selection/date semantics with SPEC.md and the design work order.
 
 1. **Card/time prototype:** future changes in `theme.css` and `StreamCard.vue`; compare missing art, unknown time, long event name and 24/7 in both themes. Reject any design that requires invented opponents or a score.
-2. **Directory composition:** future changes in `index.vue`, `c/[category].vue`, `vods/index.vue` and shared rails. Agree on date URL/timezone semantics, apply stable ordering and deduplication, then prove date/status combinations and honest empty states.
+2. **Directory composition:** future changes in `index.vue`, `c/[category].vue`, `vods/index.vue` and shared rails. Apply the UTC `date` query contract, defined group ordering, URI deduplication and first-group banner threshold, then prove date/status combinations and honest empty states.
 3. **Detail continuity:** future changes in `live/[...uri].vue` and `vods/[slug].vue` only for presentation. Verify source focus, fallback, upcoming/end/stale states and banner position before accepting visual parity.
 4. **Acceptance gate:** fresh 390×850 and 1280×850 captures in both themes and densities for home, category, event, loaded player, archive, replay, empty, stale and error; add 320 px/200% text, keyboard, reduced motion, no-JavaScript, bad artwork and ad-blocker cases. Run the repo build/test/dry-run and applicable browser tests. No visual score or performance claim follows from a source detector alone.
 
-Open questions for the next brief (recommendations allow this docs task to finish):
+The five review gaps are resolved above: deterministic tint validation and compositing, fixed responsive card anatomy, complete ordering and URI deduplication, UTC date/query behavior, and first-group banner eligibility. These owner decisions refine the recommendation without changing the source-based critique score or claiming implementation.
 
-- What date query format and SSR timezone should be canonical? Recommend explicit date links with a deterministic initial timezone; only expose dates in the loaded schedule. Do not imply historical feed support.
+Open questions for the next brief:
+
 - Is genuine opponent/crest data planned? Until a feed contract exists, ship intact names and time/state cards; no team parsing or extra asset service.
 - How should the existing playlist replay branch reconcile with the documented no-native-player constraint? Keep that policy decision separate from visual work.
 
@@ -193,3 +217,5 @@ The source detector (`impeccable detect --json app`) returned `[]` with exit 0. 
 - `git diff --check`: passed. Changes are limited to this document and PRODUCT.md; no package.json changes or dependencies.
 
 Logs for this run: `/tmp/49a-build.log`, `/tmp/49a-test.log`, `/tmp/49a-dry.log`. Browser acceptance criteria above remain unexecuted for this docs-only proposal.
+
+After resolving the five owner review gaps, reran `pnpm build` (exit 0), `pnpm test` (144 passing, zero failures), `pnpm exec wrangler deploy --dry-run --outdir /tmp/kwip49a-revision-dry` (exit 0, generated-import warnings), and `git diff --check` (passed). Revision logs: `/tmp/49a-revision-build.log`, `/tmp/49a-revision-test.log`, `/tmp/49a-revision-dry.log`. These checks validate the unchanged application baseline and document whitespace, not the unimplemented visual behavior.

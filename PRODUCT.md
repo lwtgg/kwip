@@ -31,9 +31,10 @@ Visitors browse live, upcoming, and 24/7 listings, open a sport category, or bro
 - Player and banner space is reserved. The event banner follows the player.
 - The web app offers dark and light themes, plus comfortable and compact density.
 - The directory uses third-party media and imagery at their source. It adds no media proxy or native video player.
-- There is no favourites store, native sheet or Live Activities integration in v1. Relevance comes from scheduled live events, then nearest upcoming events; 24/7 channels remain a separate group. This is the proposed ordering, not a claim of personalization.
+- There is no favourites store, native sheet or Live Activities integration in v1. Proposed relevance ordering is live by viewers, upcoming by start, unknown time by name, a separate 24/7 group, then ended newest first. Deduplicate by event URI, including any promoted entry. This is not a claim of personalization.
 - The feed supplies event names and schedule windows, not structured opponents, scores, lineups or play-by-play. Poster colours may inform decoration; they do not identify teams.
-- The proposed web date strip selects dates represented in the available feed. It must not imply a complete calendar or historical results service. Today’s build has status filters only.
+- The proposed web date strip uses `?date=YYYY-MM-DD` with UTC display and start-date membership, keeps the status filter in the query and offers dates from the loaded schedule. Missing or invalid dates show today with a visible notice. It must not imply a complete calendar or historical results service. Today’s build has status filters only.
+- Existing directory banners appear only after the first populated group when it contains at least three unique visible cards; never split a promoted entry from its group or precede an empty selection. The event banner remains below player controls.
 - Keep the Touchline palette and system typography. The direction and its constraints are documented in `docs/redesign-49a.md`; this is a design proposal, not implemented behavior.
 
 ## Product Principles
