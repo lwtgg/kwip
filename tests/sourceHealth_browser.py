@@ -716,7 +716,7 @@ export default {
                             continue
                         expect(page.get_by_role('heading', name=updated['name'], exact=True)).to_be_visible()
                         if mode == 'pitsport-only':
-                            expect(chip).to_have_accessible_name('PitSport · HD, third provider')
+                            expect(chip).to_have_accessible_name('PitSport · HD, second provider')
                             expect(chip).to_have_attribute('aria-pressed', 'true')
                             expect(page.locator('iframe')).to_have_attribute('src', pitsport_url)
                             assert sorted(browser_requests) == ['detail', 'generation', 'provider'], browser_requests
@@ -756,6 +756,66 @@ export default {
             thread.join()
 
 
+def check_zlive_picker(browser, directory, output, width):
+    sources = [
+        dict(name='Primary', type='iframe', default=True, data='https://player.example/primary'),
+        dict(name='Primary backup', type='iframe', default=False, data='https://player.example/backup'),
+        dict(name='Strmfree', type='iframe', default=False, data='https://strmfree.st/embed/fixture', origin='supplement'),
+        dict(name='PitSport', type='iframe', default=False, data='https://pitsport.st/programs/1/play', origin='pitsport'),
+        dict(name='zlive', type='iframe', default=False, data='https://zlive.st/embed/fixture', origin='zlive'),
+        dict(name='zlive backup', type='iframe', default=False, data='https://zlive.st/embed/fixture-backup', origin='zlive'),
+    ]
+    for alternate_providers, ordinal, spoken in (
+        ([], '2nd', 'second'), (['pitsport'], '3rd', 'third'), (['supplement', 'pitsport'], '4th', 'fourth'),
+    ):
+        name = f'zlive-{ordinal}'
+
+        def configure(_):
+            path = directory / f'{name}-assets/fixtures/stream.json'
+            fixture = json.loads(path.read_text())
+            fixture['data'].update(always_live=1, substreams=[], sources=[
+                source for source in sources if source.get('origin') in (None, 'zlive', *alternate_providers)
+            ])
+            path.write_text(json.dumps(fixture))
+            return {}
+
+        with worker(directory, name, output, 'https://advertiser.example', False, variables=configure) as origin:
+            with browser.new_context(viewport={'width': width, 'height': 900}) as context:
+                requests = []
+
+                def serve_zlive(route):
+                    requests.append(route.request.url)
+                    route.fulfill(body='<h1>zlive fixture</h1>', content_type='text/html')
+
+                context.route('https://player.example/**', lambda route: route.fulfill(
+                    body='<h1>Primary fixture</h1>', content_type='text/html',
+                ))
+                context.route('https://zlive.st/**', serve_zlive)
+                page = context.new_page()
+                page.clock.install()
+                assert page.goto(origin + EVENT, wait_until='domcontentloaded').ok
+                primary = page.get_by_role('button', name='Primary', exact=True)
+                expect(primary).to_have_attribute('aria-pressed', 'true')
+                chip = page.get_by_role('button', name=f'zlive, {spoken} provider', exact=True)
+                backup = page.get_by_role('button', name=f'zlive backup, {spoken} provider', exact=True)
+                expect(chip.get_by_text(ordinal, exact=True)).to_be_visible()
+                expect(backup.get_by_text(ordinal, exact=True)).to_be_visible()
+
+                page.add_style_tag(content="main::before { content: ''; display: block; height: 3000px; }")
+                chip.evaluate('(button) => button.click()')
+                expect(chip).to_have_attribute('aria-pressed', 'true')
+                page.clock.fast_forward(20_000)
+                expect(page.locator('iframe')).to_have_count(0)
+                expect(chip).to_have_attribute('aria-pressed', 'true')
+                assert not requests, requests
+
+                page.get_by_text('Loading player embed…', exact=True).scroll_into_view_if_needed()
+                expect(page.locator('iframe')).to_have_attribute('loading', 'lazy')
+                expect(page.frame_locator('iframe').get_by_role('heading', name='zlive fixture')).to_be_visible()
+                assert requests == [sources[4]['data']], requests
+        print(f'{width}px zlive uses {ordinal} and waits for the viewport before requesting the embed')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
@@ -771,6 +831,7 @@ def main():
                 check_late_supplement_shield(browser, directory, args.output.resolve(), width)
                 check_stalled_feed(browser, directory, args.output.resolve(), width)
                 check_snapshot_generation(browser, directory, args.output.resolve(), width)
+                check_zlive_picker(browser, directory, args.output.resolve(), width)
         browser.close()
 
 

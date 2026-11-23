@@ -875,9 +875,10 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
           class="[&:fullscreen>*]:h-full"
         >
           <PlayerFrame
-            :key="`${retryGeneration}:${currentSource.key}`"
+            :key="`${retryGeneration}:${currentSource.origin === 'zlive'}:${currentSource.key}`"
             :src="mounted && !rememberedFailures.includes(currentSource.key) ? currentSource.url : undefined"
             :poster="detail.poster"
+            :lazy="currentSource.origin === 'zlive'"
             :title="`${detail.name} — ${currentSource.label}`"
             :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
             @error="handleFrameError"

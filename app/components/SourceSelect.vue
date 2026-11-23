@@ -62,19 +62,27 @@ function distinctHost(source: SelectableSourceOption) {
   return hint === source.host?.toLowerCase() ? undefined : source.host
 }
 
-const providerOrdinals = {
-  supplement: { short: '2nd', spoken: 'second' },
-  pitsport: { short: '3rd', spoken: 'third' },
-  zlive: { short: '4th', spoken: 'fourth' },
-}
+const providerOrder = [undefined, 'supplement', 'pitsport', 'zlive'] as const
+const ordinals = [
+  { short: '1st', spoken: 'first' },
+  { short: '2nd', spoken: 'second' },
+  { short: '3rd', spoken: 'third' },
+  { short: '4th', spoken: 'fourth' },
+]
+const providerOrdinals = computed(() => {
+  const present = new Set(props.sources.map(source => source.origin))
+  return new Map(providerOrder.filter(origin => present.has(origin))
+    .map((origin, index) => [origin, ordinals[index]] as const))
+})
 
 function chipLabel(source: SelectableSourceOption) {
   const opensAd = props.clickUnder && source.key !== props.modelValue
   const status = chipStatus(source)
-  if (!status && !opensAd && !source.origin) return undefined
+  const ordinal = source.origin && providerOrdinals.value.get(source.origin)
+  if (!status && !opensAd && !ordinal) return undefined
   return source.label +
     (status === 'Failed' ? ', Failed to load' : status ? `, ${status}` : '') +
-    (source.origin ? `, ${providerOrdinals[source.origin].spoken} provider` : '') +
+    (ordinal ? `, ${ordinal.spoken} provider` : '') +
     (opensAd ? '. Opens an advertiser in a new tab' : '')
 }
 
@@ -159,7 +167,7 @@ function onChipKeydown(event: KeyboardEvent, key: string) {
             </span>
             <span v-if="(section.selected || sources.length === 1) && distinctHost(source)" :id="`${id}-host-${section.selected}-${index}`" class="sr-only" aria-hidden="true">{{ source.host }}</span>
           </span>
-          <span v-if="source.origin" aria-hidden="true" class="shrink-0 text-xs">{{ providerOrdinals[source.origin].short }}</span>
+          <span v-if="source.origin" aria-hidden="true" class="shrink-0 text-xs">{{ providerOrdinals.get(source.origin)?.short }}</span>
           <svg
             aria-hidden="true"
             viewBox="0 0 24 24"
