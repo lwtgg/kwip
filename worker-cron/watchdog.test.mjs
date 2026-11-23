@@ -633,3 +633,65 @@ test('a present but rejected alert token is not retried with the refresh token',
   assert.equal(searches[0].auth, 'Bearer rejected-alert-token')
   assert.ok(result.alertSubrequests <= 5)
 })
+
+for (const failure of [503, 403, 302, 'timeout', 'invalid-json', 'invalid-state']) {
+  test(`optional metadata ${failure} cannot lose consecutive hard-age observations`, async () => {
+    const sim = simulation()
+    sim.generationAt = now - 60 * minute
+    sim.put('cron-dispatch-cooldown.json', { attemptAt: now - 50 * minute, runId: 42 })
+    let probes = 0
+    let posts = 0
+    sim.fail = (r) => {
+      if (r.method === 'POST' && r.url.endsWith('/issues')) posts++
+      if (!r.url.endsWith('/actions/workflows/feed-refresh.yml')) return
+      probes++
+      if (failure === 'timeout') return new DOMException('private-secret', 'TimeoutError')
+      if (failure === 'invalid-json') return new Response('private-secret')
+      if (failure === 'invalid-state') return Response.json({ state: null })
+      return new Response('private-secret', { status: failure })
+    }
+    for (let tick = 0; tick < 4; tick++) {
+      const result = await sim.tick(now + tick * 5 * minute)
+      assert.equal(result.ageMs, (60 + tick * 5) * minute)
+      assert.equal(result.decision, 'active-run')
+      assert.equal(result.dispatch, 'skipped')
+      assert.equal(sim.objects.get(alertKey)?.value.hardTicks, tick + 1)
+      if (tick === 0) {
+        assert.equal(result.alert.reason, 'alert-workflow-state-failed')
+        assert.equal(result.alertSubrequests, 4)
+        assert.equal(sim.issues.length, 0)
+      } else {
+        assert.equal(result.alert.action, tick === 1 ? 'create' : 'none')
+        assert.equal(sim.issues.length, 1)
+        assert.match(sim.issues[0].body, /manifest-too-old/)
+      }
+      assert.ok(result.alertSubrequests <= 5)
+      assert.doesNotMatch(JSON.stringify(result), /private-secret/)
+    }
+    assert.equal(probes, 1)
+    assert.equal(posts, 1)
+  })
+}
+
+test('optional metadata failure cannot erase the first explicit dispatch rejection', async () => {
+  const sim = simulation()
+  sim.generationAt = now - 20 * minute
+  sim.fail = (r) => {
+    if (r.url.endsWith('/dispatches')) return new Response(null, { status: 422 })
+    if (r.url.endsWith('/actions/workflows/feed-refresh.yml')) return new Response(null, { status: 503 })
+  }
+  const first = await sim.tick()
+  assert.equal(first.dispatch, 'failed')
+  assert.equal(first.status, 422)
+  assert.equal(first.alert.reason, 'alert-workflow-state-failed')
+  assert.equal(sim.objects.get(alertKey).value.rejections, 1)
+  assert.equal(first.alertSubrequests, 4)
+  const second = await sim.tick(now + 5 * minute)
+  assert.equal(second.dispatch, 'failed')
+  assert.equal(second.status, 422)
+  assert.equal(second.alert.action, 'create')
+  assert.equal(sim.objects.get(alertKey).value.rejections, 2)
+  assert.equal(second.alertSubrequests, 5)
+  assert.equal(second.subrequests, 15)
+  assert.match(sim.issues[0].body, /dispatch-rejected/)
+})

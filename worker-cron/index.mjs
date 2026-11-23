@@ -365,6 +365,7 @@ export async function runWatchdogTick(env, now, request = fetch) {
   const counted = (...args) => { subrequests++; return request(...args) }
   const result = await runTick(env, now, counted, context)
   let refreshSubrequests = subrequests
+  // DECISIONS.md rule 23 puts the best-effort alarm in the pinger; preserve the refresh outcome.
   const alert = await runAlerts(env, now, result, context, counted)
   if (result.decision === 'fresh') refreshSubrequests = Math.min(2, subrequests)
   return { ...result, alert, refreshSubrequests, subrequests,

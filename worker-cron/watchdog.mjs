@@ -126,10 +126,15 @@ export async function runAlerts(env, now, result, context, request) {
     if (!healthy && !unknownFailure && action === 'none' && env.GITHUB_REFRESH_TOKEN &&
         !publisherHeld(hold, now)) {
       stage = 'workflow-state'
-      const workflow = await github(`${repo}/actions/workflows/feed-refresh.yml`, {}, env.GITHUB_REFRESH_TOKEN)
-      const metadata = await workflow.json()
-      if (typeof metadata.state !== 'string') throw new Error('invalid-workflow-state')
-      state.workflowDisabled = metadata.state === 'disabled_manually' || metadata.state === 'disabled_inactivity' || metadata.state === 'disabled' || metadata.state === 'paused'
+      try {
+        const workflow = await github(`${repo}/actions/workflows/feed-refresh.yml`, {}, env.GITHUB_REFRESH_TOKEN)
+        const metadata = await workflow.json()
+        if (typeof metadata.state !== 'string') throw new Error('invalid-workflow-state')
+        state.workflowDisabled = metadata.state === 'disabled_manually' || metadata.state === 'disabled_inactivity' || metadata.state === 'disabled' || metadata.state === 'paused'
+      } catch {
+        // Optional metadata cannot discard the age/rejection observations below.
+        output = { action: 'error', stage, reason: 'alert-workflow-state-failed' }
+      }
     }
     if (action !== 'none') {
       stage = 'search'

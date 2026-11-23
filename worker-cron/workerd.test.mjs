@@ -35,6 +35,7 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   let issueRecord
   let runStatus = 'completed'
   let issueFailure
+  let workflowFailure
   let issuePosts = 0
   let lastAlert
   let lastMetrics
@@ -80,7 +81,8 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
       }
       if (url.host === 'api.github.com') {
         assert.equal(signed, url.pathname.includes('/actions/') ? 'Bearer workerd-github-token' : 'Bearer workerd-alert-token')
-        if (url.pathname.endsWith('/actions/workflows/feed-refresh.yml')) return Response.json({ state: 'active' })
+        if (url.pathname.endsWith('/actions/workflows/feed-refresh.yml')) return workflowFailure
+          ? new Response(null, { status: workflowFailure }) : Response.json({ state: 'active' })
         if (url.pathname === '/search/issues') {
           assert.match(url.searchParams.get('q'), /label:feed-stale/)
           return Response.json({ total_count: issueRecord?.state === 'open' ? 1 : 0, incomplete_results: false,
@@ -183,10 +185,14 @@ test('Workerd scheduled handler dispatches and handles both GitHub redirects wit
   }
   hold = undefined
   alertRecord = undefined
-  await tick()
-  assert.equal(lastAlert.action, 'none')
-  await tick()
+  workflowFailure = 503
+  assert.equal((await tick()).decision, 'active-run')
+  assert.equal(lastAlert.reason, 'alert-workflow-state-failed')
+  assert.equal(alertRecord.hardTicks, 1)
+  assert.equal(lastMetrics.alertSubrequests, 4)
+  assert.equal((await tick()).decision, 'active-run')
   assert.equal(lastAlert.action, 'create')
+  assert.equal(alertRecord.hardTicks, 2)
   assert.equal(lastMetrics.alertSubrequests, 5)
   assert.equal(issueRecord.title, 'Feed refresh stalled')
   await tick()
