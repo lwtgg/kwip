@@ -104,23 +104,23 @@ useSeoMeta({
 </script>
 
 <template>
-  <div class="mx-auto max-w-fixtures space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
     <div class="space-y-1">
       <nav aria-label="Breadcrumb" class="text-xs text-muted">
         <NuxtLink to="/" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Home</NuxtLink>
         <span class="mx-1.5">/</span>
         <span class="text-fg">Archive</span>
       </nav>
-      <h1 class="text-event font-semibold text-fg">
+      <h1 class="listing-display text-2xl text-fg sm:text-3xl">
         Event archive
       </h1>
       <NuxtLink
         v-if="activeFilter"
         to="/vods"
-        class="inline-flex items-center gap-2 text-xs font-medium text-muted min-h-target hover:underline"
+        class="inline-flex items-center gap-1.5 text-xs font-medium text-muted min-h-11 hover:underline"
       >
+        <span aria-hidden="true">←</span>
         <span>All categories</span>
-        <span aria-hidden="true">→</span>
       </NuxtLink>
     </div>
 
@@ -140,6 +140,7 @@ useSeoMeta({
       <StateBlock
         v-if="isStale"
         variant="stale"
+        message="Archive listings may be out of date. The last update was more than 20 minutes ago."
         @retry="handleRefresh"
       />
 
@@ -157,9 +158,10 @@ useSeoMeta({
           :category="rail.category"
           :streams="rail.items"
           :now="nowSeconds"
+          class="[--rail-gap:var(--grid-gap)]"
           link-base="/vods"
           metric-label="views"
-          :replay-date-map="rail.dateLabels"
+          :countdown-map="rail.dateLabels"
         />
 
         <AdSlot format="leaderboard" placement="vods-banner" />

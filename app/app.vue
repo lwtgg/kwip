@@ -23,6 +23,27 @@ useSeoMeta({
   ogType: 'website',
 })
 useOgImage(undefined, siteName)
+
+function revealHorizontalFocus(event: FocusEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLElement) || !target.matches(':focus-visible')) return
+
+  const scroller = target.closest<HTMLElement>('.overflow-x-auto, [class~="md:overflow-x-auto"]')
+  if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
+
+  requestAnimationFrame(() => {
+    if (document.activeElement !== target) return
+    const bounds = scroller.getBoundingClientRect()
+    const item = target.getBoundingClientRect()
+    const style = getComputedStyle(target)
+    const gutter = Math.max(0, Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset))
+    if (item.left - gutter < bounds.left) scroller.scrollLeft += item.left - gutter - bounds.left
+    else if (item.right + gutter > bounds.right) scroller.scrollLeft += item.right + gutter - bounds.right
+  })
+}
+
+onMounted(() => document.addEventListener('focusin', revealHorizontalFocus))
+onBeforeUnmount(() => document.removeEventListener('focusin', revealHorizontalFocus))
 </script>
 
 <template>

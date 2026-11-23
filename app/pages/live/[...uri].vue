@@ -69,14 +69,14 @@ const ReplayLink = defineComponent({
       : replayFallback
   },
 })
-const replayLinkClass = 'text-fg underline hover:decoration-muted inline-flex min-h-target items-center'
+const replayLinkClass = 'text-fg underline hover:decoration-muted inline-flex min-h-11 items-center'
 
 function humanizeUri(uri: string): string {
   const last = uri.split('/').filter(Boolean).pop() || ''
-  if (!last) return 'Live Event'
+  if (!last) return 'Live event'
   return last
     .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .replace(/^\w/, (ch) => ch.toUpperCase())
 }
 
 // Review #11: every state (loading, error, empty, content) renders the page `h1`.
@@ -551,7 +551,6 @@ const categorySlug = computed(() =>
   categoryLabel.value ? slugifyCategory(categoryLabel.value) : '',
 )
 
-
 const relatedStreams = computed<FeedStreamItem[]>(() => {
   const d = detail.value
   if (!d) return []
@@ -728,12 +727,18 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 </script>
 
 <template>
-  <div class="mx-auto max-w-fixtures space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+  <div class="mx-auto max-w-7xl space-y-(--section-gap) px-4 py-(--page-padding) sm:px-6">
+    <StateBlock
+      v-if="isStale && detail"
+      variant="stale"
+      @retry="handleRetryFeed"
+    />
+
     <!-- Header rendered in every state so loading, error, and empty still expose the page h1 -->
     <div class="space-y-(--stack-gap)">
-      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-2 text-xs text-muted">
+      <nav aria-label="Breadcrumb" class="flex flex-wrap items-center gap-1.5 text-xs text-muted">
         <NuxtLink to="/" class="inline-flex min-h-target min-w-target items-center hover:text-fg">Home</NuxtLink>
-        <span v-if="categorySlug" aria-hidden="true">/</span>
+        <span>/</span>
         <NuxtLink
           v-if="categorySlug"
           :to="`/c/${categorySlug}`"
@@ -741,11 +746,15 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
         >
           {{ categoryLabel }}
         </NuxtLink>
+        <span v-if="categorySlug">/</span>
+        <span class="truncate text-fg">{{ pageHeading }}</span>
       </nav>
 
       <div class="space-y-2">
-        <h1 class="wrap-anywhere text-event font-semibold text-fg">{{ pageHeading }}</h1>
-        <div v-if="detail" class="flex flex-wrap items-center gap-x-3 text-metadata text-muted">
+        <h1 class="listing-display wrap-anywhere text-2xl text-fg sm:text-3xl">
+          {{ pageHeading }}
+        </h1>
+        <div v-if="detail" class="flex flex-wrap items-center gap-2.5 text-xs text-muted">
           <StatusPill
             :starts-at="detail.starts_at || 0"
             :ends-at="detail.ends_at || 0"
@@ -753,8 +762,15 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :now="nowSeconds"
             :stale="isStale"
           />
-          <span v-if="detail.tag">{{ detail.tag }}</span>
-          <span class="tabular-nums">{{ formatViewersExact(detail.viewers) }} viewers</span>
+          <NuxtLink
+            v-if="categorySlug"
+            :to="`/c/${categorySlug}`"
+            class="inline-flex min-h-target min-w-target items-center rounded-control bg-surface-2 px-2.5 py-0.5 font-medium text-fg hover:underline"
+          >
+            {{ detail.category_name }}
+          </NuxtLink>
+          <span v-if="detail.tag">· {{ detail.tag }}</span>
+          <span class="listing-numeric">· {{ formatViewersExact(detail.viewers) }} viewers</span>
         </div>
         <LiveProgress
           v-if="detail && !isStale"
@@ -764,7 +780,6 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
           :now="nowSeconds"
           show-label
         />
-        <StateBlock v-if="isStale && detail" variant="stale" @retry="handleRetryFeed" />
       </div>
     </div>
 
@@ -783,12 +798,13 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
     <StateBlock
       v-else-if="!detail"
       variant="empty"
-      message="This event could not be found in the feed."
+      show-current-events
+      message="This event is no longer listed."
     />
 
     <template v-else>
       <!-- Player frame (iframe) or outbound link block or exhausted-chain fallback -->
-      <section aria-label="Event player" class="rounded-card bg-surface">
+      <section aria-label="Event player" class="rounded-panel bg-surface">
         <p v-if="hasEnded" class="w-full px-4 text-metadata text-muted">
           This event has ended.
           <NuxtLink
@@ -931,7 +947,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :noscript-source-key="initialFeedSource?.key"
             @source-click="(event, key) => handleAdvertiserClick(event, 'source', key === activeSourceKey)"
           />
-          <div v-if="shieldIdentity !== null || currentSource?.kind === 'iframe'" class="flex flex-wrap items-center gap-2 border-t border-border p-4 [@media(scripting:none)]:hidden">
+          <div v-if="shieldIdentity !== null || currentSource?.kind === 'iframe'" class="flex flex-wrap items-center gap-2 border-t border-border px-4 py-(--player-tools-padding) [@media(scripting:none)]:hidden">
             <button
               v-if="shieldIdentity !== null"
               type="button"
@@ -997,15 +1013,33 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 
       <AdSlot format="leaderboard" placement="event-banner" />
 
+      <!-- Related streams in same category -->
       <section class="space-y-(--related-heading-gap)">
-        <Rail
-          v-if="relatedStreams.length"
-          :title="`Related in ${detail.category_name}`"
-          :category="detail.category_name"
-          :streams="relatedStreams"
-          :stale="isStale"
-          :now="nowSeconds"
-        />
+        <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
+          <h2 class="listing-display text-lg text-fg">
+            Related in {{ detail.category_name }}
+          </h2>
+          <NuxtLink
+            v-if="categorySlug"
+            :to="`/c/${categorySlug}`"
+            class="inline-flex min-h-11 items-center text-xs font-medium text-muted hover:underline"
+          >
+            More {{ detail.category_name }} →
+          </NuxtLink>
+        </div>
+
+        <div
+          v-if="relatedStreams.length > 0"
+          class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <StreamCard
+            v-for="stream in relatedStreams"
+            :key="stream.id"
+            :stream="stream"
+            :now="nowSeconds"
+            :stale="isStale"
+          />
+        </div>
         <StateBlock
           v-else
           variant="empty"

@@ -123,7 +123,7 @@ function onChipKeydown(event: KeyboardEvent, key: string) {
         role="group"
         :aria-label="section.label"
         class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4"
-        :class="section.selected ? 'border-b border-border bg-surface-2 py-1' : 'py-3'"
+        :class="section.selected ? 'border-b border-border bg-surface-2 py-1' : 'py-(--player-tools-padding)'"
       >
         <span aria-hidden="true" class="text-metadata font-medium text-muted">{{ section.label }}</span>
         <button
@@ -136,7 +136,7 @@ function onChipKeydown(event: KeyboardEvent, key: string) {
           :aria-label="chipLabel(source)"
           :aria-pressed="source.key === modelValue"
           :tabindex="tabStop === source.key ? 0 : -1"
-          class="inline-flex min-h-target min-w-0 max-w-full items-center gap-2 rounded-control border px-3 py-2 text-start text-metadata font-medium hover:bg-surface-2"
+          class="inline-flex min-h-target min-w-target max-w-full items-center gap-2 rounded-control border px-3 py-2 text-start text-metadata font-medium hover:bg-surface-2"
           :class="[
             section.selected ? 'border-transparent bg-surface-2 font-semibold' : 'border-control-surface bg-surface hover:border-control',
             chipStatus(source) ? 'text-muted' : 'text-fg',

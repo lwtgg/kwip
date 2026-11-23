@@ -18,18 +18,26 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
     v-if="variant === 'skeleton'"
     aria-busy="true"
     aria-label="Loading events"
-    class="fixture-list"
+    class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4"
   >
-    <div v-for="idx in skeletonCount" :key="idx" class="fixture-row" aria-hidden="true">
-      <div class="h-3 w-8 rounded-control bg-surface-2" />
-      <div class="h-4 w-2/3 rounded-control bg-surface-2" />
+    <div
+      v-for="idx in skeletonCount"
+      :key="idx"
+      class="overflow-hidden rounded-card bg-surface"
+    >
+      <div class="aspect-video w-full bg-surface-2" />
+      <div class="space-y-(--card-gap) p-(--card-pad)">
+        <div class="h-3.5 w-20 rounded-listing bg-surface-2" />
+        <div class="h-4 w-4/5 rounded-listing bg-surface-2" />
+        <div class="h-4 w-3/5 rounded-listing bg-surface-2" />
+      </div>
     </div>
   </div>
 
   <div
     v-else-if="variant === 'stale'"
     role="status"
-    class="flex flex-wrap items-center justify-between gap-x-3 rounded-card bg-surface-2 px-4 text-metadata text-muted"
+    class="flex flex-wrap items-center justify-between gap-x-3 rounded-panel bg-surface-2 px-4 text-metadata text-muted"
   >
     <span>{{ message || 'Listings may be out of date. The last update was more than 20 minutes ago.' }}</span>
     <button
@@ -44,7 +52,7 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
   <div
     v-else
     :role="variant === 'error' ? 'alert' : 'status'"
-    class="flex flex-wrap items-center justify-between gap-4 rounded-card bg-surface p-4 sm:p-6"
+    class="flex flex-wrap items-center justify-between gap-4 rounded-panel bg-surface p-4 sm:p-6"
   >
     <div v-if="variant === 'error'" class="space-y-1">
       <p class="font-semibold text-fg">Unable to load the event directory</p>
