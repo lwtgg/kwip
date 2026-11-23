@@ -37,7 +37,7 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     host: sourceHost(source.data),
     key,
     ...((source.origin !== 'supplement' || stream.hasPublishedSupplement) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
-    ...(source.origin === 'supplement' || source.origin === 'pitsport'
+    ...(source.origin === 'supplement' || source.origin === 'pitsport' || source.origin === 'zlive'
       ? { origin: source.origin, live: source.live } : {}),
   }))
 
@@ -68,7 +68,7 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     const locale = source.locale ?? (source.origin ? undefined : stream.locale)
     return {
       option,
-      tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
+      tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '', source.origin === 'zlive']) : index,
       viewers: Number(source.viewers) || 0,
     }
   })

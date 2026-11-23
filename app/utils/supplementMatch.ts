@@ -17,8 +17,12 @@ const categories = new Map([
   ['racing', 'motorsport'],
   ['combat', 'boxing'],
 ])
-function teams(name: string): string[] {
+function foldName(name: string): string {
   return name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+}
+
+function teams(name: string): string[] {
+  return foldName(name)
     .split(/(?<![\p{L}\p{N}])(?:vs|v|at)(?![\p{L}\p{N}])/u)
     .map(team => team.trim().split(/\s+/)
       .map(token => token.replace(/[^\p{L}\p{N}]/gu, ''))
@@ -48,4 +52,18 @@ export function findSupplement(
 
 export function slugifyCategory(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
+const channelSuffix = /(?:\s+(?:fhd|hd|uhd|sd|4k|uk|us|usa|gb|backup(?: \d+)?|if .+ lags?))+$/u
+const backupLabel = /\b(?:backup(?: \d+)?|if .+ lags?)\b/u
+
+function foldChannelName(name: string) {
+  return foldName(name).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+export function channelName(name: string) {
+  return foldChannelName(name).replace(channelSuffix, '')
+}
+
+export function isChannelBackup(name: string) {
+  return backupLabel.test(foldChannelName(name).match(channelSuffix)?.[0] ?? '')
 }

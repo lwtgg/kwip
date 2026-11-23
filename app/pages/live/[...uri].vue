@@ -486,7 +486,7 @@ function nextPlayableKey(activeKey: string | null): string | null {
   expireRememberedHealth()
   const activeAt = options.findIndex((source) => source.key === activeKey)
   return options.find((source, index) =>
-    index > activeAt && !failedKeys.value.has(source.key)
+    index > activeAt && (activeKey !== null || source.origin !== 'zlive') && !failedKeys.value.has(source.key)
     && (!seenKeys.has(source.key) || !beforeKeys.has(source.key)),
   )?.key ?? null
 }
@@ -504,7 +504,7 @@ function handleFrameError() {
 }
 
 function handleReloadPlayer() {
-  if (currentSource.value?.origin === 'pitsport' ||
+  if (currentSource.value?.origin === 'pitsport' || currentSource.value?.origin === 'zlive' ||
     (hasPublishedStrmfree.value && currentSource.value?.origin === 'supplement')) {
     retryGeneration.value += 1
     return
@@ -708,7 +708,8 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
   } else if (chainExhausted) {
     expireRememberedHealth()
     const nextKey = options.find(source =>
-      source.origin && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),
+      source.origin && (anchorKey.value !== null || source.origin !== 'zlive')
+      && !seenKeys.has(source.key) && !failedKeys.value.has(source.key),
     )?.key
     if (nextKey) {
       selectedSourceKey.value = nextKey

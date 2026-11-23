@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util'
 import { candidates, collectSourceHealth, nearbyEvent, supplementProbeCap } from './probe-source-health.mjs'
 import {
   dedupePublishedSources, fetchPitSportListing, fetchSupplementListing, fetchSupplementStatuses, matchPublishedSupplement,
-  publishedSupplementSources, supplementEvent,
+  fetchZliveListing, matchZliveSources, publishedSupplementSources, supplementEvent,
 } from './publish-supplements.mjs'
 import { AwsClient } from 'aws4fetch'
 import { feedDetailPath, isSnapshotPath } from '../server/utils/feed-path.ts'
@@ -117,6 +117,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   const matches = []
   const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
   const pitSportListing = fixture ? undefined : fetchPitSportListing(deadline)
+  const zliveListing = fixture ? undefined : fetchZliveListing(deadline)
   const now = Date.now()
 
   async function append(path, bytes) {
@@ -168,16 +169,20 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     if (details.size === count) throw new Error(`Empty ${collection} list`)
   }
 
-  const [listing, pitSport] = await Promise.all([supplementListing, pitSportListing])
+  const [listing, pitSport, zlive] = await Promise.all([supplementListing, pitSportListing, zliveListing])
+  if (zlive) result.zlive = { matched: 0, unmatched: 0, admittedEvents: 0, admittedSources: 0 }
   // Older manifests lack detail metadata. A nonempty listing requires one full refresh to populate it.
   const publishedEvents = current?.supplementEvents
   const needsDetails = [...eventTimes.values()].some(item => nearbyEvent(item, now))
     || publishedEvents?.some(event => nearbyEvent(event, now)
-      || matchPublishedSupplement(event, listing) || matchPublishedSupplement(event, pitSport))
-    || (!publishedEvents && (listing?.streams.length || pitSport?.streams.length))
+      || matchPublishedSupplement(event, listing) || matchPublishedSupplement(event, pitSport)
+      || (zlive?.byName.size && event.always_live === 1
+        && (!event.channelSlug || matchZliveSources(event, zlive).length)))
+    || (!publishedEvents && (listing?.streams.length || pitSport?.streams.length || zlive?.byName.size))
   if (current && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
+    if (zlive) result.zlive.unmatched = publishedEvents?.filter(event => event.always_live === 1).length ?? 0
     return { unchanged: true }
   }
   if (result.providerRequests + details.size > providerRequestLimit) {
@@ -195,15 +200,23 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     if (timing) {
       const item = payload.data
       const event = supplementEvent(item, timing)
+      if (zlive?.byName.size && event.always_live === 1) event.channelSlug = path.split('/').at(-1)
       supplementEvents.push(event)
       const probeItem = { ...event, iframe: item.iframe, sources: item.sources, substreams: item.substreams }
       if (!fixture) probeItems.push(probeItem)
+      const zliveMatch = matchZliveSources(event, zlive)
+      if (zlive && event.always_live === 1) result.zlive[zliveMatch.length ? 'matched' : 'unmatched']++
+      const isPrimary = source => source.data && !['supplement', 'pitsport', 'zlive'].includes(source.origin)
+      const hasPrimary = zliveMatch.length && (item.sources?.some(isPrimary)
+        || (Array.isArray(item.substreams) && item.substreams.some(stream => stream?.sources?.length
+          ? stream.sources.some(isPrimary) : stream?.iframe)))
+      const zliveSources = hasPrimary ? matchZliveSources(event, zlive, item) : []
       if (performance.now() >= supplementDeadline) continue
       const match = matchPublishedSupplement(event, listing)
       const sources = match ? publishedSupplementSources(item, match) : []
       const pitSportSources = matchPublishedSupplement(event, pitSport)?.sources ?? []
-      if (sources.length || pitSportSources.length) {
-        matches.push({ match, sources, pitSportSources, timing: probeItem, payload, entry: entries.at(-1), hash })
+      if (sources.length || pitSportSources.length || zliveSources.length) {
+        matches.push({ match, sources, pitSportSources, zliveSources, timing: probeItem, payload, entry: entries.at(-1), hash })
       }
     }
   }
@@ -226,6 +239,8 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     ...statusMatches.map(match => ({ ...match, supplements: withStatus(match) })),
     ...matches.filter(({ pitSportSources }) => pitSportSources.length)
       .map(match => ({ ...match, supplements: match.pitSportSources })),
+    ...matches.filter(({ zliveSources }) => zliveSources.length)
+      .map(match => ({ ...match, supplements: match.zliveSources })),
   ]
   for (const [index, { payload, entry, timing, hash, supplements: incoming }] of admissions.entries()) {
     if (performance.now() >= supplementDeadline) {
@@ -261,6 +276,10 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     hash[1] = sha256(bytes)
     for (const key of eligible.keys()) eligibleSupplementKeys.add(key)
     for (const [key, source] of pending) supplementProbes.set(key, source)
+    if (supplements[0].origin === 'zlive') {
+      result.zlive.admittedEvents++
+      result.zlive.admittedSources += supplements.length
+    }
     healthReserve = nextReserve
     hasSupplements = true
   }
@@ -427,7 +446,8 @@ function validateManifest(manifest) {
   }
   if (manifest.supplementEvents !== undefined && (!Array.isArray(manifest.supplementEvents)
     || !manifest.supplementEvents.every(event => typeof event?.name === 'string' && Number.isFinite(event.starts_at)
-      && (event.always_live === 0 || event.always_live === 1) && typeof event.categorySlug === 'string'))) {
+      && (event.always_live === 0 || event.always_live === 1) && typeof event.categorySlug === 'string'
+      && (event.channelSlug === undefined || typeof event.channelSlug === 'string')))) {
     throw new Error('Invalid supplement events in current snapshot manifest')
   }
   return payloadId
