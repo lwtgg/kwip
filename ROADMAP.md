@@ -73,3 +73,10 @@ re-verify green on the branch, tree clean, nothing merged or deployed. The revie
 that review (it failed on two defects: `SourceSelect.vue:65` fixes the ordinal by origin so a Primary+zlive
 channel still says "4th", and `PlayerFrame.vue:167` has no lazy attribute on the frame), fix those, then merge, gate, upload with `/tmp/kwip-flip.toml`, deploy and verify.
 Production is `c334cc52` (restore layout).
+
+**Shipped 2026-11-23.** zlive is live as a 24/7 supplement (`bfe8fb6`, version `418829b9`). The first
+production generation after the deploy carried it (`706` matched check: `nfl-network` serves a zlive FHD
+chip as the second provider, our primary stays the default, and no event page carries one). Their host
+began refusing TLS from here (`curl` and Chromium both `000`, connection reset) about twenty minutes after
+the publish, so embed playback is unproven in production and the frame stays lazy and inert meanwhile.
+Re-check `https://zlive.st/embed/<id>` when their host returns.
