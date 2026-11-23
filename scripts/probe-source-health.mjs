@@ -19,6 +19,11 @@ export const probeHosts = new Map([
   // Both player shells can return 200 while the nested player blocks playback.
   ['pitsport.st', { unverified: true }],
   ['embdlol.st', { unverified: true }],
+  ['zlive.st', {
+    path: /^\/embed\/[\w-]+$/,
+    markers: [/<div id="root">/],
+    concurrency: 1,
+  }],
 ])
 
 function registered(url) {
@@ -49,10 +54,11 @@ export const supplementProbeCap = 24
 export function candidates(items, now = Date.now(), { limit = sourceProbeCap, exclude } = {}) {
   const unique = new Map()
   for (const item of items) {
-    if (!nearbyEvent(item, now)) continue
+    const nearby = nearbyEvent(item, now)
+    if (!nearby && Number(item?.always_live) !== 1) continue
     for (const raw of sourceUrls(item)) {
       const entry = registered(raw)
-      if (!entry) continue
+      if (!entry || (!nearby && entry.url.hostname !== 'zlive.st')) continue
       const key = sourceKey(raw)
       if (!unique.has(key) && !exclude?.has(key)) unique.set(key, entry)
       if (unique.size === limit) return unique

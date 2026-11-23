@@ -69,7 +69,7 @@ export interface FeedStreamsResponse {
 export type FeedSourceKind = 'iframe' | 'link'
 
 export interface FeedStreamSource {
-  origin?: 'supplement' | 'pitsport'
+  origin?: 'supplement' | 'pitsport' | 'zlive'
   live?: boolean
   name: string
   default: boolean
@@ -78,7 +78,7 @@ export interface FeedStreamSource {
 }
 
 export function isSupplementSource(source: Pick<FeedStreamSource, 'origin'>) {
-  return source.origin === 'supplement' || source.origin === 'pitsport'
+  return source.origin === 'supplement' || source.origin === 'pitsport' || source.origin === 'zlive'
 }
 
 export interface FeedStreamDetail extends FeedStreamItem {
@@ -373,12 +373,16 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
 
     const sources = raw.sources ?? []
     const publishedSources = publishedDetail.value?.sources ?? []
-    const publishedByKey = new Map(publishedSources.map(source => [sourceKey(source.data), source]))
     const ordered = [
       ...sources.filter(source => !isSupplementSource(source)),
       ...alternatives,
       ...(feed.data.value?.detailGeneration ? [] : sources.filter(isSupplementSource)),
     ]
+    const primaryKeys = new Set(ordered.filter(source => !isSupplementSource(source)).map(source => sourceKey(source.data)))
+    const publishedByKey = new Map(publishedSources.flatMap(source => {
+      const key = sourceKey(source.data)
+      return source.origin === 'zlive' && primaryKeys.has(key) ? [] : [[key, source] as const]
+    }))
     return {
       ...raw,
       ...fixtureItem,

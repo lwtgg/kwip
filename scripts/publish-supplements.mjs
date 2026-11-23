@@ -1,11 +1,11 @@
-import { findSupplement, slugifyCategory } from '../app/utils/supplementMatch.ts'
+import { channelName, findSupplement, isChannelBackup, slugifyCategory } from '../app/utils/supplementMatch.ts'
 import { applySupplementStatus, sourceQualityBand, supplementSources } from '../app/utils/strmfree.ts'
 import { sourceKey } from '../app/utils/sourceIdentity.ts'
 import { nearbyEvent, sourceProbeCap, sourceUrls } from './probe-source-health.mjs'
 
 const api = 'https://strmfree.pk/api/v1'
 
-async function fetchJson(url, deadline) {
+async function fetchJson(url, deadline, maxBytes = 2 * 1024 ** 2) {
   const remaining = Math.floor(deadline - performance.now())
   if (remaining <= 0) return
   try {
@@ -21,7 +21,7 @@ async function fetchJson(url, deadline) {
     let length = 0
     for await (const chunk of response.body) {
       length += chunk.length
-      if (length > 2 * 1024 ** 2) return
+      if (length > maxBytes) return
       chunks.push(chunk)
     }
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))
@@ -103,8 +103,84 @@ export async function fetchPitSportListing(deadline) {
   return { streams: [...events.values()] }
 }
 
+const zlive = 'https://zlive.st'
+const zliveSports = new Set([
+  'sports', 'f1', 'soccer', 'football', 'american-football', 'australian-football',
+  'basketball', 'baseball', 'hockey', 'ice-hockey', 'tennis', 'cricket', 'rugby',
+  'racing', 'motorsport', 'motorsports', 'combat', 'boxing', 'mma', 'ufc', 'wrestling', 'golf', 'darts',
+])
+const zliveQuality = new Map([['FHD', 2], ['HD', 1]])
+
+export async function fetchZliveListing(deadline) {
+  const payload = await fetchJson(`${zlive}/embed/manifest.json`, deadline, 256 * 1024)
+  if (!Array.isArray(payload?.channels) || payload.count !== payload.channels.length) return
+
+  const byName = new Map()
+  const bySlug = new Map()
+  for (const channel of payload.channels) {
+    if (channel?.live !== true || typeof channel.name !== 'string' || typeof channel.id !== 'string' ||
+        !/^[\w-]+$/.test(channel.id) || channel.url !== `${zlive}/embed/${channel.id}`) continue
+    // Exact matches such as CNN and Fox News are excluded by this sport filter.
+    if (typeof channel.sport !== 'string' || !zliveSports.has(slugifyCategory(channel.sport))) continue
+    const name = channelName(channel.name)
+    if (!name) continue
+    const backup = isChannelBackup(channel.name)
+    const band = sourceQualityBand(channel.quality)
+    const quality = zliveQuality.get(band) ?? 0
+    const locale = (typeof channel.region === 'string' && channel.region.trim()) ||
+      (typeof channel.flag === 'string' ? channel.flag.trim() : '')
+    const tagline = typeof channel.tagline === 'string' ? channel.tagline.trim() : ''
+    const variant = backup ? tagline || channel.name.trim() : ''
+    const entry = {
+      backup, quality,
+      source: {
+        name: variant ? `zlive · ${variant}` : 'zlive',
+        ...(quality ? { sourceTag: band } : {}),
+        ...(locale ? { locale } : {}),
+        origin: 'zlive',
+        type: 'iframe',
+        default: false,
+        data: channel.url,
+      },
+    }
+    if (!byName.has(name)) byName.set(name, [])
+    byName.get(name).push(entry)
+    const slug = channel.id.toLowerCase()
+    if (!bySlug.has(slug)) bySlug.set(slug, new Set())
+    bySlug.get(slug).add(name)
+  }
+  return { byName, bySlug }
+}
+
+export function matchZliveSources(event, listing, item) {
+  if (!listing || event.always_live !== 1) return []
+  const name = channelName(event.name)
+  const slugNames = listing.bySlug.get(event.channelSlug?.toLowerCase() || slugifyCategory(name))
+  const entries = listing.byName.get(name) ??
+    (slugNames?.size === 1 ? listing.byName.get(slugNames.values().next().value) : undefined)
+  if (!entries) return []
+
+  // Preserve manifest order on equal quality. Health can break ties within a locale band.
+  const keys = item ? publishedSourceKeys(item) : new Set()
+  const backups = []
+  let primary
+  for (const entry of entries) {
+    const key = sourceKey(entry.source.data)
+    if (keys.has(key)) continue
+    keys.add(key)
+    if (entry.backup) backups.push(entry)
+    else if (!primary || entry.quality > primary.quality) primary = entry
+  }
+  backups.sort((a, b) => b.quality - a.quality)
+  return [...(primary ? [primary.source] : []), ...backups.map(entry => entry.source)]
+}
+
+function publishedSourceKeys(item) {
+  return new Set([...sourceUrls(item), item.source?.data].filter(url => typeof url === 'string').map(sourceKey))
+}
+
 export function dedupePublishedSources(item, sources) {
-  const keys = new Set([...sourceUrls(item), item.source?.data].filter(url => typeof url === 'string').map(sourceKey))
+  const keys = publishedSourceKeys(item)
   return sources.filter(source => {
     const key = sourceKey(source.data)
     if (keys.has(key)) return false

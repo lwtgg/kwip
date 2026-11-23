@@ -37,7 +37,7 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
     host: sourceHost(source.data),
     key,
     ...((source.origin !== 'supplement' || stream.hasPublishedSupplement) && health?.[key]?.embedOk === false ? { degraded: true as const } : {}),
-    ...(source.origin === 'supplement' || source.origin === 'pitsport'
+    ...(source.origin === 'supplement' || source.origin === 'pitsport' || source.origin === 'zlive'
       ? { origin: source.origin, live: source.live } : {}),
   }))
 
@@ -60,15 +60,19 @@ export function usePlayerSources(stream: { sources: PlayerSource[]; source_tag?:
   const needsRanking = (option: SourceOption) => option.degraded || option.live === false
   if (!labelled.some(needsRanking)) return labelled
 
-  // Sort only within contiguous runs of known quality and matching locale.
+  // Sort only within contiguous runs of primary bids with known quality and matching locale.
   const ranked = labelled.map((option, index) => {
     const source = uniqueSources.get(option.key)!
     const tag = source.sourceTag ?? source.source_tag ?? (source.default && !source.origin ? stream.source_tag : undefined)
     const quality = sourceQualityBand(tag)
     const locale = source.locale ?? (source.origin ? undefined : stream.locale)
+    // The publisher uses plain "zlive" for its bid and "zlive · …" for labelled backups.
+    const isZliveBackup = source.origin === 'zlive' && source.name?.startsWith('zlive · ')
     return {
       option,
-      tier: quality ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '']) : index,
+      tier: quality && !isZliveBackup
+        ? JSON.stringify([quality, typeof locale === 'string' ? locale.trim().toLowerCase() : '', source.origin === 'zlive'])
+        : index,
       viewers: Number(source.viewers) || 0,
     }
   })

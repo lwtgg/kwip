@@ -6,6 +6,7 @@ const props = withDefaults(
     poster?: string | null
     sandbox?: string
     timeoutMs?: number
+    lazy?: boolean
   }>(),
   {
     timeoutMs: 12_000,
@@ -17,12 +18,16 @@ const emit = defineEmits<{
   load: []
 }>()
 
+const playerRef = ref<HTMLDivElement | null>(null)
 const frameRef = ref<HTMLIFrameElement | null>(null)
+const enteredViewport = ref(false)
+const frameSrc = computed(() => (!props.lazy || enteredViewport.value) ? props.src : undefined)
 const loaded = ref(false)
 const frameFocused = ref(false)
 let focusFrame: number | null = null
 let settled = false
 let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+let viewportObserver: IntersectionObserver | undefined
 
 function clearTimer() {
   if (timeoutHandle !== null) {
@@ -51,7 +56,7 @@ function startTimer() {
   clearTimer()
   settled = false
   loaded.value = false
-  if (!import.meta.client || !props.src) return
+  if (!import.meta.client || !frameSrc.value) return
   if (frameHasDocument()) {
     succeedOnce()
     return
@@ -83,17 +88,17 @@ function frameHasDocument(allowLoading = false): boolean {
 }
 
 function handleLoad() {
-  if (props.src && frameHasDocument()) succeedOnce()
+  if (frameSrc.value && frameHasDocument()) succeedOnce()
 }
 
 function handleError() {
-  if (!props.src) return
+  if (!frameSrc.value) return
   if (frameHasDocument(true)) succeedOnce()
   else failOnce()
 }
 
 function handleWindowMessage(event: MessageEvent) {
-  if (!props.src || settled || !frameRef.value?.contentWindow) return
+  if (!frameSrc.value || settled || !frameRef.value?.contentWindow) return
   if (event.source === frameRef.value.contentWindow) {
     succeedOnce()
   }
@@ -110,7 +115,7 @@ function syncFrameFocus() {
 }
 
 watch(
-  [() => props.src, () => props.sandbox],
+  [frameSrc, () => props.sandbox],
   () => {
     startTimer()
     syncFrameFocus()
@@ -119,6 +124,21 @@ watch(
 )
 
 onMounted(() => {
+  if (props.lazy) {
+    const player = playerRef.value
+    if (player && 'IntersectionObserver' in window) {
+      // Native lazy loading can start near the viewport. Wait for the player to
+      // enter it before mounting the frame and starting its failure timer.
+      viewportObserver = new IntersectionObserver(entries => {
+        if (!entries.some(entry => entry.isIntersecting)) return
+        enteredViewport.value = true
+        viewportObserver?.disconnect()
+      })
+      viewportObserver.observe(player)
+    } else {
+      enteredViewport.value = true
+    }
+  }
   window.addEventListener('message', handleWindowMessage)
   window.addEventListener('blur', syncFrameFocus)
   document.addEventListener('focusout', syncFrameFocus)
@@ -128,6 +148,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  viewportObserver?.disconnect()
   window.removeEventListener('message', handleWindowMessage)
   window.removeEventListener('blur', syncFrameFocus)
   document.removeEventListener('focusout', syncFrameFocus)
@@ -138,7 +159,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="relative aspect-video w-full overflow-hidden rounded-card bg-surface"
+  <div ref="playerRef" class="relative aspect-video w-full overflow-hidden rounded-card bg-surface"
     :class="{ '[@media(scripting:none)]:hidden': !src }"
   >
     <div
@@ -165,10 +186,11 @@ onBeforeUnmount(() => {
     />
 
     <iframe
-      v-if="src"
+      v-if="frameSrc"
       ref="frameRef"
-      :key="JSON.stringify([src, sandbox])"
-      :src="src"
+      :key="JSON.stringify([frameSrc, sandbox])"
+      :loading="lazy ? 'lazy' : undefined"
+      :src="frameSrc"
       :title="title"
       :sandbox="sandbox"
       allow="autoplay; fullscreen; picture-in-picture"

@@ -32,6 +32,9 @@ Competitors make far more than their quality justifies. Research is done (`docs/
 
 Score, clock, period, lineups, per-player numbers, driven from the match rather than the listing. Two layers: match state next to the player, and a stats panel that appears only when a game is on. Needs a data provider with a usable free tier.
 
+The owner asked for the per-player layer on 2026-11-23; the shape is noted under §6 (a Stats view on the
+player surface). It needs a data provider first, so §2's provider work is the dependency.
+
 ## 5. De-vibecoding
 
 The design pass fixed the mechanics; the look is still generic. Target the things that read as generated: default type scale, evenly rounded cards, one accent doing every job, no editorial hierarchy, no texture. Budget a real art direction pass with reference sets, not another item list.
@@ -55,3 +58,18 @@ Dead-stream health signal, per-event poster quality, 390 px sweep, archive searc
 league CDNs (ESPN `a.espncdn.com/i/teamlogos/...` verified `200`, soccer by numeric id). Same composite is
 reachable from our `name` and `colors`, but it needs a curated team-alias table and two extra requests per
 card, so it waits until the supplement work lands.
+
+**Idea (owner, 2026-11-23): a Stats view.** Live player and team statistics inside the player surface,
+for supported live and recorded events, as a tab next to the sources rather than a page away. The
+directory already knows the two teams from the fixture name, and league summary APIs publish the same
+figures, so this is a read of someone else's JSON, not new media. Open questions before it can be
+briefed: which leagues actually carry per-player data, how it is attributed when our name match is a
+guess, refresh cadence, and what the view shows for the 24/7 channels that have no fixture at all.
+
+**Parked mid-flight (2026-11-23).** `task/47-zlive` (commit `c3eb865`, brief `.prompts/47-zlive-supplement.md`)
+implements zlive as a 24/7 supplement. The implementer's gate passed and `pnpm test` (143) plus `pnpm build`
+re-verify green on the branch, tree clean, nothing merged or deployed. The review against
+`.prompts/47-review.md` never completed — the reviewer sat in model-capacity retries. Next session: finish
+that review (it failed on two defects: `SourceSelect.vue:65` fixes the ordinal by origin so a Primary+zlive
+channel still says "4th", and `PlayerFrame.vue:167` has no lazy attribute on the frame), fix those, then merge, gate, upload with `/tmp/kwip-flip.toml`, deploy and verify.
+Production is `c334cc52` (restore layout).

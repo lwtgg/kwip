@@ -31,6 +31,9 @@ const mock = String.raw`
   })
   const fixture = ${JSON.stringify(fixture)}
   const current = JSON.parse(process.env.PUBLISH_TEST_CURRENT)
+  const zliveMode = mode.startsWith('zlive-')
+  const zliveAvailable = mode === 'zlive-up' || mode === 'zlive-no-primary'
+  const zliveUrl = id => 'https://zlive.st/embed/' + id
   const startsAt = Math.floor(Date.now() / 1000)
   const primary = { name: 'Primary', type: 'iframe', default: true, data: 'https://strmfree.st/embed/soccer/away-home?primary' }
   const alternate = 'https://streamfree.top/embed/soccer/away-home-' + (mode === 'capacity' ? 'x'.repeat(4000) : '') + '720p'
@@ -53,6 +56,12 @@ const mock = String.raw`
   if (mode !== 'baseline') {
     Object.assign(fixture['streams/foo'].data, {
       name: 'Home FC vs. Away FC', starts_at: start, sources: [primary],
+    })
+  }
+  if (zliveMode) {
+    Object.assign(fixture['streams/foo'].data, { name: 'Sky Sports F1 UK', always_live: 1 })
+    Object.assign(fixture['streams/foo.json/bar'].data, {
+      name: mode === 'zlive-no-primary' ? 'Sky Sports F1 UK' : 'Unmatched Sports', always_live: 1,
     })
   }
   const pitSportModes = ['pitsport', 'pitsport-down']
@@ -97,9 +106,10 @@ const mock = String.raw`
   }
   let listingRequests = 0
   let pitSportRequests = 0
+  let zliveRequests = 0
   let packed
   const probeRequests = []
-  const expectedProbes = nearbyPitSport ? [
+  const expectedProbes = zliveAvailable ? [zliveUrl('sky-fhd'), zliveUrl('sky-backup')] : nearbyPitSport ? [
     primary.data, alternate, ...(verifyPitSport ? [pitSportUrl(100), pitSportUrl(101) + '?strmfree', pitSportUrl(102), pitSportUrl(103)] : []),
   ] : mode === 'capacity' ? [...primarySources.map(source => source.data), acceptedAlternate]
     : split ? [...primarySources.slice(0, 40).map(source => source.data), ...splitAlternates.slice(0, 24)] : []
@@ -107,12 +117,31 @@ const mock = String.raw`
   process.on('exit', () => {
     assert.equal(listingRequests, mode === 'fixture' ? 0 : 1)
     assert.equal(pitSportRequests, mode === 'fixture' ? 0 : 1)
+    assert.equal(zliveRequests, mode === 'fixture' ? 0 : 1)
     if (mode === 'deadline') assert.deepEqual(probeRequests, [primary.data, splitAlternates[0]])
     else assert.deepEqual(probeRequests.sort(), expectedProbes.sort())
   })
   globalThis.fetch = async (request, options) => {
     if (typeof request === 'string') {
       const url = new URL(request)
+      if (url.href === 'https://zlive.st/embed/manifest.json') {
+        zliveRequests++
+        assert.equal(options.redirect, 'manual')
+        assert.ok(options.signal instanceof AbortSignal)
+        if (mode === 'zlive-down') throw new TypeError('network error')
+        const channel = (id, name, quality, extra = {}) => ({
+          id, name, quality, sport: 'F1', live: true, url: zliveUrl(id), ...extra,
+        })
+        const channels = zliveAvailable ? [
+          channel('sky-hd', 'Sky Sports F1 USA HD', 'HD'),
+          channel('sky-fhd', 'Sky Sports F1 (FHD)', 'FHD'),
+          channel('sky-backup', 'Sky Sports F1 FHD Backup 2', 'FHD', { tagline: 'Alternate feed' }),
+          channel('sky-backup', 'Sky Sports F1 Backup 3', 'HD'),
+          channel('sky-offline', 'Sky Sports F1 HD Backup 3', 'HD', { live: false }),
+          channel('sky-kids', 'Sky Sports F1 HD Backup 4', 'HD', { sport: 'Kids' }),
+        ] : []
+        return Response.json({ count: channels.length, channels })
+      }
       if (url.href === 'https://pitsport.st/api/v1/home') {
         pitSportRequests++
         assert.equal(options.redirect, 'manual')
@@ -177,6 +206,8 @@ const mock = String.raw`
         await new Promise(resolve => setImmediate(resolve))
         active--
       }
+      if (request.href === zliveUrl('sky-fhd')) return new Response('<div id="root"></div>')
+      if (request.href === zliveUrl('sky-backup')) return new Response('<title>Missing</title>')
       if (verifyPitSport && request.hostname === 'pitsport.st') return new Response('player-ready')
       return new Response(null, { status: 503 })
     }
@@ -200,7 +231,7 @@ const mock = String.raw`
       if (packed) assert.equal(manifest.payloadId, manifest.commitId)
       else assert.equal(manifest.payloadId, current.payloadKey.slice(10, -4))
       const paths = ['streams', 'vods', ...Object.keys(fixture).filter(path => path.includes('/')).sort()]
-      if (split || nearbyPitSport || mode === 'capacity') paths.push('health.json')
+      if (split || nearbyPitSport || zliveAvailable || mode === 'capacity') paths.push('health.json')
       assert.deepEqual(manifest.endpoints.map(({ path }) => path), paths)
       if (packed) {
         let end = 0
@@ -216,7 +247,18 @@ const mock = String.raw`
               assert.equal(health['pitsport.st/programs/101/play'].embedOk, true)
               assert.equal(health['pitsport.st/programs/102/play'].error, 'manifest-unverified')
             }
-            if (mode !== 'deadline') assert.equal(health['strmfree.st/embed/soccer/away-home'].error, 'embed-503')
+            if (zliveAvailable) {
+              assert.equal(health['zlive.st/embed/sky-fhd'].error, 'manifest-unverified')
+              assert.equal(health['zlive.st/embed/sky-fhd'].sequence, 'unknown')
+              assert.equal(health['zlive.st/embed/sky-backup'].error, 'embed-markers')
+            } else if (mode !== 'deadline') assert.equal(health['strmfree.st/embed/soccer/away-home'].error, 'embed-503')
+          } else if (zliveAvailable && path === 'streams/foo') {
+            const { sources } = JSON.parse(bytes).data
+            assert.deepEqual(sources, [
+              primary,
+              { name: 'zlive', sourceTag: 'FHD', origin: 'zlive', type: 'iframe', default: false, data: zliveUrl('sky-fhd') },
+              { name: 'zlive · Alternate feed', sourceTag: 'FHD', origin: 'zlive', type: 'iframe', default: false, data: zliveUrl('sky-backup') },
+            ])
           } else if (split && path === 'streams/foo') {
             const { sources } = JSON.parse(bytes).data
             assert.deepEqual(sources.slice(0, primarySources.length), primarySources)
@@ -392,4 +434,22 @@ test('nearby PitSport dedupes against the admitted Strmfree payload and shares t
   assert.equal(verified.outcome, 'published')
   assert.equal(unverified.probes.supplement.queued, 1)
   assert.equal(verified.probes.supplement.queued, 5)
+})
+test('zlive supplements 24/7 channels and a manifest network error publishes the same generation as an empty listing', async () => {
+  const [available, noPrimary, failed, empty, failedDryRun, emptyDryRun] = await Promise.all([
+    publish([], null, 'zlive-up'),
+    publish([], null, 'zlive-no-primary'),
+    publish([], null, 'zlive-down'),
+    publish([], null, 'zlive-empty'),
+    publish(['--dry-run'], null, 'zlive-down'),
+    publish(['--dry-run'], null, 'zlive-empty'),
+  ])
+  assert.equal(available.outcome, 'published')
+  assert.deepEqual(available.zlive, { matched: 1, unmatched: 1, admittedEvents: 1, admittedSources: 2 })
+  assert.equal(noPrimary.outcome, 'published')
+  assert.deepEqual(noPrimary.zlive, { matched: 2, unmatched: 0, admittedEvents: 1, admittedSources: 2 })
+  assert.equal(failed.outcome, 'published')
+  assert.equal(empty.outcome, 'published')
+  assert.deepEqual(failed.bytes, empty.bytes)
+  assert.deepEqual(failedDryRun.manifest.hashes, emptyDryRun.manifest.hashes)
 })
