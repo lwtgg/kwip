@@ -70,5 +70,6 @@ guess, refresh cadence, and what the view shows for the 24/7 channels that have 
 implements zlive as a 24/7 supplement. The implementer's gate passed and `pnpm test` (143) plus `pnpm build`
 re-verify green on the branch, tree clean, nothing merged or deployed. The review against
 `.prompts/47-review.md` never completed — the reviewer sat in model-capacity retries. Next session: finish
-that review, iterate to pass, then merge, gate, upload with `/tmp/kwip-flip.toml`, deploy and verify.
+that review (it failed on two defects: `SourceSelect.vue:65` fixes the ordinal by origin so a Primary+zlive
+channel still says "4th", and `PlayerFrame.vue:167` has no lazy attribute on the frame), fix those, then merge, gate, upload with `/tmp/kwip-flip.toml`, deploy and verify.
 Production is `c334cc52` (restore layout).
