@@ -367,6 +367,14 @@ def check_source_health(browser, origin, width):
 
 
 def check_stalled_feed(browser, directory, output, width):
+    # This case asserts the stale notice; a newly captured seed may be fresh.
+    stale_output = directory / 'stalled-output'
+    shutil.copytree(output, stale_output)
+    seed_path = stale_output / 'public/feed-cache/streams.json'
+    seed = json.loads(seed_path.read_text())
+    seed['timestamp'] = int(time()) - 7200
+    seed_path.write_text(json.dumps(seed))
+    output = stale_output
     missing_uri = 'task34-missing-event'
     release = Event()
     requests = []

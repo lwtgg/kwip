@@ -159,7 +159,7 @@ async function fetchFromBase<T extends { success: boolean }>(
 ): Promise<T> {
   const payload = await withinFeedDeadline(endpoint, stage, duration, async (signal) => {
     let payload: unknown
-    if (assets && URL.canParse(url) && new URL(url).origin === requestUrl.origin) {
+    if (assets && URL.canParse(url) && new URL(url).origin === requestUrl.origin && !new URL(url).pathname.startsWith('/api/')) {
       const request = new Request(url, { signal })
       let response: Response
       try {
@@ -232,13 +232,17 @@ export async function fetchFeed<T extends { success: boolean }>(
   const primaryUrl = resolveUrl(config.feedBase || '/fixtures')
   const mirrorUrl = config.feedMirrorBase ? resolveUrl(config.feedMirrorBase) : null
   // A fallback batch still needs time for the snapshot retry and seed before SSR.
-  const upstreamBudget = snapshotFallback?.upstreamOnly ? FEED_DEADLINES_MS.fallbackUpstream : FEED_DEADLINES_MS.upstream
+  const upstreamBudget = isGenerationFeed(config.feedBase)
+    ? FEED_DEADLINES_MS.identity + FEED_DEADLINES_MS.snapshot + 2 * FEED_DEADLINES_MS.upstream + FEED_DEADLINES_MS.seed + FEED_DEADLINES_MS.cacheMatch
+    : snapshotFallback?.upstreamOnly ? FEED_DEADLINES_MS.fallbackUpstream : FEED_DEADLINES_MS.upstream
   let networkFailure = false
   try {
     return await fetchFromBase<T>(fetcher, primaryUrl, requestUrl, host, endpoint.kind, 'primary', assets, () => {
       networkFailure = true
     }, upstreamBudget)
   } catch (err) {
+    // The same-origin route owns failover and authoritative omissions.
+    if (isGenerationFeed(config.feedBase)) throw err
     let upstreamError = err
     if ((networkFailure || err instanceof FeedTimeoutError) && mirrorUrl && mirrorUrl !== primaryUrl) {
       try {
@@ -285,7 +289,12 @@ export async function fetchFeed<T extends { success: boolean }>(
   }
 }
 
+export function isGenerationFeed(base: string): boolean {
+  return base.replace(/\/+$/, '') === '/api/feed'
+}
+
 export function isExternalFeed(base: string): boolean {
+  if (isGenerationFeed(base)) return true
   const url = URL.parse(base)
   return !!url && (url.protocol === 'http:' || url.protocol === 'https:') &&
     !url.pathname.replace(/\/+$/, '').endsWith('/fixtures')
@@ -524,7 +533,8 @@ async function readFeedFallback(
   const paths = endpoints.map(snapshotPath)
   const host = requestUrl.host || config.canonicalHost
   const batch = await Promise.allSettled(endpoints.map(endpoint =>
-    fetchFeed<SnapshotPayload>(fetcher, config, requestUrl, endpoint, assets, { event, binding, upstreamOnly: true }),
+    fetchFeed<SnapshotPayload>(fetcher, isGenerationFeed(config.feedBase)
+      ? { ...config, feedBase: 'https://api.ppv.st/api' } : config, requestUrl, endpoint, assets, { event, binding, upstreamOnly: true }),
   ))
   if (batch.every(result => result.status === 'fulfilled')) {
     const payloads = new Map(paths.map((path, index) => [path, batch[index]!.value]))
@@ -591,7 +601,7 @@ export function getFeedFallback(
   seedDetails: readonly string[],
   now = Math.floor(Date.now() / 1000),
 ) {
-  if (!event || !URL.canParse(config.feedBase)) return
+  if (!event || (!URL.canParse(config.feedBase) && !isGenerationFeed(config.feedBase))) return
   const context: FeedContext = event.context
   return context[requestFallback] ??= readFeedFallback(
     event, binding, fetcher, config, requestUrl, pageRequirements(requestUrl), seedDetails, now,
@@ -603,7 +613,8 @@ export async function getFeedCacheIdentity(event: H3Event, binding: string, conf
   const pinned = getRequestReader(event, binding, requestUrl)
   if (!pinned) return
   try {
-    return (await pinned.reader.open()).commitId
+    const manifest = await pinned.reader.open()
+    return manifest.commitId
   } catch {
     // A failed identity read may still render live upstream data.
     return
@@ -639,6 +650,11 @@ export function getFeedGeneration(
     context[resolvedGeneration] = generation
     return generation
   })
+}
+
+export async function hasSnapshotPath(event: H3Event, binding: string, requestUrl: URL, path: string) {
+  const pinned = getRequestReader(event, binding, requestUrl)
+  return pinned ? (await pinned.reader.open()).ranges.has(path) : false
 }
 
 export async function getSnapshotHealth(event: H3Event, binding: string, requestUrl: URL, commitId: string) {
