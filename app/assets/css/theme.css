@@ -457,33 +457,43 @@
   --banner-edge-alpha: 0.45;
   --banner-away-stop: 30%;
   --banner-home-stop: 71%;
-  --banner-plate: 12rem;
-  --banner-plate-narrow: 6rem;
-  --banner-score-size: 3.5rem;
-  --banner-score-narrow: 2.75rem;
-  --banner-score-hero: 9.0625rem;
-  --banner-status-size: 0.75rem;
-  --banner-status-hero: 3.5rem;
-  --banner-team-hero: clamp(0.75rem, 2.2vw, 3.5rem);
-  --banner-logo: 1.5rem;
-  --banner-logo-narrow: 0.625rem;
-  --banner-logo-hero: clamp(2rem, 8vw, 7.25rem);
-  --banner-status-width: 2.75rem;
-  --banner-score-compression: 0.65;
-  --banner-score-compression-narrow: 0.28;
+  --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
+  --banner-score-size: 2rem;
+  --banner-score-hero: clamp(2.75rem, 10vw, 9.0625rem);
+  --banner-status-size: var(--text-metadata);
+  --banner-status-hero: clamp(0.875rem, 2.25vw, 2rem);
+  --banner-logo: 2.5rem;
+  --banner-logo-hero: clamp(2.75rem, 9vw, 7.25rem);
+  --banner-status-width: 36%;
+  --banner-team-width: 20%;
+  --banner-status-fit-width: 5rem;
+  --banner-score-compression: 0.85;
   --banner-score-weight: 700;
   --banner-label-weight: 400;
   --banner-status-leading: 1.1;
-  --banner-status-leading-hero: 0.9;
-  --banner-abbreviation-compression: 1;
-  --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
+  --banner-pad-inline: var(--spacing-2);
+  --banner-pad-top: var(--spacing-1);
+  --banner-pad-bottom: var(--spacing-2);
+  --banner-hero-height: clamp(6rem, 25vw, var(--spacing-feature-art));
+  --banner-hero-pad: var(--spacing-4);
 }
-.card-row.card-matched { --card-plate: var(--banner-plate); }
-.card-row.card-matched .card-art { aspect-ratio: auto; align-self: stretch; border-radius: 0; }
-.card-matched .card-time { font-weight: var(--banner-label-weight); }
+
+[data-density='compact'] {
+  --banner-pad-top: calc(var(--spacing-1) / 2);
+}
+
+.card-matched {
+  position: relative;
+  display: block;
+  padding: 0;
+}
 .match-banner {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  display: grid;
+  min-height: inherit;
+  height: 100%;
+  border-radius: inherit;
+  overflow: hidden;
   color: var(--banner-white);
   background-image:
     linear-gradient(to bottom, color-mix(in srgb, var(--banner-black) calc(var(--banner-edge) * 100%), transparent), transparent 50%, color-mix(in srgb, var(--banner-black) calc(var(--banner-edge) * 100%), transparent)),
@@ -492,80 +502,84 @@
 }
 .banner-lineup {
   display: grid;
-  grid-template-columns: var(--banner-logo) minmax(0, 1fr) var(--banner-status-width) minmax(0, 1fr) var(--banner-logo);
+  grid-template-columns: var(--banner-team-width) minmax(0, 1fr) var(--banner-status-width) minmax(0, 1fr) var(--banner-team-width);
+  grid-template-rows: minmax(1lh, 1fr) auto minmax(1lh, 1fr);
   align-items: center;
-  height: 100%;
-  padding-inline: var(--spacing-1);
+  padding: var(--banner-pad-top) var(--banner-pad-inline) var(--banner-pad-bottom);
+  font-size: var(--banner-status-size);
   font-weight: var(--banner-label-weight);
+  line-height: var(--banner-status-leading);
   text-align: center;
 }
-.banner-team { min-width: 0; font-size: var(--banner-status-size); }
+.banner-team { grid-row: 1 / 3; display: grid; place-items: center; min-width: 0; }
 .banner-team img, .banner-initials {
-  display: block;
   width: var(--banner-logo);
-  height: var(--banner-logo);
+  max-width: 100%;
+  aspect-ratio: 1;
+  height: auto;
   object-fit: contain;
 }
 .banner-initials {
   display: grid;
-  place-items: center;
-  font-size: calc(var(--banner-logo) / 3);
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  font-size: min(calc(var(--banner-logo) / 3), 1em);
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
 }
-.banner-abbreviation { display: block; font-size: inherit; transform: scaleX(var(--banner-abbreviation-compression)); }
-.banner-away-team { grid-column: 1; grid-row: 1; }
-.banner-away-score { grid-column: 2; grid-row: 1; }
-.banner-home-score { grid-column: 4; grid-row: 1; }
-.banner-home-team { grid-column: 5; grid-row: 1; }
+.banner-abbreviation {
+  grid-row: 3;
+  min-width: 0;
+}
+.banner-away-team, .banner-away-label { grid-column: 1; }
+.banner-home-team, .banner-home-label { grid-column: 5; }
+.banner-away-score { grid-column: 2; }
+.banner-home-score { grid-column: 4; }
+.banner-score-slot { grid-row: 2; min-width: 0; }
 .banner-score {
-  justify-self: center;
+  --banner-size-fit: calc(var(--banner-score-compression) * 2 / max(2, var(--banner-digits, 2)));
   font-family: var(--font-score);
   font-size: var(--banner-score-size);
   font-weight: var(--banner-score-weight);
   font-stretch: extra-condensed;
   font-variant-numeric: lining-nums tabular-nums;
   line-height: 1;
-  transform: scaleX(calc(var(--banner-score-compression) * 2 / max(2, var(--banner-digits, 2))));
 }
 .banner-status {
   grid-column: 3;
-  grid-row: 1;
-  width: var(--banner-status-width);
-  justify-self: center;
-  font-size: var(--banner-status-size);
-  line-height: 1;
+  grid-row: 1 / -1;
+  display: grid;
+  grid-template-rows: subgrid;
+  min-width: 0;
+  align-self: stretch;
 }
-.banner-status > span {
+.banner-status-tier { align-self: center; min-width: 0; }
+.banner-status-line {
+  --banner-size-fit: min(1, calc(var(--banner-status-fit-width) / (var(--banner-status-size) * var(--banner-chars))));
+}
+.banner-fit-text {
   position: relative;
   left: 50%;
   display: block;
   width: max-content;
   white-space: nowrap;
-  line-height: var(--banner-status-leading);
-  transform: translateX(-50%) scaleX(var(--banner-line-fit, min(1, calc(var(--banner-status-width) / (var(--banner-status-size) * var(--banner-chars))))));
+  transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
 }
 
+.banner-fit-text.banner-score {
+  transform: translateX(-50%) scaleX(min(var(--banner-line-fit, 1), var(--banner-size-fit)));
+}
 
-.banner-progress { position: absolute; inset-inline: 0; bottom: 0; }
+.banner-progress { position: absolute; inset-inline: var(--banner-pad-inline); bottom: 0; }
 .banner-progress [role="progressbar"] { border: 0; background: var(--banner-base); }
 .banner-progress [role="progressbar"] > div { background: var(--banner-white); }
-.card-hero .banner-team { font-size: var(--banner-team-hero); }
-.card-hero .match-banner {
+.match-banner[data-scale="hero"] {
   --banner-score-size: var(--banner-score-hero);
   --banner-logo: var(--banner-logo-hero);
-  --banner-status-width: clamp(3rem, 7vw, 7rem);
   --banner-status-size: var(--banner-status-hero);
-  --banner-status-leading: var(--banner-status-leading-hero);
-  --banner-score-compression: 0.65;
-}
-@media (width < 48rem) {
-  .card-row.card-matched { --card-plate: var(--banner-plate-narrow); }
-  .card-row .match-banner {
-    --banner-score-size: var(--banner-score-narrow);
-    --banner-logo: var(--banner-logo-narrow);
-    --banner-score-compression: var(--banner-score-compression-narrow);
-    --banner-abbreviation-compression: 0.4;
-  }
+  --banner-pad-inline: var(--banner-hero-pad);
+  --banner-pad-bottom: var(--banner-hero-pad);
+  height: auto;
+  min-height: var(--banner-hero-height);
 }

@@ -280,25 +280,128 @@ def check_known_hero(browser, origin, assets, dest):
     (dest / 'hero-report.json').write_text(json.dumps(results, indent=2))
 
 
+def assert_clean_banner(card, event, listing_row):
+    visible = card.evaluate("""el => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const text = [];
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (!node.parentElement.closest('.sr-only')) text.push(node.textContent.trim());
+      }
+      return text.join(' ');
+    }""")
+    assert not re.search(r'\bUTC\b', visible), ('matched card must have no visible UTC', visible)
+    for forbidden in (event['name'], event['category_name'], event.get('tag'), 'Watch'):
+        if forbidden:
+            assert forbidden not in visible, (forbidden, visible)
+    assert card.locator('.card-info, .card-lane, .card-art, a, button').count() == 0
+
+    match = event['match']
+    scored = all(match[side]['score'] is not None for side in ('away', 'home'))
+    state = {'in': 'Live', 'pre': 'Upcoming', 'post': 'Final'}[match['state']]
+    detail = 'vs' if match['state'] == 'pre' and not scored else match['detail']
+    label = ', '.join([
+        f"{team['name']} {team['score']}" if scored else team['name']
+        for team in (match['away'], match['home'])
+    ] + [match['detail'] or state])
+    kickoff = datetime.fromtimestamp(event['starts_at'], timezone.utc).strftime('%H:%M:%S UTC')
+    expect(card).to_have_accessible_name(re.compile(
+        re.escape(label) + rf".*{int(event['viewers']):,} viewers.*Kickoff .*{kickoff}"
+    ))
+
+    banner = card.locator('.match-banner')
+    assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
+    tiers = banner.locator('.banner-status-tier')
+    assert tiers.nth(0).inner_text() == state
+    assert tiers.nth(1).inner_text() == ('' if detail == state else detail)
+    viewer_count = '62' if event['viewers'] == '62' else '123.5m'
+    assert tiers.nth(2).inner_text() == f'{viewer_count} Viewers'
+    assert banner.locator('.banner-score').all_text_contents() == (
+        [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
+    assert banner.locator('.banner-abbreviation').all_text_contents() == [
+        match[side]['abbreviation'] for side in ('away', 'home')]
+    assert card.get_by_role('progressbar').count() == 1
+
+    geometry = card.evaluate("""el => {
+      const rect = r => ({left:r.left, right:r.right, top:r.top, bottom:r.bottom,
+        width:r.width, height:r.height});
+      const banner = el.querySelector('.match-banner');
+      const nodes = [...banner.querySelectorAll('.banner-fit-text, .banner-team img')];
+      return {
+        card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
+        radii:[getComputedStyle(el).borderRadius, getComputedStyle(banner).borderRadius],
+        paint:Object.fromEntries(nodes.map(n => {
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          const logo = n.matches('img');
+          const name = n.closest('.banner-team')?.className.match(/banner-(away|home)-team/)[0]
+            || (n.matches('.banner-status-line') ? 'tier-' + [...n.closest('.banner-status').children].indexOf(n.parentElement)
+              : n.parentElement.className.match(/banner-(away|home)-(label|score)/)[0]);
+          return [name, {...rect(logo ? n.getBoundingClientRect() : range.getBoundingClientRect()),
+            lines:logo ? 1 : range.getClientRects().length, font:getComputedStyle(n).fontFamily,
+            weight:parseInt(getComputedStyle(n).fontWeight)}];
+        })),
+        progress:rect(banner.querySelector('[role=progressbar]').getBoundingClientRect())
+      };
+    }""")
+    box, art, paint = (geometry[key] for key in ('card', 'banner', 'paint'))
+    assert box == art and len(set(geometry['radii'])) == 1, geometry
+    ratio = box['width'] / box['height']
+    if listing_row:
+        assert ratio >= 3.5 and box['height'] >= 44, geometry
+    for name, ink in paint.items():
+        assert ink['lines'] == 1, (name, ink)
+        assert (ink['weight'] >= 600) == name.endswith('-score'), (name, ink)
+        if name.endswith('-score'):
+            assert 'Acumin Pro Extra Condensed' in ink['font'], ink
+        assert box['left'] <= ink['left'] <= ink['right'] <= box['right'], (name, ink, box)
+        assert box['top'] <= ink['top'] <= ink['bottom'] <= geometry['progress']['top'] + .25, (name, ink, box)
+    for index, (name, ink) in enumerate(paint.items()):
+        for other, target in list(paint.items())[index + 1:]:
+            assert (ink['right'] <= target['left'] + .25 or target['right'] <= ink['left'] + .25
+                    or ink['bottom'] <= target['top'] + .25 or target['bottom'] <= ink['top'] + .25), (name, other, geometry)
+    top, bottom = paint['tier-0'], paint['tier-2']
+    middle = paint.get('tier-1')
+    if middle:
+        assert top['bottom'] <= middle['top'] and middle['bottom'] <= bottom['top'], geometry
+    for name in ('banner-away-score', 'banner-home-score'):
+        if name in paint:
+            score = paint[name]
+            center = (score['top'] + score['bottom']) / 2
+            assert top['bottom'] < center < bottom['top'], geometry
+            if middle:
+                assert middle['top'] < center < middle['bottom'], geometry
+    for side in ('away', 'home'):
+        team = paint[f'banner-{side}-team']
+        abbrev = paint[f'banner-{side}-label']
+        assert team['bottom'] <= abbrev['top'] + .25, geometry
+        assert abs(abbrev['top'] - bottom['top']) <= .25, geometry
+        if scored:
+            score = paint[f'banner-{side}-score']
+            gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
+            assert gap >= 0, (side, gap, geometry)
+    return dict(height=box['height'], width=box['width'], ratio=ratio, contrast=assert_banner_contrast(banner))
+
+
 def check_matches(browser, origin, assets, dest):
     now = int(time.time())
     listing = json.loads((assets / 'fixtures/streams.json').read_text())
     template = listing['streams'][0]['streams'][0]
     away = dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b', logo='/icon-32.png', score=50)
-    home = dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033', logo='/icon-48.png', score=97)
+    home = dict(name='Arizona Wildcats', abbreviation='Arizona', color='#cc0033', logo='/icon-48.png', score=97)
     match = dict(state='in', detail='Halftime', away=away, home=home)
     cases = [
         ('matched-live', match),
         ('matched-pre', dict(match, state='pre', detail='Scheduled', away=dict(away, score=None), home=dict(home, score=None))),
-        ('matched-missing-logo', dict(match, away=dict(away, logo=None))),
+        ('matched-missing-logo', dict(match, away=dict(away, name='West Washington', logo=None))),
         ('matched-failed-logo', dict(match, away=dict(away, logo='/fixtures/missing-logo.png'))),
         ('matched-bad-color', dict(match, away=dict(away, color='url(evil)'))),
         ('matched-no-color', dict(match, away=dict(away, color=None), home=dict(home, color=None))),
         ('matched-bright', dict(match, away=dict(away, color='#ffffff'), home=dict(home, color='#ffff00'))),
-        ('matched-long-status', dict(match, detail='WWWWWWWWWWWWWWWWWWWWWWWW', away=dict(away, abbreviation='ABCDE'))),
+        ('matched-long-status', dict(match, detail='Halftime · WWWWWWWWWWWWWWWWWWWWWWWW', away=dict(away, score=150, abbreviation='WWWWW'), home=dict(home, score=197))),
         ('matched-final', dict(match, state='post', detail='Final', away=dict(away, score=150), home=dict(home, score=197))),
     ]
-    events = [dict(template, id=9000+i, match=game, name=slug, uri_name=f'basketball/{slug}', viewers='62',
+    events = [dict(template, id=9000+i, match=game, name='Colorado State Rams at Arizona Wildcats', uri_name=f'basketball/{slug}', viewers='62',
                    starts_at=now-3600, ends_at=now+3600, poster='/never-fetch-provider-thumbnail.jpg') for i, (slug, game) in enumerate(cases)]
     events[-2]['viewers'] = '123456789'
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=events)])
@@ -318,105 +421,39 @@ def check_matches(browser, origin, assets, dest):
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.screenshot(path=str(dest / f'{width}-{theme}-{density}-matches.png'), full_page=True)
                     assert not any('never-fetch-provider' in url for url in requests), requests
-                    for slug, game in cases:
+                    page.evaluate('document.fonts.ready')
+                    for event, (slug, _) in zip(events, cases):
                         card = page.locator(f'a.event-card[href$="/{slug}"]')
                         card.scroll_into_view_if_needed()
-                        banner = card.locator('.match-banner')
-                        assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
-                        assert card.locator('a, button').count() == 0
-                        assert card.get_by_role('progressbar').count() == 1
-                        box = card.bounding_box()
-                        assert box['width'] / box['height'] >= 3.5, (width, density, slug, box)
-                        assert box['height'] <= (81 if width < 768 else 160), (slug, box)
-                        geometry = banner.evaluate('''el => {
-                          const rect = s => { const r = el.querySelector(s).getBoundingClientRect(); return [r.left,r.right,r.top,r.bottom]; };
-                          const heavy = [...el.closest('a').querySelectorAll('*')].filter(n =>
-                            [...n.childNodes].some(t => t.nodeType === 3 && t.textContent.trim()) &&
-                            parseInt(getComputedStyle(n).fontWeight) >= 600 && !n.matches('.banner-score')).map(n => n.textContent);
-                          return {away:rect('.banner-away-team'), home:rect('.banner-home-team'), status:rect('.banner-status'),
-                            scores:[...el.querySelectorAll('.banner-score')].map(n=>{const r=n.getBoundingClientRect();return [r.left,r.right]}),
-                            lines:[...el.querySelectorAll('.banner-status > span')].map(n=>{const r=n.getBoundingClientRect();return [r.left,r.right]}),
-                            heavy, colors:[el.style.getPropertyValue('--banner-away'),el.style.getPropertyValue('--banner-home')],
-                            background:getComputedStyle(el).backgroundImage};
-                        }''')
-                        page.evaluate('document.fonts.ready')
-                        contrast = assert_banner_contrast(banner)
-                        assert not geometry['heavy'], (slug, geometry)
-                        assert geometry['away'][1] <= geometry['status'][0] < geometry['home'][0], geometry
-                        for line in geometry['lines']:
-                            assert line[0] >= geometry['status'][0] - 1 and line[1] <= geometry['status'][1] + 1, (slug, 'status containment', geometry)
-                        if geometry['scores']:
-                            assert geometry['scores'][0][1] <= geometry['status'][0] + 1, (slug, 'away score collision', geometry)
-                            assert geometry['scores'][1][0] >= geometry['status'][1] - 1, (slug, 'home score collision', geometry)
-                        for line in banner.locator('.banner-status > span').all():
-                            assert line.evaluate('el => {const r=document.createRange();r.selectNodeContents(el);return r.getClientRects().length===1}'), line.inner_text()
-                        if slug == 'matched-live':
-                            expect(card).to_have_accessible_name(re.compile('Colorado State Rams 50, Arizona Wildcats 97, Halftime'))
-                            expect(card).to_have_accessible_name(re.compile('62 viewers'))
-                            assert geometry['colors'] == ['#1e4d2b', '#cc0033'], geometry
-                            progress = banner.locator('[role=progressbar]')
-                            assert 49 <= int(progress.get_attribute('aria-valuenow')) <= 51
-                        if slug == 'matched-pre':
-                            assert banner.locator('.banner-versus').inner_text() == 'vs'
-                            assert banner.locator('.banner-score').count() == 0
                         if slug in ('matched-missing-logo', 'matched-failed-logo'):
-                            assert banner.locator('.banner-away-team .banner-initials').inner_text() == 'CS'
+                            expect(card.locator('.banner-away-team .banner-initials')).to_have_text('WW' if slug == 'matched-missing-logo' else 'CS')
+                        geometry = assert_clean_banner(card, event, listing_row=True)
+                        if slug == 'matched-live':
+                            progress = card.get_by_role('progressbar')
+                            assert 49 <= int(progress.get_attribute('aria-valuenow')) <= 51
+                            card.screenshot(path=str(dest / f'{width}-{theme}-{density}-row.png'))
                         if slug in ('matched-bad-color', 'matched-no-color'):
-                            assert geometry['colors'][0] == '#272624', geometry
-                        initials_measurements = []
-                        for initial in banner.locator('.banner-initials').all():
-                            for text in (initial.inner_text(), 'WWW'):
-                                size = initial.evaluate('''(el, text) => {
-                                  const old = el.textContent; el.textContent = text;
-                                  const range = document.createRange(); range.selectNodeContents(el);
-                                  const r = range.getBoundingClientRect(), box = el.getBoundingClientRect();
-                                  el.textContent = old;
-                                  const score = el.closest('.banner-team').classList.contains('banner-away-team')
-                                    ? el.closest('.banner-lineup').querySelector('.banner-away-score')
-                                    : el.closest('.banner-lineup').querySelector('.banner-home-score');
-                                  const sr = score?.getBoundingClientRect();
-                                  const gap = !sr ? null : el.closest('.banner-team').classList.contains('banner-away-team') ? sr.left-r.right : r.left-sr.right;
-                                  return {text, width:r.width, box:box.width, left:r.left, right:r.right, gap};
-                                }''', text)
-                                assert size['width'] <= size['box'] + .1, size
-                                assert size['gap'] is None or size['gap'] >= 0, size
-                                initials_measurements.append(size)
-                        results.append(dict(scores=geometry['scores'], initials=initials_measurements, contrast=contrast, viewport=width, theme=theme, density=density, fixture=slug,
-                                            height=box['height'], ratio=box['width']/box['height']))
+                            assert card.locator('.match-banner').evaluate("el => el.style.getPropertyValue('--banner-away')") == '#272624'
+                        results.append(dict(viewport=width, theme=theme, density=density, fixture=slug, **geometry))
                     page.screenshot(path=str(dest / f'{width}-{theme}-{density}-matches.png'), full_page=True)
                     double_text(page)
-                    assert_unbroken_time(page)
+                    # The fit pass runs from a ResizeObserver, then the transform restyles: let both settle.
+                    page.evaluate('() => new Promise(resolve => { let n = 6; const tick = () => --n ? requestAnimationFrame(tick) : resolve(); tick() })')
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (width, density, 'matched 200%')
+                    for event in (events[0], events[2], events[-2]):
+                        card = page.locator(f'a.event-card[href$="/{event["uri_name"]}"]')
+                        assert_clean_banner(card, event, listing_row=False)
+                    hero_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[events[0]])])
+                    (assets / 'fixtures/streams.json').write_text(json.dumps(hero_listing))
                     assert page.goto(origin, wait_until='networkidle').ok
-                    hero = page.locator('.card-hero .match-banner')
-                    assert hero.is_visible()
-                    assert hero.locator('.banner-score').count() == 2
-                    page.evaluate('document.fonts.ready')
-                    assert page.evaluate("document.fonts.check('700 145px \"Acumin Pro Extra Condensed\"', '0123456789')")
-                    assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
-                    def measure_hero():
-                        data = hero.evaluate('''el => {
-                          const box = el.getBoundingClientRect(), lane = el.querySelector('.banner-status').getBoundingClientRect();
-                          return {height:box.height, teamSizes:[...el.querySelectorAll('.banner-team')].map(n=>parseFloat(getComputedStyle(n).fontSize)), lines:[...el.querySelectorAll('.banner-status > span')].map(n => {
-                            const r=n.getBoundingClientRect(); const range=document.createRange();range.selectNodeContents(n);
-                            return {text:n.textContent,size:parseFloat(getComputedStyle(n).fontSize),width:r.width, scroll:n.scrollWidth, cssWidth:getComputedStyle(n).width, transform:getComputedStyle(n).transform, fit:n.style.cssText, lane:lane.width,
-                              fits:r.left>=lane.left-1 && r.right<=lane.right+1 && r.top>=box.top-1 && r.bottom<=box.bottom+1,
-                              rects:range.getClientRects().length};
-                          })};
-                        }''')
-                        assert all(size < 56 for size in data['teamSizes']), data
-                        assert all(line['size'] == 56 and line['fits'] and line['rects'] == 1 for line in data['lines']), data
-                        hero_results.append(dict(viewport=width, theme=theme, density=density, **data))
-                    measure_hero()
-                    for label, state in (('Live', 'in'), ('Halftime', 'in'), ('Final', 'post')):
-                        single = dict(events[0], match=dict(match, state=state, detail=label))
-                        hero_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[single])])
-                        (assets / 'fixtures/streams.json').write_text(json.dumps(hero_listing))
-                        assert page.goto(origin, wait_until='networkidle').ok
-                        measure_hero()
                     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
-                    assert_banner_contrast(hero)
-                    page.screenshot(path=str(dest / f'{width}-{theme}-{density}-matched-hero.png'), full_page=True)
+                    hero = page.locator('a.card-hero.card-matched')
+                    expect(hero.locator('.banner-score')).to_have_count(2)
+                    page.evaluate('document.fonts.ready')
+                    assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
+                    geometry = assert_clean_banner(hero, events[0], listing_row=False)
+                    hero_results.append(dict(viewport=width, theme=theme, density=density, **geometry))
+                    hero.screenshot(path=str(dest / f'{width}-{theme}-{density}-matched-hero.png'))
     (dest / 'hero-status-report.json').write_text(json.dumps(hero_results, indent=2))
     (dest / 'match-report.json').write_text(json.dumps(results, indent=2))
 

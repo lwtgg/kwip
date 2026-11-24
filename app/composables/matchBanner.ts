@@ -1,4 +1,23 @@
 import { hexRGB } from './cardTint.ts'
+import type { FeedStreamItem } from './useFeed.ts'
+import { formatViewersCompact, formatViewersExact } from '../utils/viewers.ts'
+
+const stateLabels = { pre: 'Upcoming', in: 'Live', post: 'Final' } as const
+
+type Match = NonNullable<FeedStreamItem['match']>
+
+export function matchBannerContent(match: Match, viewers: string | number, metric: 'viewers' | 'views', stale: boolean) {
+  const state = stateLabels[match.state]
+  const hasScores = match.away.score !== null && match.home.score !== null
+  const detail = match.state === 'pre' && !hasScores ? 'vs' : match.detail === state ? '' : match.detail
+  const exact = formatViewersExact(viewers)
+  const unit = exact === '1' ? metric.slice(0, -1) : metric
+  const compact = formatViewersCompact(viewers)
+  const audience = stale ? '' : `${compact} ${unit[0]!.toUpperCase()}${unit.slice(1)}`
+  const label = [match.away, match.home].map(side => hasScores ? `${side.name} ${side.score}` : side.name)
+    .concat(match.detail || state).join(', ')
+  return { hasScores, tiers: [state, detail, audience], label }
+}
 
 /** sRGB source-over, with invalid/missing colours degrading independently. */
 export function mixBannerColor(color: string | null | undefined, base: string, opacity: number): string {
