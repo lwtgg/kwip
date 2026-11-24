@@ -17,7 +17,7 @@ const scheduled = computed(() => start.value !== null && Number.isFinite(props.e
   && props.endsAt > props.startsAt && !Number.isNaN(new Date(props.endsAt * 1000).getTime()))
 const ended = computed(() => scheduled.value && (props.now ?? initialNow.value) >= props.endsAt)
 const started = computed(() => scheduled.value && (props.now ?? initialNow.value) >= props.startsAt && !ended.value)
-const numeric = computed(() => !props.stale && !props.replay && (props.alwaysLive === 1 || (start.value && !ended.value)))
+const numeric = computed(() => !props.stale && !props.replay && props.alwaysLive !== 1 && start.value && !ended.value)
 const kickoff = computed(() => start.value?.toLocaleTimeString('en-GB', {
   timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 }))
@@ -39,8 +39,8 @@ const listedTime = computed(() => {
 
 <template>
   <div class="flex min-w-0 flex-col gap-(--card-gap)" data-allow-mismatch="text children">
-    <time v-if="numeric && alwaysLive !== 1 && start" :datetime="start.toISOString()" class="card-time text-fg">{{ fact }}</time>
-    <span v-else :class="numeric ? 'card-time' : 'card-state'" class="text-fg">{{ fact }}</span>
+    <time v-if="numeric && start" :datetime="start.toISOString()" class="card-time text-fg">{{ fact }}</time>
+    <span v-else class="card-state text-fg">{{ fact }}</span>
     <div class="flex min-w-0 flex-col items-start gap-(--card-gap) text-metadata text-muted wrap-anywhere">
       <span v-if="stale">Last listed: {{ listedTime }}</span>
       <span v-if="replay && eventDate">{{ eventDate }} · UTC</span>
