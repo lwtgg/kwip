@@ -655,10 +655,9 @@ test('readable generation omissions return JSON 404 without provider or seed', a
   assert.deepEqual(response.body, { success: false, error: 'Not found', snapshotOmitted: true })
 })
 
-for (const state of ['missing', 'unreadable', 'stale', 'ping']) {
+for (const state of ['missing', 'unreadable', 'ping']) {
   test(`feed route proxies ${state} with bounded upstream fetching`, async () => {
     const data = routeFixture()
-    if (state === 'stale') data.manifest.listsVerifiedAt = time
     const event = state === 'missing' ? { context: {} } as never : state === 'unreadable'
       ? { context: { cloudflare: { env: { FEED_SNAPSHOTS: { get: async () => { throw Error('bad manifest') } } } } } } as never
       : data.event
@@ -703,3 +702,16 @@ test('same-origin browser leaves authoritative API errors intact and never tries
     requestUrl, { kind: 'stream', uriName: 'missing' }), candidate => candidate === error)
   assert.deepEqual(calls, ['https://kwip.fyi/api/feed/streams/missing'])
 })
+
+for (const age of [1, 46]) {
+  test(`readable generation remains authoritative at ${age} minutes`, async () => {
+    for (const included of [true, false]) {
+      const data = routeFixture(included)
+      data.manifest.listsVerifiedAt = new Date(Date.now() - age * 60_000).toISOString()
+      const noProxy = (() => { throw Error('must not proxy') }) as never
+      const response = await serveFeedPath(data.event, 'streams/sport/example', noProxy, localConfig, requestUrl)
+      assert.equal(response.status, included ? 200 : 404)
+      assert.equal(await getFeedCacheIdentity(data.event, 'FEED_SNAPSHOTS', localConfig.public, requestUrl), commitId)
+    }
+  })
+}

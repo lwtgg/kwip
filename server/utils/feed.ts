@@ -435,10 +435,6 @@ function normalizeSnapshotPayload(
   return { ...normalized, fromCache: true, fromSnapshot: true }
 }
 
-export function isFreshFeedManifest(manifest: { listsVerifiedAt: number }, now = Date.now() / 1000) {
-  return manifest.listsVerifiedAt <= now * 1000 && now * 1000 - manifest.listsVerifiedAt <= 45 * 60_000
-}
-
 export async function readFeedGeneration(
   bucket: SnapshotBucket,
   requestUrl: URL,
@@ -446,7 +442,6 @@ export async function readFeedGeneration(
   endpoints: FeedEndpoint[],
   now = Math.floor(Date.now() / 1000),
   reader = createRequestSnapshotReader(bucket, endpoints.at(-1)?.kind ?? 'streams'),
-  requireFresh = false,
 ) {
   const paths = endpoints.map(snapshotPath)
   const streamPath = paths.find(path => path.startsWith('streams/'))
@@ -457,7 +452,6 @@ export async function readFeedGeneration(
   let hasHealth = false
   try {
     const manifest = await reader.open()
-    if (requireFresh && !isFreshFeedManifest(manifest, now)) throw new FeedResponseError('Stale feed generation')
     identity = manifest.commitId
     hasHealth = manifest.ranges.has('health.json')
     await withinFeedDeadline(endpoints.at(-1)?.kind ?? 'streams', 'snapshot', FEED_DEADLINES_MS.snapshot, async (signal) => {
@@ -554,7 +548,7 @@ async function readFeedFallback(
 
   const pinned = getRequestReader(event, binding, requestUrl, retryReader)
   if (pinned) {
-    const retry = await readFeedGeneration(pinned.bucket, requestUrl, host, endpoints, now, pinned.reader, isGenerationFeed(config.feedBase))
+    const retry = await readFeedGeneration(pinned.bucket, requestUrl, host, endpoints, now, pinned.reader)
     if (retry.readable) return retry
   }
 
@@ -620,7 +614,6 @@ export async function getFeedCacheIdentity(event: H3Event, binding: string, conf
   if (!pinned) return
   try {
     const manifest = await pinned.reader.open()
-    if (isGenerationFeed(config.feedBase) && !isFreshFeedManifest(manifest)) return
     return manifest.commitId
   } catch {
     // A failed identity read may still render live upstream data.
@@ -652,7 +645,7 @@ export function getFeedGeneration(
   const context: FeedContext = event.context
   return context[requestGeneration] ??= readFeedGeneration(
     pinned.bucket, requestUrl, requestUrl.host || config.canonicalHost,
-    endpoints ?? pageRequirements(requestUrl), now, pinned.reader, isGenerationFeed(config.feedBase),
+    endpoints ?? pageRequirements(requestUrl), now, pinned.reader,
   ).then(generation => {
     context[resolvedGeneration] = generation
     return generation

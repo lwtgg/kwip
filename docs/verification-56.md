@@ -3,8 +3,8 @@
 Task 56 uses `/api/feed` by default, including Wrangler's runtime variable. Explicit feed bases and
 `/fixtures` still work. The API and SSR share the packed snapshot reader, validation, deadlines and
 host replacement. A readable generation's omitted endpoint returns JSON 404 without back-filling.
-Missing, unreadable, or older-than-45-minute list verification takes the provider, network-failure
-mirror, then seed path. The 45-minute threshold matches the publisher's existing freshness threshold.
+Only a missing or unreadable generation takes the provider, network-failure mirror, then seed path.
+A readable generation remains authoritative at every age; age still informs stale state and refresh triggers.
 Ping always uses the provider. Browser API errors remain authoritative and cannot trigger a second,
 client-side mirror/seed chain. The same-origin request budget covers the route's full fallback chain.
 
@@ -84,7 +84,7 @@ itself completes successfully. No package or lockfile changes are included.
 - `.env.example`
 - `app/composables/useFeed.ts`
 - `nuxt.config.ts`
-- `server/routes/api/feed/[...path].get.ts`
+- `server/routes/api/feed/[...path].ts`
 - `server/utils/feed-route.ts`
 - `server/utils/feed.ts`
 - `server/utils/snapshot.ts`
@@ -95,3 +95,42 @@ itself completes successfully. No package or lockfile changes are included.
 - `docs/verification-56.md`
 
 No `package.json` additions. No changes to `.prompts` or `DECISIONS.md`.
+
+## Review fixes (56-fix)
+
+Readable generations now win regardless of manifest age, including cache identity and fallback retries.
+GET and HEAD share the route and validation; HEAD retains the GET status, JSON content type and
+`no-store`, with an empty body. H3 maps a null handler return to 204, so HEAD explicitly returns an
+empty string instead.
+
+The browser regression now asserts Vue's live Nuxt payload after hydration, a forced route refresh,
+a 90-second wait and another refresh beyond the 60-second bucket. The controlled live fixture
+`/tmp/kwip56-review2-live` carries a synthetic 1–2 score; it is not a production score claim.
+`--strip-refresh-match` intercepts the detail refresh and removes `match`: the test exits 1 on its
+`refreshed` client-state assertion, proving it detects the original downgrade.
+
+Final verification:
+
+- `pnpm test`: 181 passed, zero failed.
+- `pnpm build`, `NITRO_PRESET=node-server pnpm build`, then default `pnpm build`: passed.
+- `pnpm exec wrangler deploy --dry-run`: passed, no deployment. Upload 1071.06 KiB, gzip 281.30 KiB;
+  existing `node:process` shim warnings remain. Client assets remain 396K; no dependencies added.
+- Six browser suites (density, click-under, banner, not-live, source-health, cards) passed at 390 and
+  1280 pixels; cards additionally covers 320 pixels and both themes/densities.
+- Generation browser proof passed at both widths, including GET/HEAD status parity for valid,
+  omitted and invalid paths, `no-store`, empty HEAD bodies and no browser provider API calls.
+- Independent review found no further concrete defects; `git diff --check` passed.
+
+The age probe supplies the same packed bytes to the range reader and varies only manifest verification
+age. It asserts response byte equality, status equality and zero upstream calls:
+
+| Age | Matched detail | Omitted detail |
+| --- | --- | --- |
+| 1 minute | 200, match retained | 404 |
+| 46 minutes | 200, match retained | 404 |
+
+Both detail responses have SHA-256 `5cd5790eac6a24cf6590539c6fea4c9aac9f711d7d18fff5994aa4dab729d56c`;
+both omissions have `cb78c9b7704930c2f96aa5e6224442bd560c169fb5b31d3ce7670c18e87e8006`.
+Probe: `/tmp/kwip56-fix-age.mts`; results: `/tmp/kwip56-fix-age.log`.
+Final build/browser logs use `/tmp/kwip56-fix-*`; browser runs read an immutable copy at
+`/tmp/kwip56-fix-final-output`. No changes to `.prompts`, `DECISIONS.md` or `package.json`.
