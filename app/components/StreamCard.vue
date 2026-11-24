@@ -53,7 +53,7 @@ const matchFacts = computed(() => {
     : props.stream.starts_at > 0 && Number.isFinite(start.getTime())
       ? `${props.stale ? 'Last listed' : 'Kickoff'} ${start.toUTCString().replace('GMT', 'UTC')}`
       : 'Time unavailable'
-  return props.stale ? `Unconfirmed. ${time}` : `${exact.value} ${metric.value}. ${time}`
+  return props.stale ? `Unconfirmed. ${time}.` : `${time}.`
 })
 </script>
 

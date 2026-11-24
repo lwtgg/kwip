@@ -468,9 +468,13 @@
   --banner-team-width: 20%;
   --banner-status-fit-width: 5rem;
   --banner-score-compression: 0.85;
+  /* A fitted line is never drawn narrower than this; below it the line wraps and the row grows. */
+  --banner-fit-floor: 0.6;
+  /* Clear space between a score and the detail beside it; em so it follows the text size. */
+  --banner-gutter: 0.5em;
   --banner-score-weight: 700;
   --banner-label-weight: 400;
-  --banner-status-leading: 1.1;
+  --banner-status-leading: 1.2;
   --banner-pad-inline: var(--spacing-2);
   --banner-pad-top: var(--spacing-1);
   --banner-pad-bottom: var(--spacing-2);
@@ -502,7 +506,13 @@
 }
 .banner-lineup {
   display: grid;
-  grid-template-columns: var(--banner-team-width) minmax(0, 1fr) var(--banner-status-width) minmax(0, 1fr) var(--banner-team-width);
+  /* Team and status columns give way first; scores keep at least what the floor allows. */
+  grid-template-columns:
+    minmax(var(--banner-logo), var(--banner-team-width))
+    minmax(var(--banner-score-min, 0px), 1fr)
+    minmax(0, var(--banner-status-width))
+    minmax(var(--banner-score-min, 0px), 1fr)
+    minmax(var(--banner-logo), var(--banner-team-width));
   grid-template-rows: minmax(1lh, 1fr) auto minmax(1lh, 1fr);
   align-items: center;
   padding: var(--banner-pad-top) var(--banner-pad-inline) var(--banner-pad-bottom);
@@ -511,6 +521,9 @@
   line-height: var(--banner-status-leading);
   text-align: center;
 }
+/* The fit pass reads layout straight after writing it. Reduced motion stretches every zero-length
+   transition to 0.01ms, which would hand the read back the old track sizes. */
+.banner-lineup, .banner-lineup * { transition-property: none; }
 .banner-team { grid-row: 1 / 3; display: grid; place-items: center; min-width: 0; }
 .banner-team img, .banner-initials {
   width: var(--banner-logo);
@@ -534,11 +547,10 @@
 }
 .banner-away-team, .banner-away-label { grid-column: 1; }
 .banner-home-team, .banner-home-label { grid-column: 5; }
-.banner-away-score { grid-column: 2; }
-.banner-home-score { grid-column: 4; }
+.banner-away-score { grid-column: 2; padding-inline-end: var(--banner-gutter); }
+.banner-home-score { grid-column: 4; padding-inline-start: var(--banner-gutter); }
 .banner-score-slot { grid-row: 2; min-width: 0; }
 .banner-score {
-  --banner-size-fit: calc(var(--banner-score-compression) * 2 / max(2, var(--banner-digits, 2)));
   font-family: var(--font-score);
   font-size: var(--banner-score-size);
   font-weight: var(--banner-score-weight);
@@ -566,9 +578,31 @@
   white-space: nowrap;
   transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
 }
+/* Below the floor the line wraps at the width the floor allows, then is drawn at the floor. */
+.banner-fit-text[data-wrap] {
+  width: calc(100% / var(--banner-fit-floor));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
 
 .banner-fit-text.banner-score {
-  transform: translateX(-50%) scaleX(min(var(--banner-line-fit, 1), var(--banner-size-fit)));
+  transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-score-compression)));
+}
+
+/* Wide listing card: the middle columns narrow and each score hugs the detail, as in the mockup. */
+@media (width >= 64rem) {
+  .match-banner[data-scale='listing'] {
+    --banner-status-width: 16%;
+  }
+  .match-banner[data-scale='listing'] .banner-score-slot { display: flex; }
+  .match-banner[data-scale='listing'] .banner-away-score { justify-content: flex-end; }
+  .match-banner[data-scale='listing'] .banner-fit-text.banner-score {
+    left: auto;
+    transform: scaleX(var(--banner-line-fit, var(--banner-score-compression)));
+  }
+  .match-banner[data-scale='listing'] .banner-away-score .banner-score { transform-origin: right center; }
+  .match-banner[data-scale='listing'] .banner-home-score .banner-score { transform-origin: left center; }
 }
 
 .banner-progress { position: absolute; inset-inline: var(--banner-pad-inline); bottom: 0; }

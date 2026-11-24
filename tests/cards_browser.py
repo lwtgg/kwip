@@ -280,7 +280,7 @@ def check_known_hero(browser, origin, assets, dest):
     (dest / 'hero-report.json').write_text(json.dumps(results, indent=2))
 
 
-def assert_clean_banner(card, event, listing_row):
+def assert_clean_banner(card, event, listing_row, allow_growth=False):
     visible = card.evaluate("""el => {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       const text = [];
@@ -300,32 +300,40 @@ def assert_clean_banner(card, event, listing_row):
     scored = all(match[side]['score'] is not None for side in ('away', 'home'))
     state = {'in': 'Live', 'pre': 'Upcoming', 'post': 'Final'}[match['state']]
     detail = 'vs' if match['state'] == 'pre' and not scored else match['detail']
-    label = ', '.join([
-        f"{team['name']} {team['score']}" if scored else team['name']
-        for team in (match['away'], match['home'])
-    ] + [match['detail'] or state])
-    kickoff = datetime.fromtimestamp(event['starts_at'], timezone.utc).strftime('%H:%M:%S UTC')
-    expect(card).to_have_accessible_name(re.compile(
-        re.escape(label) + rf".*{int(event['viewers']):,} viewers.*Kickoff .*{kickoff}"
-    ))
+    viewers = int(event['viewers'])
+    compact = '62' if viewers == 62 else '123.5m'
+    audience = f'{compact} {"Viewer" if viewers == 1 else "Viewers"}'
+    # The name is the banner's own content, in its words and order, one sentence each.
+    teams = (', '.join(f"{match[side]['name']} {match[side]['score']}" for side in ('away', 'home')) if scored
+             else f"{match['away']['name']} vs {match['home']['name']}")
+    spoken = audience if compact == f'{viewers:,}' else f'{audience} ({viewers:,})'
+    parts = [teams, state, '' if detail in ('vs', state) else detail, spoken]
+    kickoff = datetime.fromtimestamp(event['starts_at'], timezone.utc).strftime('%a, %d %b %Y %H:%M:%S UTC')
+    expected = '. '.join(part for part in parts if part) + f'. Kickoff {kickoff}.'
+    expect(card).to_have_accessible_name(re.compile(f'^{re.escape(expected)}$'))
+    # The progress bar is decoration here: it must neither be exposed nor leak its value into the name.
+    assert card.get_by_role('progressbar').count() == 0
+    assert card.locator('[role=progressbar]').count() == 1
 
     banner = card.locator('.match-banner')
     assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
     tiers = banner.locator('.banner-status-tier')
     assert tiers.nth(0).inner_text() == state
     assert tiers.nth(1).inner_text() == ('' if detail == state else detail)
-    viewer_count = '62' if event['viewers'] == '62' else '123.5m'
-    assert tiers.nth(2).inner_text() == f'{viewer_count} Viewers'
+    assert tiers.nth(2).inner_text() == audience
     assert banner.locator('.banner-score').all_text_contents() == (
         [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
-    assert banner.locator('.banner-abbreviation').all_text_contents() == [
-        match[side]['abbreviation'] for side in ('away', 'home')]
-    assert card.get_by_role('progressbar').count() == 1
+    # Never blank under a logo: an empty abbreviation falls back to the name's initials.
+    shown = banner.locator('.banner-abbreviation').all_text_contents()
+    assert shown == [match[side]['abbreviation'] or ''.join(word[0] for word in match[side]['name'].split()[:3]).upper()
+                     for side in ('away', 'home')], shown
+    assert all(text.strip() for text in shown), shown
 
     geometry = card.evaluate("""el => {
       const rect = r => ({left:r.left, right:r.right, top:r.top, bottom:r.bottom,
         width:r.width, height:r.height});
       const banner = el.querySelector('.match-banner');
+      const lineup = banner.querySelector('.banner-lineup');
       const nodes = [...banner.querySelectorAll('.banner-fit-text, .banner-team img')];
       return {
         card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
@@ -339,31 +347,59 @@ def assert_clean_banner(card, event, listing_row):
               : n.parentElement.className.match(/banner-(away|home)-(label|score)/)[0]);
           return [name, {...rect(logo ? n.getBoundingClientRect() : range.getBoundingClientRect()),
             lines:logo ? 1 : range.getClientRects().length, font:getComputedStyle(n).fontFamily,
-            weight:parseInt(getComputedStyle(n).fontWeight)}];
+            weight:parseInt(getComputedStyle(n).fontWeight),
+            wrap:n.hasAttribute('data-wrap'),
+            scale:logo ? 1 : new DOMMatrix(getComputedStyle(n).transform).a}];
         })),
-        progress:rect(banner.querySelector('[role=progressbar]').getBoundingClientRect())
+        progress:rect(banner.querySelector('[role=progressbar]').getBoundingClientRect()),
+        floor:parseFloat(lineup.style.getPropertyValue('--banner-fit-floor') || getComputedStyle(lineup).getPropertyValue('--banner-fit-floor')),
+        compression:parseFloat(getComputedStyle(lineup).getPropertyValue('--banner-score-compression')),
+        gutter:parseFloat(getComputedStyle(banner.querySelector('.banner-score-slot') || lineup).paddingInlineEnd) || 0,
+        scores:[...banner.querySelectorAll('.banner-score')].map(n => {
+          const slot = getComputedStyle(n.parentElement);
+          return {natural:n.offsetWidth + 1, room:n.parentElement.clientWidth - parseFloat(slot.paddingLeft) - parseFloat(slot.paddingRight)};
+        })
       };
     }""")
     box, art, paint = (geometry[key] for key in ('card', 'banner', 'paint'))
     assert box == art and len(set(geometry['radii'])) == 1, geometry
     ratio = box['width'] / box['height']
     if listing_row:
-        assert ratio >= 3.5 and box['height'] >= 44, geometry
+        assert box['height'] >= 44, geometry
+        if not allow_growth:
+            assert ratio >= 3.5, geometry
+    floor = geometry['floor']
+    assert 0 < floor < 1, geometry
     for name, ink in paint.items():
-        assert ink['lines'] == 1, (name, ink)
+        # One line, unless the line hit the fit floor and wrapped: then the row grows instead of the text shrinking.
+        assert ink['lines'] == 1 or ink['wrap'], (name, ink)
+        assert not ink['wrap'] or not name.endswith('-score'), (name, ink)
+        if not name.endswith('-team'):  # initials live in a fixed logo box
+            assert ink['scale'] >= floor - .002, ('drawn below the fit floor', name, ink['scale'], floor)
         assert (ink['weight'] >= 600) == name.endswith('-score'), (name, ink)
         if name.endswith('-score'):
             assert 'Acumin Pro Extra Condensed' in ink['font'], ink
         assert box['left'] <= ink['left'] <= ink['right'] <= box['right'], (name, ink, box)
-        assert box['top'] <= ink['top'] <= ink['bottom'] <= geometry['progress']['top'] + .25, (name, ink, box)
+        assert box['top'] <= ink['top'] <= ink['bottom'] <= geometry['progress']['top'], (name, ink, box)
+    # No tolerance: ink boxes of two items never overlap, in either direction.
     for index, (name, ink) in enumerate(paint.items()):
         for other, target in list(paint.items())[index + 1:]:
-            assert (ink['right'] <= target['left'] + .25 or target['right'] <= ink['left'] + .25
-                    or ink['bottom'] <= target['top'] + .25 or target['bottom'] <= ink['top'] + .25), (name, other, geometry)
+            assert (ink['right'] <= target['left'] or target['right'] <= ink['left']
+                    or ink['bottom'] <= target['top'] or target['bottom'] <= ink['top']), (name, other, geometry)
     top, bottom = paint['tier-0'], paint['tier-2']
     middle = paint.get('tier-1')
     if middle:
         assert top['bottom'] <= middle['top'] and middle['bottom'] <= bottom['top'], geometry
+    scores = geometry['scores']
+    if scored:
+        # Both scores are fitted together, so 50/97 and 101/99 are drawn at the same scale, and the scale
+        # only drops below the compression when the column is genuinely too tight for the wider score.
+        widest = max(score['natural'] for score in scores)
+        expected = max(floor, min(geometry['compression'], *(score['room'] / widest for score in scores)))
+        drawn = [paint[f'banner-{side}-score']['scale'] for side in ('away', 'home')]
+        assert abs(drawn[0] - drawn[1]) < .001 and abs(drawn[0] - expected) < .01, (drawn, expected, scores)
+        if all(score['room'] >= widest * geometry['compression'] for score in scores):
+            assert abs(drawn[0] - geometry['compression']) < .001, ('squeezed with room to spare', drawn, scores)
     for name in ('banner-away-score', 'banner-home-score'):
         if name in paint:
             score = paint[name]
@@ -374,12 +410,22 @@ def assert_clean_banner(card, event, listing_row):
     for side in ('away', 'home'):
         team = paint[f'banner-{side}-team']
         abbrev = paint[f'banner-{side}-label']
-        assert team['bottom'] <= abbrev['top'] + .25, geometry
-        assert abs(abbrev['top'] - bottom['top']) <= .25, geometry
+        assert team['bottom'] <= abbrev['top'], geometry
+        if not (bottom['wrap'] or abbrev['wrap']):  # a wrapped line is centred in a taller row
+            assert abs(abbrev['top'] - bottom['top']) <= .25, geometry
         if scored:
             score = paint[f'banner-{side}-score']
             gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
             assert gap >= 0, (side, gap, geometry)
+            # A real gutter between each score and the detail beside it, at every width and text size.
+            if middle:
+                gap = middle['left'] - score['right'] if side == 'away' else score['left'] - middle['right']
+                assert gap >= geometry['gutter'] - .01 > 0, ('score touches the detail', side, gap, geometry['gutter'], geometry)
+    if scored and listing_row and box['width'] >= 600:
+        # Wide listing card: scores sit near the mockup's 38.5% and 57.6% of the width, not out at the edges.
+        centres = [((paint[f'banner-{side}-score']['left'] + paint[f'banner-{side}-score']['right']) / 2 - box['left']) / box['width'] * 100
+                   for side in ('away', 'home')]
+        assert abs(centres[0] - 38.5) <= 3 and abs(centres[1] - 57.6) <= 4, ('score centres', event['uri_name'], centres)
     return dict(height=box['height'], width=box['width'], ratio=ratio, contrast=assert_banner_contrast(banner))
 
 
@@ -388,7 +434,8 @@ def check_matches(browser, origin, assets, dest):
     listing = json.loads((assets / 'fixtures/streams.json').read_text())
     template = listing['streams'][0]['streams'][0]
     away = dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b', logo='/icon-32.png', score=50)
-    home = dict(name='Arizona Wildcats', abbreviation='Arizona', color='#cc0033', logo='/icon-48.png', score=97)
+    # The feed caps abbreviations at five characters, so ARIZ is what real data produces.
+    home = dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033', logo='/icon-48.png', score=97)
     match = dict(state='in', detail='Halftime', away=away, home=home)
     cases = [
         ('matched-live', match),
@@ -398,12 +445,20 @@ def check_matches(browser, origin, assets, dest):
         ('matched-bad-color', dict(match, away=dict(away, color='url(evil)'))),
         ('matched-no-color', dict(match, away=dict(away, color=None), home=dict(home, color=None))),
         ('matched-bright', dict(match, away=dict(away, color='#ffffff'), home=dict(home, color='#ffff00'))),
-        ('matched-long-status', dict(match, detail='Halftime · WWWWWWWWWWWWWWWWWWWWWWWW', away=dict(away, score=150, abbreviation='WWWWW'), home=dict(home, score=197))),
+        ('matched-three-digit', dict(match, away=dict(away, score=101), home=dict(home, score=99))),
+        # The feed's maximum: a 24-character detail and five-character abbreviations.
+        ('matched-long-status', dict(match, detail='End of 4th Quarter - OT1', away=dict(away, score=148, abbreviation='WWWWW'), home=dict(home, score=152, abbreviation='MMMMM'))),
+        # Nothing may be left blank under a logo.
+        ('matched-empty-abbr', dict(match, away=dict(away, abbreviation=''), home=dict(home, abbreviation=''))),
         ('matched-final', dict(match, state='post', detail='Final', away=dict(away, score=150), home=dict(home, score=197))),
+        # Wider than the feed allows on purpose: the row may grow, the text may not shrink or collide.
+        ('matched-widest', dict(match, detail='W' * 24, away=dict(away, score=148, abbreviation='WWWWW'), home=dict(home, score=152, abbreviation='WWWWW'))),
     ]
     events = [dict(template, id=9000+i, match=game, name='Colorado State Rams at Arizona Wildcats', uri_name=f'basketball/{slug}', viewers='62',
                    starts_at=now-3600, ends_at=now+3600, poster='/never-fetch-provider-thumbnail.jpg') for i, (slug, game) in enumerate(cases)]
-    events[-2]['viewers'] = '123456789'
+    for event in events:
+        if event['uri_name'].endswith('matched-final'):
+            event['viewers'] = '123456789'
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=events)])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
@@ -427,9 +482,9 @@ def check_matches(browser, origin, assets, dest):
                         card.scroll_into_view_if_needed()
                         if slug in ('matched-missing-logo', 'matched-failed-logo'):
                             expect(card.locator('.banner-away-team .banner-initials')).to_have_text('WW' if slug == 'matched-missing-logo' else 'CS')
-                        geometry = assert_clean_banner(card, event, listing_row=True)
+                        geometry = assert_clean_banner(card, event, listing_row=True, allow_growth=slug == 'matched-widest')
                         if slug == 'matched-live':
-                            progress = card.get_by_role('progressbar')
+                            progress = card.locator('[role=progressbar]')
                             assert 49 <= int(progress.get_attribute('aria-valuenow')) <= 51
                             card.screenshot(path=str(dest / f'{width}-{theme}-{density}-row.png'))
                         if slug in ('matched-bad-color', 'matched-no-color'):
@@ -440,9 +495,12 @@ def check_matches(browser, origin, assets, dest):
                     # The fit pass runs from a ResizeObserver, then the transform restyles: let both settle.
                     page.evaluate('() => new Promise(resolve => { let n = 6; const tick = () => --n ? requestAnimationFrame(tick) : resolve(); tick() })')
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (width, density, 'matched 200%')
-                    for event in (events[0], events[2], events[-2]):
+                    # 200% text on every matched fixture: the text keeps its floor and the row grows instead.
+                    for event in events:
                         card = page.locator(f'a.event-card[href$="/{event["uri_name"]}"]')
-                        assert_clean_banner(card, event, listing_row=False)
+                        card.scroll_into_view_if_needed()
+                        results.append(dict(viewport=width, theme=theme, density=density, zoom=200,
+                                            fixture=event['uri_name'].split('/')[-1], **assert_clean_banner(card, event, listing_row=False)))
                     hero_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[events[0]])])
                     (assets / 'fixtures/streams.json').write_text(json.dumps(hero_listing))
                     assert page.goto(origin, wait_until='networkidle').ok
