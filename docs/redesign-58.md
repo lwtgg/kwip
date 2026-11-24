@@ -193,3 +193,62 @@ score-to-status gap was 6.76 px at normal text, 13.37 px with per-element doubli
   place of the missing production capture.
 - `cards_browser.py` passed the full fresh and stale sweep and the three-mode matched
   matrix. `git diff --check` passed.
+
+## Third review pass (5747136 comparison)
+
+Stacked score tracks reserve half of the 0.5em gutter each, on the two facing edges.
+The shared fit subtracts those paddings before scaling either score. The five-column
+layout now checks the longest measured word at the 0.60 floor and allows the outer
+padding to contract to half its preferred size when the word needs the room.
+Logo width comes from the rendered box in CSS pixels.
+
+At 390 px and 200% root text, stacking dropped from **12/13 to 4/13 fixtures**
+in each theme and density, or **48/52 to 16/52 observations** in total. The four that
+still stack are `matched-long-status`, `matched-final`, `matched-widest` and
+`matched-cjk`. In all four theme and density combinations `matched-live` reports
+`stacked: false`, with a 58 px status track and one Halftime line. Its comfortable
+row fell from 242.42 to 223.19 px.
+
+The stacked assertions now compare the two score edges horizontally and the lowest
+abbreviation ink to the first status tier vertically. Both enforce the gutter with
+a 0.02 px measurement tolerance. At 320 px and 200% root text the 999/999 clearance
+on `matched-long-status` increased from 0.75 to 13.75 px.
+
+| Temporary CSS mutation | First failing assertion at 320 px and 200% root text |
+|---|---|
+| Set stacked `--banner-stacked-score-gutter: 0px` | `matched-long-status` score-to-score gap 0.75 px against 13.00 px |
+| Set `--banner-gutter: 0` on stacked status | `matched-live` abbreviation-to-status gap 3.80 px against 13.00 px |
+
+The server and client use the same character fallback through hydration.
+Browsers with `Intl.Segmenter` apply word segmentation after mounting and refit.
+Chromium with the constructor disabled before app startup passed all 208 root-text
+observations, including a temporary Japanese fixture (`東京都` repeated eight
+times). The assertions found zero broken words and preserved the exact tier text.
+The browser reported zero hydration and page errors in that run.
+
+The matrix covers 624 matched listing observations and 16 matched heroes. Each
+width and mode has 52 listing observations across both themes and densities.
+
+| Text mode | Stacked at 320 / 390 / 1024 / 1280 px | Smallest stacked score gap | Smallest stacked abbreviation-to-status gap |
+|---|---|---:|---:|
+| Normal | 4 / 0 / 0 / 0 | 46.04 px | 7.39 px |
+| Per-element 200% | 12 / 4 / 4 / 0 | 13.99 px | 16.80 px |
+| Root 200% | 48 / 16 / 0 / 0 | 13.75 px | 16.80 px |
+
+Only `matched-widest` stacked at normal text, at 320 px. No matched hero stacked.
+The listing sweep found zero broken words, zero horizontal card overflow, a minimum
+scale of 0.60 and a minimum rendered contrast of 4.55:1. The fixture measurements,
+screenshots and mutation logs are under `/tmp/kw58-fix3`.
+
+### Verification gate
+
+- `pnpm test` passed 189 tests. The default Cloudflare build, the
+  `NITRO_PRESET=node-server pnpm build` build, the final default rebuild and
+  `pnpm exec wrangler deploy --dry-run` all passed.
+- `cards_browser.py` passed the fresh and stale sweeps and the full four-width,
+  three-mode matched matrix. The standalone matched run, the card contrast sweep
+  and the local Worker build-key test also passed.
+- The banner, density, not-live and click-under browser suites passed. Click-under
+  used the `1942ccb` baseline. Generation-first passed with a locally packed
+  generation fixture. Source health passed against a build with the local feed
+  seed on retry after a stalled-feed navigation timeout.

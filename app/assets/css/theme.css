@@ -505,15 +505,9 @@
     linear-gradient(color-mix(in srgb, var(--banner-black) calc(var(--banner-scrim) * 100%), transparent), color-mix(in srgb, var(--banner-black) calc(var(--banner-scrim) * 100%), transparent)),
     var(--banner-team-field);
 }
-@property --banner-logo-resolved {
-  syntax: '<length>';
-  inherits: false;
-  initial-value: 0px;
-}
 .banner-lineup {
   display: grid;
   min-width: 0;
-  --banner-logo-resolved: var(--banner-logo);
   --banner-team-min: max(var(--banner-logo), var(--banner-label-min, 0px));
   /* The fit pass reserves enough room for unbroken words, labels and scores. */
   grid-template-columns:
@@ -524,7 +518,8 @@
     minmax(var(--banner-team-min), var(--banner-team-width));
   grid-template-rows: minmax(1lh, 1fr) auto minmax(1lh, 1fr);
   align-items: center;
-  padding: var(--banner-pad-top) var(--banner-pad-inline) var(--banner-pad-bottom);
+  padding-block: var(--banner-pad-top) var(--banner-pad-bottom);
+  padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
   font-size: var(--banner-status-size);
   font-weight: var(--banner-label-weight);
   line-height: var(--banner-status-leading);
@@ -614,26 +609,34 @@
 
 /* When the five columns cannot hold the fit floor, the status gets a full-width tier group. */
 .banner-lineup[data-stacked] {
+  --banner-stacked-score-gutter: calc(var(--banner-gutter) / 2);
+  --banner-stacked-score-min: 0px;
   grid-template-columns:
     minmax(var(--banner-label-min), 1fr)
-    minmax(var(--banner-score-min), 1fr)
-    minmax(var(--banner-score-min), 1fr)
+    minmax(var(--banner-stacked-score-min), 1fr)
+    minmax(var(--banner-stacked-score-min), 1fr)
     minmax(var(--banner-label-min), 1fr);
   grid-template-rows: auto auto repeat(3, auto);
   padding-block: calc(var(--banner-pad-top) / 2) calc(var(--banner-pad-bottom) / 2);
-  padding-inline: clamp(0px, calc(50% - var(--banner-label-min) - var(--banner-score-min)), var(--banner-pad-inline));
+  padding-inline: clamp(0px, calc(50% - var(--banner-label-min) - var(--banner-stacked-score-min)), var(--banner-pad-inline));
+}
+.banner-lineup[data-stacked]:has(.banner-score-slot) {
+  --banner-stacked-score-min: calc(var(--banner-score-min) + var(--banner-stacked-score-gutter));
 }
 .banner-lineup[data-stacked] .banner-team,
 .banner-lineup[data-stacked] .banner-score-slot { grid-row: 1; }
 .banner-lineup[data-stacked] .banner-score-slot {
-  padding-inline: 0;
   padding-block-start: var(--spacing-1);
 }
 .banner-lineup[data-stacked] .banner-score { line-height: var(--banner-stacked-score-leading); }
 .banner-lineup[data-stacked] .banner-abbreviation { grid-row: 2; }
 .banner-lineup[data-stacked] .banner-home-team,
 .banner-lineup[data-stacked] .banner-home-label { grid-column: 4; }
-.banner-lineup[data-stacked] .banner-home-score { grid-column: 3; }
+.banner-lineup[data-stacked] .banner-away-score { padding-inline-end: var(--banner-stacked-score-gutter); }
+.banner-lineup[data-stacked] .banner-home-score {
+  grid-column: 3;
+  padding-inline-start: var(--banner-stacked-score-gutter);
+}
 .banner-lineup[data-stacked] .banner-status {
   grid-area: 3 / 1 / -1 / -1;
   padding-block-start: var(--banner-gutter);

@@ -19,11 +19,17 @@ function room(slot: HTMLElement) {
   return slot.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
 }
 
-const wordSegmenter = new Intl.Segmenter('en', { granularity: 'word' })
+const wordSegmenter = typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter('en', { granularity: 'word' })
+  : undefined
+// Use the same segmentation during SSR and hydration, regardless of browser support.
+const segmentAfterHydration = ref(false)
 const unspacedScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u
 const statusWords = computed(() => props.content.tiers.map(line =>
   (line.match(/\s+|\S+/g) ?? []).flatMap(word => unspacedScript.test(word)
-    ? Array.from(wordSegmenter.segment(word), part => part.segment)
+    ? (segmentAfterHydration.value && wordSegmenter
+        ? Array.from(wordSegmenter.segment(word), part => part.segment)
+        : Array.from(word))
     : [word])))
 function longestWord(line: HTMLElement) {
   return Math.max(0, ...Array.from(line.children, word => word.getBoundingClientRect().width))
@@ -40,7 +46,10 @@ function fitText() {
   const labels = lines.filter(line => line.parentElement!.classList.contains('banner-abbreviation'))
   const status = lines.filter(line => line.classList.contains('banner-status-line'))
   delete lineup.dataset.stacked
-  const available = room(lineup)
+  lineup.style.removeProperty('--banner-lineup-min')
+  const preferredRoom = room(lineup)
+  // Match the CSS minimum inline padding of half the preferred padding.
+  const available = (preferredRoom + lineup.getBoundingClientRect().width) / 2
   for (const line of lines) {
     observer?.observe(line)
     delete line.dataset.wrap
@@ -57,14 +66,16 @@ function fitText() {
   const scoreMin = Math.ceil(widestScore * floor)
   const gutter = scores.length ? parseFloat(getComputedStyle(scores[0]!.parentElement!).paddingInlineEnd) : 0
   const labelMin = Math.ceil(Math.max(...labels.map(line => natural.get(line)!)) * floor)
-  const logo = parseFloat(getComputedStyle(lineup).getPropertyValue('--banner-logo-resolved'))
-  const wordMin = Math.max(parseFloat(style.fontSize) * 4, Math.ceil(Math.max(...status.map(longestWord)) * floor) + 1)
+  const logo = lineup.querySelector('.banner-team > *')!.getBoundingClientRect().width
+  const wordMin = Math.ceil(Math.max(...status.map(longestWord)) * floor) + 1
   const statusPreferred = Math.ceil(Math.max(...status.map(line => natural.get(line)!)) * floor)
-  const statusRoom = available - 2 * (Math.max(logo, labelMin) + scoreMin + gutter)
+  const sideMin = Math.max(logo, labelMin) + scoreMin + gutter
+  const statusRoom = available - 2 * sideMin
+  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + wordMin}px`)
   lineup.toggleAttribute('data-stacked', statusRoom < wordMin)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
-  lineup.style.setProperty('--banner-status-min', `${Math.max(wordMin, Math.min(statusRoom, statusPreferred))}px`)
+  lineup.style.setProperty('--banner-status-min', `${Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))}px`)
 
   const scoreFit = Math.max(floor, Math.min(compression, ...scores.map(line => room(line.parentElement!) / widestScore)))
   for (const line of lines) {
@@ -80,6 +91,7 @@ function fitText() {
 }
 let observer: ResizeObserver | undefined
 onMounted(() => {
+  segmentAfterHydration.value = !!wordSegmenter
   for (const [index, side] of [match.value.away, match.value.home].entries()) {
     const image = logoImages[index]
     if (side.logo && image?.complete && image.naturalWidth === 0) failed.value[side.logo] = true
@@ -89,7 +101,7 @@ onMounted(() => {
   if (lineupElement.value) observer.observe(lineupElement.value)
   void document.fonts.ready.then(fitText)
 })
-watch([match, () => props.content, failed], fitText, { flush: 'post', deep: true })
+watch([match, () => props.content, failed, segmentAfterHydration], fitText, { flush: 'post', deep: true })
 onBeforeUnmount(() => observer?.disconnect())
 </script>
 

@@ -346,10 +346,15 @@ def banner_measurements(geometry):
     detail = paint.get('tier-1', paint['tier-0'])
     middle = paint.get('tier-1')
     scores = [paint.get(f'banner-{side}-score') for side in ('away', 'home')]
-    gap = None
-    if middle and all(scores):
-        gap = (paint['tier-0']['top'] - max(score['bottom'] for score in scores) if geometry['stacked']
-               else min(middle['left'] - scores[0]['right'], scores[1]['left'] - middle['right']))
+    score_gap = None
+    stacked_status_gap = None
+    if geometry['stacked']:
+        stacked_status_gap = paint['tier-0']['top'] - max(paint[f'banner-{side}-label']['bottom']
+                                                        for side in ('away', 'home'))
+        if all(scores):
+            score_gap = scores[1]['left'] - scores[0]['right']
+    elif middle and all(scores):
+        score_gap = min(middle['left'] - scores[0]['right'], scores[1]['left'] - middle['right'])
     return dict(height=box['height'], width=box['width'], ratio=box['width'] / box['height'],
                 status_width=geometry['statusWidth'], detail_lines=detail['lines'],
                 abbreviation_lines=max(paint[f'banner-{side}-label']['lines'] for side in ('away', 'home')),
@@ -359,7 +364,8 @@ def banner_measurements(geometry):
                 tier_clearance=min(detail['top'] - paint['tier-0']['bottom'],
                                    paint['tier-2']['top'] - detail['bottom']) if 'tier-1' in paint else None,
                 min_scale=min(ink['scale'] for name, ink in paint.items() if not name.endswith('-team')),
-                gutter=geometry['gutter'], score_gap=gap, stacked=geometry['stacked'])
+                gutter=geometry['gutter'], score_gap=score_gap, stacked_status_gap=stacked_status_gap,
+                stacked=geometry['stacked'])
 
 
 def assert_clean_banner(card, event, listing_row, allow_growth=False, root_text=False):
@@ -447,7 +453,6 @@ def assert_clean_banner(card, event, listing_row, allow_growth=False, root_text=
         # 27ba445's 320px Halftime row was 145px. Allow the stacked identity plus status tiers,
         # including a multi-line detail, within a bounded number of metadata line heights.
         assert geometry['rootSize'] == 32 and geometry['fontSize'] == 26, geometry
-        assert geometry['statusWidth'] >= 4 * geometry['fontSize'], ('status column too narrow', geometry)
         lines = middle['lines'] if middle else 1
         assert lines <= 3, geometry
         assert box['height'] <= 145.2 + (4 + (lines - 1) * 1.3) * geometry['fontSize'], (
@@ -486,20 +491,24 @@ def assert_clean_banner(card, event, listing_row, allow_growth=False, root_text=
             score = paint[f'banner-{side}-score']
             gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
             assert gap >= 0, (side, gap, geometry)
-            # A real gutter between each score and the detail beside it, at every width and text size.
-            if middle:
-                if geometry['stacked']:
-                    gap = top['top'] - score['bottom']
-                else:
-                    gap = middle['left'] - score['right'] if side == 'away' else score['left'] - middle['right']
-                gutter = max(geometry['fontSize'] * .5, geometry['gutter'])
-                assert gap >= gutter - .02, ('measured score gap below gutter', side, gap, gutter, geometry)
+    measurements = banner_measurements(geometry)
+    # Keep the intended minimum even if a stylesheet regression removes the padding.
+    gutter = max(geometry['fontSize'] * .5, geometry['gutter'])
+    if geometry['stacked']:
+        gap = measurements['stacked_status_gap']
+        assert gap >= gutter - .02, ('stacked label-to-status gap below gutter', event['uri_name'], gap, gutter)
+        if scored:
+            gap = measurements['score_gap']
+            assert gap >= gutter - .02, ('stacked score-to-score gap below gutter', event['uri_name'], gap, gutter)
+    elif scored and middle:
+        gap = measurements['score_gap']
+        assert gap >= gutter - .02, ('measured score gap below gutter', event['uri_name'], gap, gutter)
     if scored and listing_row and not allow_growth and box['width'] >= 600:
         # Wide listing card: scores sit near the mockup's 38.5% and 57.6% of the width, not out at the edges.
         centres = [((paint[f'banner-{side}-score']['left'] + paint[f'banner-{side}-score']['right']) / 2 - box['left']) / box['width'] * 100
                    for side in ('away', 'home')]
         assert abs(centres[0] - 38.5) <= 3 and abs(centres[1] - 57.6) <= 4, ('score centres', event['uri_name'], centres)
-    return dict(**banner_measurements(geometry), contrast=assert_banner_contrast(banner))
+    return dict(**measurements, contrast=assert_banner_contrast(banner))
 
 
 def check_matches(browser, origin, assets, dest, text_modes, measure_only=False):
@@ -573,6 +582,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                     expect(card.locator('.banner-away-team .banner-initials')).to_have_text('WW' if slug == 'matched-missing-logo' else 'CS')
                                 geometry = assert_clean_banner(card, event, listing_row=mode == 'normal',
                                                                allow_growth=slug in ('matched-widest', 'matched-cjk'), root_text=mode == 'root')
+                                if ((mode == 'normal' and (width == 1024 or (
+                                        width in (320, 390) and slug not in ('matched-widest', 'matched-cjk'))))
+                                        or (mode == 'root' and width == 390 and slug == 'matched-live')):
+                                    assert not geometry['stacked'], ('unexpected stacking', prefix, mode, slug)
                                 if mode == 'normal' and slug == 'matched-live':
                                     progress = card.locator('[role=progressbar]')
                                     assert 49 <= int(progress.get_attribute('aria-valuenow')) <= 51
