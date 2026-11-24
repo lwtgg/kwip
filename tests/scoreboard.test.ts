@@ -120,7 +120,7 @@ test('college basketball regulation details use halves', async () => {
 test('missing provider display name falls back to the correct fixture side', async () => {
   const event = item({ name: 'Home FC vs. Away FC' })
   await run([event], async () => response([competition({ competitors: [competitor('home', 'Home FC'),
-    competitor('away', undefined, { name: 'Away FC' })] })]))
+    competitor('away', undefined, { shortDisplayName: 'Away FC' })] })]))
   assert.equal(event.match.away.name, 'Away FC')
 })
 
@@ -129,4 +129,48 @@ test('malformed event structures are skipped without losing valid competitions',
   await run([event], async () => Response.json({ events: [null, { competitions: {} }, { competitions: [null] },
     { id: 'valid', competitions: [competition()] }] }))
   assert.ok(event.match)
+})
+
+const collegeCompetition = () => competition({ competitors: [
+  competitor('away', 'Arizona Wildcats', { id: '12', shortDisplayName: 'Arizona', name: 'Wildcats' }),
+  competitor('home', 'Colorado State Rams', { id: '36', shortDisplayName: 'Colorado State', name: 'Rams' }),
+] })
+
+test('mascot-only fixtures stay unmatched in either order while full names match the same competition', async () => {
+  for (const reverse of [false, true]) {
+    const names = ['Wildcats', 'Rams']
+    const full = ['Arizona Wildcats', 'Colorado State Rams']
+    if (reverse) { names.reverse(); full.reverse() }
+    const events = [item({ tag: 'College Basketball', name: names.join(' vs. ') }),
+      item({ tag: 'College Basketball', name: full.join(' vs. ') })]
+    assert.deepEqual(await run(events, async () => response([collegeCompetition()])),
+      { leagues: 1, requests: 1, matched: 1, unmatched: 1 })
+    assert.equal(events[0].match, undefined)
+    assert.equal(events[1].match.away.name, 'Arizona Wildcats')
+    assert.equal(events[1].match.home.name, 'Colorado State Rams')
+  }
+})
+
+test('duplicate normalized short aliases across distinct teams cannot identify a side', async () => {
+  const comp = collegeCompetition()
+  comp.competitors[0].team.shortDisplayName = 'State'
+  const other = collegeCompetition()
+  other.competitors[0].team = { id: '99', displayName: 'Other Wildcats', shortDisplayName: ' STATE ', name: 'Wildcats' }
+  const event = item({ tag: 'College Basketball', name: 'State vs. Colorado State' })
+  await run([event], async () => response([comp, other]))
+  assert.equal(event.match, undefined)
+})
+
+test('repeated appearances of the same team do not make a short alias ambiguous', async () => {
+  const event = item({ tag: 'College Basketball', name: 'Arizona vs. Colorado State' })
+  await run([event], async () => response([collegeCompetition(), collegeCompetition()]))
+  assert.ok(event.match)
+})
+
+test('full-name strength beats a nearer short-name fixture for one competition', async () => {
+  const events = [item({ tag: 'College Basketball', name: 'Arizona vs. Colorado State' }),
+    item({ tag: 'College Basketball', name: 'Arizona Wildcats vs. Colorado State Rams', starts_at: start + 3600 })]
+  await run(events, async () => response([collegeCompetition()]))
+  assert.equal(events[0].match, undefined)
+  assert.ok(events[1].match)
 })

@@ -57,6 +57,35 @@ function matchValue(competition, away, home, names) {
   return result
 }
 
+// Index aliases once per league payload; repeat appearances of one team count once.
+function aliasIndex(payload, soccer) {
+  const counts = new Map()
+  const aliases = new Map()
+  for (const event of payload.events) {
+    if (!Array.isArray(event?.competitions)) continue
+    for (const competition of event.competitions) {
+      if (!Array.isArray(competition?.competitors)) continue
+      for (const competitor of competition.competitors) {
+        const team = competitor?.team
+        if (!team) continue
+        const names = [team.name, team.shortDisplayName, team.displayName]
+          .flatMap((name, index) => typeof name === 'string' && name.trim()
+            ? [[normalizeTeam(name, soccer), index + 1]] : [])
+        aliases.set(competitor, names)
+        const identity = team.id != null ? `id:${team.id}`
+          : team.displayName ? `name:${normalizeTeam(team.displayName, soccer)}` : team
+        for (const [name] of names) {
+          if (!counts.has(name)) counts.set(name, new Set())
+          counts.get(name).add(identity)
+        }
+      }
+    }
+  }
+  return (competitor, name) => Math.max(0, ...(aliases.get(competitor) ?? [])
+    .filter(([alias]) => alias === name)
+    .map(([alias, tier]) => tier === 2 && counts.get(alias).size > 1 ? 1 : tier))
+}
+
 // Mutates eligible items only. A failed league is deliberately indistinguishable from no match.
 export async function enrichScoreboards(items, { deadline = performance.now() + 8000, fetcher = fetch,
   maxRequests = Infinity, onRequest = () => {} } = {}) {
@@ -84,6 +113,7 @@ export async function enrichScoreboards(items, { deadline = performance.now() + 
         payload = await response.json()
       } catch { continue }
       if (!Array.isArray(payload?.events) || performance.now() >= deadline) continue
+      const strength = aliasIndex(payload, soccer)
       const candidates = []
       for (const providerEvent of payload.events) {
         if (!providerEvent || !Array.isArray(providerEvent.competitions)) continue
@@ -94,26 +124,24 @@ export async function enrichScoreboards(items, { deadline = performance.now() + 
           const away = competitors.find(side => side?.homeAway === 'away')
           const home = competitors.find(side => side?.homeAway === 'home')
           if (!away || !home) continue
-          const aliases = competitor => [competitor.team?.displayName, competitor.team?.shortDisplayName,
-            competitor.team?.name].filter(name => typeof name === 'string' && name).map(name => normalizeTeam(name, soccer))
-          const awayNames = aliases(away), homeNames = aliases(home)
           const date = Date.parse(raw.date ?? providerEvent.date)
           for (const event of events) {
             const names = event.name.split(/ vs\. | vs | at /)
             const normalized = names.map(name => normalizeTeam(name, soccer))
-            const direct = awayNames.includes(normalized[0]) && homeNames.includes(normalized[1])
-            const reverse = homeNames.includes(normalized[0]) && awayNames.includes(normalized[1])
+            const direct = Math.min(strength(away, normalized[0]), strength(home, normalized[1]))
+            const reverse = Math.min(strength(home, normalized[0]), strength(away, normalized[1]))
+            const tier = Math.max(direct, reverse)
             const distance = Math.abs(eventTime(event) - date)
-            if ((!direct && !reverse) || distance > 36 * 3600_000 || !Number.isFinite(distance)) continue
+            if (tier < 2 || distance > 36 * 3600_000 || !Number.isFinite(distance)) continue
             const match = matchValue({ ...raw, status: raw.status ?? providerEvent.status,
               periodLabel: soccer ? '' : tag === 'NHL' ? 'P' : tag === 'College Basketball' ? 'H' : 'Q' }, away, home,
-              reverse ? [names[1], names[0]] : names)
-            if (match) candidates.push({ event, key: `${providerEvent.id ?? date}:${index}`, distance, match })
+              reverse > direct ? [names[1], names[0]] : names)
+            if (match) candidates.push({ event, key: `${providerEvent.id ?? date}:${index}`, distance, tier, match })
           }
         }
       }
       const used = new Set()
-      for (const candidate of candidates.sort((a, b) => a.distance - b.distance)) {
+      for (const candidate of candidates.sort((a, b) => b.tier - a.tier || a.distance - b.distance)) {
         if (candidate.event.match || used.has(candidate.key)) continue
         candidate.event.match = candidate.match
         used.add(candidate.key)
