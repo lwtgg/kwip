@@ -55,6 +55,19 @@ def double_text(page):
     }''')
 
 
+def assert_unbroken_time(page):
+    for timing in page.locator('.card-time').all():
+        measurement = timing.evaluate('''el => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return {rects: range.getClientRects().length,
+            height: el.getBoundingClientRect().height,
+            line: parseFloat(getComputedStyle(el).lineHeight)};
+        }''')
+        assert measurement['rects'] == 1, (timing.inner_text(), measurement)
+        assert measurement['height'] <= measurement['line'] + 1, measurement
+
+
 def check(browser, origin, width, theme, density, dest, stale=False):
     with browser.new_context(viewport={'width': width, 'height': 850}, reduced_motion='reduce') as context:
         context.add_cookies([dict(name='theme', value=theme, url=origin), dict(name='density', value=density, url=origin)])
@@ -116,10 +129,7 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     assert box['labelWhole'], (prefix, label, 'label truncated', box)
                 if not box['hero']:
                     assert box['art'] <= box['name'][0], (prefix, label, 'plate leads', box)
-                    # 51 target: rows are at least 3.5 times wider than tall. A lane note that has to
-                    # wrap (Availability unconfirmed in the phone lane) adds one line, and only that.
-                    floor = 3.5 if not box['twoLineNote'] else box['width'] / (box['width'] / 3.5 + 18)
-                    assert box['width'] / box['height'] >= floor, (prefix, label, 'row proportion', box)
+                    assert box['width'] / box['height'] >= 3.5, (prefix, label, 'row proportion', box)
             if label in ('category', 'stale'):
                 for card in cards.all():
                     slug = card.get_attribute('href').split('/')[-1]
@@ -149,7 +159,8 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     for slug in ('invalid-end', 'missing-end'):
                         card = page.locator(f'a.event-card[href$="/{slug}"]')
                         assert card.locator('.card-time').count() == 1
-                        assert 'Availability unconfirmed' in card.inner_text()
+                        assert 'Unconfirmed' in card.inner_text()
+                        expect(card).to_have_accessible_name(re.compile('Availability unconfirmed'))
                         assert card.get_by_role('progressbar').count() == 0
                     live = page.locator('a.event-card[href$="/live"]')
                     # Below md the lane keeps one note: the status replaces the date caption.
@@ -176,6 +187,7 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     page.screenshot(path=str(dest / f'{prefix}-focus.png'))
                     # Text-only 200% stress: keep the layout viewport unchanged.
                     double_text(page)
+                    assert_unbroken_time(page)
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (prefix, '200% overflow')
                     for timing in page.locator('.card-time, .card-state').all():
                         assert timing.evaluate('(el) => el.scrollWidth <= el.clientWidth + 1'), (prefix, timing.inner_text())
@@ -183,6 +195,7 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     page.screenshot(path=str(dest / f'{prefix}-200percent.png'), full_page=True)
             if label == 'home':
                 double_text(page)
+                assert_unbroken_time(page)
                 page.screenshot(path=str(dest / f'{prefix}-home-200percent.png'), full_page=True)
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (prefix, 'hero 200% overflow')
                 for timing in page.locator('.card-time, .card-state').all():
@@ -258,6 +271,7 @@ def check_known_hero(browser, origin, assets, dest):
                     expect(hero).to_have_css('outline-offset', '2px')
                     page.screenshot(path=str(dest / f'{prefix}-hero-known-focus.png'), full_page=True)
                     double_text(page)
+                    assert_unbroken_time(page)
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     assert hero.locator('.card-time').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
                     page.screenshot(path=str(dest / f'{prefix}-hero-known-200percent.png'), full_page=True)

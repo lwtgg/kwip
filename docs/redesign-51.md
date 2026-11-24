@@ -41,7 +41,7 @@ claim credited to it, so the citation and the claim are both gone.
 | League label above the row | `.card-category`: its own full-width line across the top of the row, metadata size, muted, one line | When it does not fit, the tag after the dot drops whole before the sport name truncates. "Football · Champions League" (155 px) prints in full at 320. |
 | Crest at the leading edge | Poster plate, 16:9 at `--spacing-row-plate` 6rem (3rem below md), `--radius-plate` | Uncropped genuine poster or the existing fallback; never a pretend crest. |
 | Names beside the crest | `.card-name` at 1rem/400 `text-fg`, two-line clamp at md and up, one line below md; one quiet meta line under it (viewer count, `Watch`) | Viewer count is tertiary and says `1 viewer`, `2 viewers`. `Watch` is the subordinate cue, muted 400, and stays inside the one link; when the meta line is too narrow it drops whole (it stays in the accessible name). |
-| Score in its own lane | `.card-lane` at the trailing edge: caption, then time with a small `UTC` unit, then quiet status | The lane is a fixed column at the floor of its scale (`--spacing-row-lane` 6.75rem), so no state widens it; longer text wraps inside. The name column is `minmax(0, 1fr)`, so the name truncates for the lane, never the reverse. |
+| Score in its own lane | `.card-lane` at the trailing edge: caption, then time with a small `UTC` unit, then quiet status | The lane uses `minmax(var(--card-lane-min), max-content)` above its 6.75rem row floor. Time never wraps; supporting text may wrap within the lane. The name column is `minmax(0, 1fr)`, so the name truncates for the lane, never the reverse. |
 | The heavy element | The time, 850, `text-fg`, `--card-time-tracking` -0.02em | The only bold thing in a row. Name, state, status, caption, `UTC`, viewers and `Watch` are 400; everything but the name and the state word is muted. |
 | Central game state | Quiet `StatusPill` in the lane, muted 400: `In 1h 58m`, `Live`, `2h ago` | Short form only in the lane; the accessible label keeps `Upcoming in 1 hour 58 minutes. Starts …`. States without a number (`24/7`, `Ended`, `Replay`, `Time unavailable`, `Unconfirmed`) take the fact slot at label scale (metadata size in a row, 1rem in the hero above 28rem), in the height the time would use. |
 | Live progress | `.card-lane-bar`, absolutely placed on the row's bottom edge, inset by the row padding | Out of the lane's flow: it adds no band to the row and moves nothing when it appears at kickoff. |
@@ -68,17 +68,18 @@ lane. Measured at 320 px, the row is 288 px wide and 80–81 px tall (3.56:1) co
    It truncates; the full name is in the link's accessible name.
 4. The time drops a step, from 1.75rem to 1.5rem. The lane stays 6.75rem, the same as at md and
    up, because the widest one-line strings set it (see "Lane floors").
-5. The lane never gives way: its notes wrap (`Availability unconfirmed`, `Last listed: Time
-   unavailable`) but nothing in it truncates. Those rows are one line taller. No row in the live
-   feed is.
+5. Notes use short, honest wording: `Unconfirmed` and `No time listed`. Their accessible labels
+   retain `Availability unconfirmed` and `Last listed: Time unavailable`. At normal text size
+   every note fits one line; there is no proportion exception for any state.
 
 Density changes spacing only: row padding, row gap, column gap and the stack gaps. The same
 fields, type and structure appear in both densities.
 
 ## Lane floors
 
-The lane is a fixed column, not `minmax(floor, auto)`, so a long state cannot widen it and
-reflow one row. Each floor is the widest one-line lane string at its scale, measured in macOS
+The lane uses a `max-content` upper bound so an unbroken time can grow above its floor.
+Notes retain inline-size containment so captions wrap rather than dictate the lane width.
+Each floor was measured in macOS
 Chromium with the system face (lane text is not condensed; only the time is):
 
 | Scale | Strings | Floor |
@@ -119,7 +120,7 @@ used (column flex, contained note, reversed fact row). Every lane string begins 
 or is digits only, so Unicode bidi rule W7 keeps each one a single left-to-right run.
 
 The floors are measured widths with the system font on macOS Chromium, sized so the uncondensed
-time still fits. Text wider than a floor wraps inside the lane; it never widens it. The schedule
+time still fits at normal size. Enlarged time widens the lane; supporting text can wrap inside it. The schedule
 bar is out of the lane's flow, so its appearance at kickoff moves nothing. The test matrix is
 Chromium on macOS only; no other engine or OS is claimed.
 
@@ -185,7 +186,7 @@ removed, and nothing was added.
   least 3.5:1, the lane reserved for state rows, `1 viewer`) and the short status at the kickoff
   boundary.
 
-## 51 fix round: before and after
+## 51 fix round: before and after (historical; superseded by fix round 2)
 
 The review passed the row's identity and failed its proportion and emphasis. Every number below
 was measured in Chromium on macOS: before on a build of `4cb8c4d`, after on the final source.
@@ -230,7 +231,7 @@ What did not get better, and why:
 - **Next up rows are 1232 px wide at 1280.** One column was the brief's choice. The lane sits at
   the far edge of a long row.
 
-## Verification
+## First fix verification (historical; missed the failures below)
 
 Everything below ran on the final source on 23 November 2026, in Chromium on macOS. Logs are
 in `/tmp/kwip51fix/final/`. No deployment.
@@ -283,3 +284,66 @@ per file, summed):
 `useCardTint.ts` imports `theme.css?raw`, so comments in `theme.css` ship in a client chunk. The
 rationale lives in this document, and the CSS comments stay short. No dependency, image, route
 or runtime request was added.
+
+## 51 fix round 2: strict proportions and intact kickoff
+
+Measured on `71337d2` and the fixed source in macOS Chromium on 23 November 2026.
+Raw measurements, screenshots and command logs: `/tmp/kwip51fix2/`.
+The historical verification above missed these failures and does not establish this round's result.
+
+The row and hero lanes now use `minmax(floor, max-content)`. `.card-time` is explicitly
+`white-space: nowrap`; captions and notes retain inline-size containment and can wrap at enlarged
+text sizes. At normal size, `Unconfirmed` replaces `Availability unconfirmed`, and `No time listed`
+replaces the stale missing-time note. Full wording remains in accessible labels. Replay captions
+show the full date without the trailing UTC unit, retaining that unit in the accessible label.
+The strict test also exposed replay's previously wrapped date caption (288×98, 2.94:1).
+
+All numbers below hold in both themes. The before/after edge probe covers both densities, all
+14 synthetic states, fresh and stale, at 320/390/1280 (48 combinations across both builds).
+
+| Measurement | Before | After |
+|---|---:|---:|
+| 320 invalid-end, comfortable | 288×99, 2.91:1 | 288×81, **3.56:1** |
+| 320 invalid-end, compact | 288×91, 3.16:1 | 288×73, **3.95:1** |
+| 320 stale missing-time, comfortable | 288×98, 2.94:1 | 288×80, **3.60:1** |
+| 320 stale missing-time, compact | 288×90, 3.20:1 | 288×72, **4.00:1** |
+| 390 invalid-end, comfortable / compact | 358×99 / 91, 3.62 / 3.93:1 | 358×81 / 73, **4.42 / 4.90:1** |
+| 390 stale missing-time, comfortable / compact | 358×98 / 90, 3.65 / 3.98:1 | 358×80 / 72, **4.48 / 4.97:1** |
+| 200% time at 320 and 390, both densities | 96 px high, 2 text rects, 108 px lane | **48 px**, **1 rect**, 173 px lane |
+| 200% time at 1280, both densities | 112 px high, 2 text rects, 108 px lane | **56 px**, **1 rect**, 192 px lane |
+| Wrapped-note test floor at 320 | 2.87:1 | **3.5:1**, no exception |
+
+The review grouped the 99/91 px numbers with stale rows too; the fresh baseline probe above
+separates the actual stale 98/90 px measurements. Neither old stale result meets 3.5:1.
+The new ratio assertion fails against the saved baseline on a 288×99 row. The new time assertion
+requires one text rect and a height no greater than one computed line box; baseline times have
+two rects and twice the line-box height. These checks run for category rows, home, and known
+kickoff heroes at all three widths, both themes and both densities.
+
+### Round 2 verification
+
+- `pnpm test`: **148 passed, 0 failed**.
+- `pnpm build` (Worker), `NITRO_PRESET=node-server pnpm build`, Node HTTP smoke on `/`,
+  `/c/basketball`, `/vods` (all 200), then default Worker rebuild: passed.
+- `pnpm exec wrangler deploy --dry-run`: passed; upload **1058.79 KiB / 278.45 KiB gzip**
+  (before 1058.54 / 278.34). The same 15 ignored-bare-import warnings; no new warning type.
+- `tests/cards_browser.py`: **60 loads, 612 cards, 460 screenshots**, widths 320/390/1280,
+  both themes and densities, home/category/replays/empty/stale; every row **≥3.5:1**.
+  CLS **0 → 0** on all loads including delayed/failed art, at kickoff/full time at 390/1280
+  in both themes, and all 12 known-kickoff hero runs. All 200% row and hero checks pass.
+- Independent edge probe: 48 before/after combinations, all fixed states pass. Independent
+  page probe: 72 captures including noscript and reduced motion, no horizontal overflow;
+  normal row minima at 320/390/1280 are **3.56 / 4.42 / 4.14:1**.
+- `node tests/cards_contrast.ts`: passed, unchanged fg/muted/focus minimums:
+  dark listing **10.41 / 5.78 / 7.55**; dark hero **8.81 / 4.89 / 6.39**;
+  light listing **13.20 / 5.58 / 6.02**; light hero **12.12 / 5.12 / 5.52**.
+- `density_browser.py`, `banner_browser.py`, `notLive_browser.py`, `sourceHealth_browser.py`,
+  and `click_under_browser.py` against `/tmp/kwip50a-baseline/.output`: passed.
+  Source-health emitted Playwright pending-route teardown diagnostics, with exit status 0.
+- Impeccable `detect --json --changed`: `[]`; independent diff review: no defects;
+  `git diff --check`: clean.
+- Client JS gzip **126329 → 126421 B** (+92); CSS gzip **7505 → 7512 B** (+7), no added
+  dependency, image, route, client chunk or runtime request. `package.json` unchanged.
+
+Only `app/assets/css/theme.css`, `app/components/CardTiming.vue`, `tests/cards_browser.py`
+and this document changed. No deployment was performed.

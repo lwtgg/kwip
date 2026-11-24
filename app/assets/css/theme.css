@@ -258,7 +258,7 @@
   font-weight: var(--card-name-weight);
 }
 
-/* The number lane: a fixed column at its floor; text wraps inside it. Laid out RTL so each
+/* The number lane grows above its floor for an intact time. Laid out RTL so each
    box is anchored at the trailing edge and a changing label never shifts (bidi W7 keeps
    every lane string one LTR run). */
 .card-lane {
@@ -293,7 +293,7 @@
 }
 .card-time {
   min-width: 0;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   font-size: var(--card-time-size);
   font-weight: var(--card-time-weight);
   line-height: var(--card-time-leading);
@@ -339,7 +339,7 @@
 .card-row {
   position: relative;
   display: grid;
-  grid-template-columns: var(--card-plate) minmax(0, 1fr) var(--card-lane-min);
+  grid-template-columns: var(--card-plate) minmax(0, 1fr) minmax(var(--card-lane-min), max-content);
   grid-template-rows: auto 1fr auto auto 1fr;
   grid-template-areas:
     "label label label"
@@ -377,7 +377,7 @@
   --row-pad-inline: var(--hero-pad);
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--card-lane-min);
+  grid-template-columns: minmax(0, 1fr) minmax(var(--card-lane-min), max-content);
   grid-template-rows: 1fr auto auto auto 1fr;
   grid-template-areas:
     ". ."
