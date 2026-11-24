@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { cardTintStyle } from '~/composables/useCardTint'
-import { blurBackground } from '~/composables/usePosterBlur'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
@@ -29,38 +28,19 @@ const props = withDefaults(
   },
 )
 
-const imgRef = ref<HTMLImageElement | null>(null)
-const imgLoaded = ref(false)
-const imgError = ref(false)
-const background = blurBackground(() => props.stream?.blurhash)
-
-watch(
-  () => props.stream?.poster,
-  () => {
-    imgLoaded.value = false
-    imgError.value = false
-  },
-)
-
-onMounted(() => {
-  if (imgRef.value?.complete) {
-    imgLoaded.value = imgRef.value.naturalWidth > 0
-    imgError.value = !imgLoaded.value
-  }
-})
-
-const effectiveVariant = computed<'default' | 'skeleton'>(() => {
-  if (!props.stream || props.variant === 'skeleton' || !props.stream.poster) {
-    return 'skeleton'
-  }
-  return 'default'
-})
-
 const tint = computed(() => cardTintStyle(props.stream?.colors, props.scale))
 
 const targetHref = computed(() => {
   if (props.to) return props.to
   return props.stream ? `/live/${props.stream.uri_name}` : '/'
+})
+
+const matchLabel = computed(() => {
+  const match = props.stream?.match
+  if (!match) return ''
+  const scores = match.away.score !== null && match.home.score !== null
+  return [match.away, match.home].map(side => scores ? `${side.name} ${side.score}` : side.name)
+    .concat(match.detail).join(', ')
 })
 
 const compact = computed(() => formatViewersCompact(props.stream?.viewers ?? 0))
@@ -87,46 +67,27 @@ const metric = computed(() => exact.value === '1' ? props.metricLabel.replace(/s
   <NuxtLink
     v-else
     :to="targetHref"
-    :data-variant="effectiveVariant"
+    :data-variant="variant"
     :style="tint"
     class="event-card group h-full min-h-target rounded-row"
-    :class="hero ? 'card-hero' : 'card-row'"
+    :class="[hero ? 'card-hero' : 'card-row', { 'card-matched': stream.match }]"
   >
     <div
       class="card-art relative w-full overflow-hidden bg-surface-2"
       :class="{ 'rounded-row': hero }"
     >
-      <span
-        v-if="!imgLoaded && background && effectiveVariant === 'default' && !imgError"
-        aria-hidden="true"
-        class="absolute inset-0 scale-105 bg-cover bg-center blur-sm"
-        :style="{ backgroundImage: background }"
-      />
-      <img
-        v-if="effectiveVariant === 'default' && !imgError"
-        ref="imgRef"
-        :src="stream.poster"
-        alt=""
-        width="640"
-        height="360"
-        :loading="hero ? 'eager' : 'lazy'"
-        decoding="async"
-        class="absolute inset-0 h-full w-full object-cover"
-        :class="imgLoaded ? 'opacity-100' : 'opacity-0'"
-        @load="imgLoaded = true"
-        @error="imgError = true"
-      >
-
-      <PosterFallback v-else :name="stream.name" :colors="stream.colors" :blurhash="stream.blurhash" />
+      <MatchBanner v-if="stream.match" :stream="stream" :now="now" :stale="stale" :scale="scale" />
+      <PosterFallback v-else :name="stream.name" :colors="stream.colors" />
     </div>
 
+    <span v-if="stream.match" class="sr-only">{{ matchLabel }}</span>
     <div class="card-info">
       <span class="card-category text-metadata text-muted"><span>{{ stream.category_name }}</span><span v-if="stream.tag"> · {{ stream.tag }}</span></span>
       <component :is="headingLevel" class="card-name wrap-anywhere leading-snug text-fg group-hover:underline">
         {{ stream.name }}
       </component>
       <CardTiming :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
-        :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
+        :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" :banner="!!stream.match" />
       <div class="card-meta gap-x-3 text-metadata text-muted">
         <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
         <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
