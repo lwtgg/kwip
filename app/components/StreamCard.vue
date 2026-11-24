@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { cardTintStyle } from '~/composables/useCardTint'
 import { blurBackground } from '~/composables/usePosterBlur'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
@@ -13,7 +14,9 @@ const props = withDefaults(
     to?: string
     metricLabel?: 'viewers' | 'views'
     layout?: 'card' | 'listing'
-    headingLevel?: 'h2' | 'h3'
+    headingLevel?: 'h1' | 'h2' | 'h3'
+    scale?: 'listing' | 'hero'
+    hero?: boolean
   }>(),
   {
     stream: undefined,
@@ -24,6 +27,7 @@ const props = withDefaults(
     metricLabel: 'viewers',
     layout: 'card',
     headingLevel: 'h3',
+    scale: 'listing',
   },
 )
 
@@ -54,7 +58,7 @@ const effectiveVariant = computed<'default' | 'skeleton'>(() => {
   return 'default'
 })
 
-const placeholderColor = computed(() => props.stream?.colors?.[0] || 'var(--color-surface-2)')
+const tint = computed(() => cardTintStyle(props.stream?.colors, props.scale))
 
 const targetHref = computed(() => {
   if (props.to) return props.to
@@ -84,13 +88,13 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
     v-else
     :to="targetHref"
     :data-variant="effectiveVariant"
-    class="group flex min-h-target h-full rounded-card bg-surface hover:bg-surface-2"
-    :class="layout === 'listing' ? 'items-center gap-(--card-gap) px-(--card-pad)' : 'flex-col'"
+    :style="tint"
+    class="event-card group h-full min-h-target"
+    :class="[hero ? 'card-hero rounded-panel' : layout === 'listing' ? 'card-listing rounded-card' : 'flex flex-col rounded-card', { 'card-scale-hero': scale === 'hero' }]"
   >
     <div
-      class="relative aspect-video shrink-0 overflow-hidden rounded-card"
-      :class="layout === 'listing' ? 'w-listing-thumb' : 'w-full'"
-      :style="{ backgroundColor: placeholderColor }"
+      class="card-art relative w-full shrink-0 overflow-hidden bg-surface-2"
+      :class="hero ? 'rounded-panel' : 'rounded-card'"
     >
       <span
         v-if="!imgLoaded && background && effectiveVariant === 'default' && !imgError"
@@ -105,70 +109,30 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
         alt=""
         width="640"
         height="360"
-        loading="lazy"
+        :loading="hero ? 'eager' : 'lazy'"
         decoding="async"
-        class="relative h-full w-full object-cover"
+        class="absolute inset-0 h-full w-full object-cover"
         :class="imgLoaded ? 'opacity-100' : 'opacity-0'"
         @load="imgLoaded = true"
         @error="imgError = true"
       >
 
       <PosterFallback v-else :name="stream.name" :colors="stream.colors" :blurhash="stream.blurhash" />
-
-      <div v-if="layout === 'card'" class="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-center justify-between gap-2">
-        <StatusPill
-          :starts-at="stream.starts_at"
-          :ends-at="stream.ends_at"
-          :always-live="stream.always_live"
-          :now="now"
-          :stale="stale"
-        />
-
-        <span
-          role="img"
-          :aria-label="`${exact} ${metricLabel}`"
-          class="listing-numeric rounded-listing bg-bg px-2.5 py-0.5 text-metadata font-medium text-fg whitespace-nowrap"
-        >
-          <span aria-hidden="true">{{ compact }} {{ metricLabel }}</span>
-        </span>
-      </div>
-      <span
-        v-if="metricLabel === 'views' && countdown"
-        class="listing-numeric absolute bottom-2.5 left-2.5 rounded-listing bg-bg px-2.5 py-0.5 text-metadata font-medium text-fg"
-      >
-        {{ countdown }}
-      </span>
     </div>
 
-    <div class="flex min-w-0 flex-1 flex-col justify-between gap-(--card-gap) py-(--card-pad)"
-      :class="{ 'px-(--card-pad)': layout === 'card' }">
-      <LiveProgress
-        v-if="layout === 'card' && now !== undefined && !stale"
-        :starts-at="stream.starts_at"
-        :ends-at="stream.ends_at"
-        :always-live="stream.always_live"
-        :now="now"
-      />
-      <div class="flex flex-wrap items-center gap-1.5 text-xs">
-        <span class="font-medium text-muted">
-          {{ stream.category_name }}
-        </span>
-        <span v-if="layout === 'card' && stream.tag" class="text-muted">
-          · {{ stream.tag }}
-        </span>
-        <StatusPill
-          v-if="layout === 'listing'"
-          :starts-at="stream.starts_at"
-          :ends-at="stream.ends_at"
-          :always-live="stream.always_live"
-          :now="now"
-          :stale="stale"
-        />
-      </div>
-
-      <component :is="headingLevel" class="listing-display wrap-anywhere text-sm leading-snug text-fg group-hover:underline">
+    <div class="card-content flex min-w-0 flex-1 flex-col gap-(--card-gap) p-(--card-pad)">
+      <component :is="headingLevel" class="card-name line-clamp-2 wrap-anywhere leading-snug text-fg group-hover:underline">
         {{ stream.name }}
       </component>
+      <span class="card-category text-metadata text-muted wrap-anywhere">{{ stream.category_name }}<template v-if="stream.tag"> · {{ stream.tag }}</template></span>
+      <CardTiming class="card-timing" :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
+        :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
+      <div class="card-action mt-auto flex flex-wrap items-center justify-between gap-(--card-gap) text-metadata">
+        <span v-if="!stale" role="img" :aria-label="`${exact} ${metricLabel}`" class="listing-numeric text-muted">
+          <span aria-hidden="true">{{ compact }} {{ metricLabel }}</span>
+        </span>
+        <span class="ml-auto font-semibold text-fg group-hover:underline">Watch</span>
+      </div>
     </div>
   </NuxtLink>
 </template>
