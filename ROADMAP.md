@@ -107,6 +107,11 @@ server-side probe of the embed's `/fetch` (POST, URI body, 500/405/non-JSON = de
 source health, keep it inside the existing probe budget/subrequest caps, and have a dead primary fall back to
 a working supplement when one exists. Frame stays lazy and inert on a dead source.
 
+Probed 2026-11-24 17:00 UTC (`docs/taifood-fetch-probe.md`): `/fetch` now answers 200 with the URI body, but the
+signed manifest's segment resolver 404s and the player never creates a media element, so the outage moved one
+layer down. **A `/fetch`-only probe is therefore not sufficient** — follow one hop to the manifest or first
+segment and treat a 403/404 as dead.
+
 **Shipped 2026-11-24. Task 51 — the listing is a row.** Version `1b186e32`, branch merged `805ac2d`, `main`
 pushed. Two review rounds failed first: round one on eleven defects (proportion 2.12:1, wrapped labels, the
 lane as a shared prefix, lane prefix repeated, `Watch` heavy, hero empty block, Next up two columns), round
