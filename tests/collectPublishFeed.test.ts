@@ -64,6 +64,16 @@ const mock = String.raw`
       name: mode === 'zlive-no-primary' ? 'Sky Sports F1 UK' : 'Unmatched Sports', always_live: 1,
     })
   }
+  if (mode.startsWith('scores')) {
+    for (const item of [fixture.streams.streams[0].streams[0], fixture['streams/foo'].data]) {
+      Object.assign(item, { name: 'Home FC vs. Away FC', tag: 'Premier League', always_live: 0, starts_at: start })
+    }
+  }
+  if (mode === 'scores-shed' || mode === 'scores-empty') {
+    const payload = fixture['streams/foo']
+    payload.data.padding = ''
+    payload.data.padding = 'x'.repeat(2 * 1024 ** 2 - Buffer.byteLength(JSON.stringify(payload, null, 2) + '\n') - 10)
+  }
   const pitSportModes = ['pitsport', 'pitsport-down']
   const pitSportAvailable = mode === 'pitsport' || nearbyPitSport
   const pitSportUrl = id => 'https://pitsport.st/programs/' + id + '/play'
@@ -76,16 +86,20 @@ const mock = String.raw`
     for (let i = 1; i < count; i++) primarySources.push({ ...primary, data: primary.data.replace('?primary', '-' + i) })
     fixture['streams/foo'].data.sources = primarySources
   }
-  const wire = payload => mode === 'capacity' ? JSON.stringify(payload) : JSON.stringify(payload, null, 2) + '\n'
-  if (mode === 'capacity') {
+  const wire = payload => ['capacity', 'scores-capacity', 'scores-shrink'].includes(mode) ? JSON.stringify(payload) : JSON.stringify(payload, null, 2) + '\n'
+  if (['capacity', 'scores-capacity', 'scores-shrink'].includes(mode)) {
     Object.assign(fixture['streams/foo.json/bar'].data, { name: 'East vs. West', starts_at: start })
+    if (mode === 'scores-shrink') Object.assign(fixture['streams/foo.json/bar'].data, {
+      tag: 'Premier League', always_live: 0, match: { stale: 'x'.repeat(1000) },
+    })
     const primaryHealth = Object.fromEntries(primarySources.map(({ data }) => [data.split('?')[0].slice(8), {
       embedOk: false, manifestOk: false, sequence: 'unknown', checkedAt: new Date().toISOString(), error: 'embed-503',
     }]))
     const rows = fixture.vods.vods[0].vods
     let size = Object.values(fixture).reduce((sum, payload) => sum + Buffer.byteLength(wire(payload)), 0)
     const fileLimit = 2 * 1024 ** 2
-    const target = 40 * 1024 ** 2 - Buffer.byteLength(wire(primaryHealth)) - 3600
+    const target = ['scores-capacity', 'scores-shrink'].includes(mode) ? 40 * 1024 ** 2 - 100
+      : 40 * 1024 ** 2 - Buffer.byteLength(wire(primaryHealth)) - 3600
     for (let id = 4; size < target; id++) {
       const row = { id, slug: 'pad-' + id }
       const payload = { success: true, data: { id, pad: '' } }
@@ -124,6 +138,16 @@ const mock = String.raw`
   globalThis.fetch = async (request, options) => {
     if (typeof request === 'string') {
       const url = new URL(request)
+      if (url.hostname === 'site.api.espn.com') {
+        assert.ok(mode.startsWith('scores'))
+        if (mode === 'scores-empty') return Response.json({ events: [] })
+        return Response.json({ events: [{ id: 'score1', competitions: [{
+          date: new Date(start * 1000).toISOString(), status: { type: { state: 'in', description: 'Halftime' } },
+          competitors: ['home', 'away'].map(homeAway => ({ homeAway, score: '2', team: {
+            displayName: homeAway === 'home' ? 'Home FC' : 'Away FC', abbreviation: homeAway === 'home' ? 'HOM' : 'AWY',
+          } })),
+        }] }] })
+      }
       if (url.href === 'https://zlive.st/embed/manifest.json') {
         zliveRequests++
         assert.equal(options.redirect, 'manual')
@@ -239,7 +263,20 @@ const mock = String.raw`
           assert.equal(offset, end)
           end += length
           const bytes = packed.subarray(offset, end)
-          if (path === 'health.json') {
+          if (mode.startsWith('scores') && ['streams', 'streams/foo'].includes(path)) {
+            const payload = JSON.parse(bytes)
+            const item = path === 'streams' ? payload.streams[0].streams[0] : payload.data
+            if (['scores-shed', 'scores-empty', 'scores-capacity'].includes(mode)) {
+              assert.equal(item.match, undefined)
+              continue
+            }
+            assert.equal(item.match.away.name, 'Away FC')
+            assert.equal(item.match.home.name, 'Home FC')
+            assert.equal(item.match.detail, 'Halftime')
+            assert.equal(item.match.home.score, 2)
+          } else if (mode === 'scores-shrink' && path === 'streams/foo.json/bar') {
+            assert.equal(JSON.parse(bytes).data.match, undefined)
+          } else if (path === 'health.json') {
             const health = JSON.parse(bytes)
             assert.deepEqual(Object.keys(health).sort(), mode === 'deadline' ? []
               : expectedProbes.map(url => url.split('?')[0].slice(8)).sort())
@@ -306,7 +343,7 @@ async function publish(args: string[], current: object | null = null, mode = 'ba
   const { stdout } = await promisify(execFile)(process.execPath, [
     '--import', 'data:text/javascript,' + encodeURIComponent(mock), publisher, ...args,
   ], {
-    timeout: mode === 'capacity' ? 20_000 : 10_000,
+    timeout: ['capacity', 'scores-capacity', 'scores-shrink'].includes(mode) ? 20_000 : 10_000,
     env: {
       ...process.env,
       NUXT_PUBLIC_FEED_BASE: mode === 'fixture' ? 'http://provider.example/fixtures/' : 'https://provider.example',
@@ -348,6 +385,7 @@ test('republishes matching list hashes with incomplete or incorrect endpoint cov
     assert.deepEqual(result.bytes, { ...dryRun.bytes, payloadPut: dryRun.bytes.snapshot })
   }
   assert.equal(completeResult.outcome, 'unchanged')
+  assert.equal(completeResult.scores.shed, 0)
   assert.equal(completeResult.providerRequests, 2)
   assert.equal(completeResult.requests, 4)
   assert.equal(completeResult.bytes.payloadPut, 0)
@@ -452,4 +490,25 @@ test('zlive supplements 24/7 channels and a manifest network error publishes the
   assert.equal(empty.outcome, 'published')
   assert.deepEqual(failed.bytes, empty.bytes)
   assert.deepEqual(failedDryRun.manifest.hashes, emptyDryRun.manifest.hashes)
+})
+
+test('publisher packs scoreboard enrichment in lists and details and counts the request', async () => {
+  const result = await publish([], null, 'scores')
+  assert.equal(result.outcome, 'published')
+  assert.equal(result.providerRequests, 6)
+  assert.deepEqual(result.scores, { leagues: 1, requests: 1, matched: 1, unmatched: 0, shed: 0 })
+})
+
+for (const mode of ['scores-shed', 'scores-empty', 'scores-capacity']) {
+  test('publisher keeps a near-limit detail publishable: ' + mode, async () => {
+    const result = await publish([], null, mode)
+    assert.equal(result.outcome, 'published')
+    assert.equal(result.scores.shed, mode === 'scores-empty' ? 0 : 1)
+  })
+}
+
+test('publisher measures final size before applying growth followed by stale-match removal', async () => {
+  const result = await publish([], null, 'scores-shrink')
+  assert.equal(result.outcome, 'published')
+  assert.equal(result.scores.shed, 0)
 })
