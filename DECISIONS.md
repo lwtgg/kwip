@@ -49,13 +49,16 @@ order. A fixture with no match renders exactly as today, with no partial score. 
 boundary: the page renders what it carries and never fetches scores itself. Scores keep the same refresh
 clock as everything else — a stopped refresh shows an older score and the existing stale notice, not a
 guessed one.
-26. **The first home slot is the top event.** It is the highest-viewed event that is live (rule for the rest
-of the ordering unchanged), falling back to the soonest kickoff when nothing is live. Live, it mounts its
-player automatically and plays muted, so the front page shows a stream without a click; sound is opt-in on
-tap and never on load. The card stays a link and the player is a second, separate target. An auto-mounted
-top event does not itself count as the money click of rule 22 — that stays the first source click inside the
-event page. Autoplay is only assumed where the source accepts it; where it does not, the frame loads paused
-and the row is unchanged.
+26. **The first home slot is the top event.** It is the highest-viewed live event that also carries a source
+which can play itself muted, falling back to the highest-viewed live event, then to the soonest kickoff when
+nothing is live. Only zlive accepts a mute parameter (`?muted=1`); taifood ignores every one, so its frames
+load paused (probe: `docs/top-event-probe.md`). Live and playable, the slot mounts the player muted, so the
+front page shows a stream without a click; the frame mounts only when it intersects the viewport and the tab
+is visible, and unmounts when it leaves either, because the stream runs at about 1.3 MB/s. Sound is opt-in on
+tap and only on zlive, which remounts without `muted` inside the gesture. The card link covers the identity
+column only; the player is a sibling, never inside the link. An auto-mounted top event does not itself count
+as the money click of rule 22 — that stays the first source click inside the event page. Where the source
+cannot play itself, the frame loads paused and nothing else about the slot changes.
 
 
 ## Deferred (do not build, just note)
