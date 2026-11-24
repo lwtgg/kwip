@@ -131,15 +131,12 @@ Live scores are best-effort enrichment from ESPN's public scoreboard, matched se
 collector (rules 24 and 25). The first home slot becomes the top event and mounts its player, muted, with
 sound opt-in (rule 26). Queue: 52 data and contract, 54 autoplay probe, 53 banner rendering, 55 top event.
 
-**Defect found 2026-11-24 — a deploy leaves cached HTML pointing at dead assets.** The HTML cache key
-(decision 11) carries the feed generation but not the build, so HTML cached before a deploy keeps the previous
-build's hashed `entry.*.css`; after the deploy that hash 404s and the page renders unstyled — cards collapse to
-`display: inline`, the whole theme absent — until the entry expires (up to 15 minutes) or the generation turns.
-Observed on `kwip.fyi` after deploying 53: `/_nuxt/entry.2e4Hp8Sq.css` 404 while the build emitted
-`entry.CE3iXlqq.css`; `?filter=live` (render-affecting, `no-store`) was correct at the same moment. Fix by
-putting the build identity in the render-affecting cache key (or by making asset names survive a deploy), and
-prove with a cache-HIT fetch immediately after a deploy. Do not confuse with the feed generation, which is
-already in the key.
+**Defect found and fixed 2026-11-24 — a deploy leaves cached HTML pointing at dead assets.** Task 57
+adds the runtime build identity to the HTML cache key alongside the feed generation and host. Previous-build
+entries become unreachable and expire under the existing TTL rules. A real two-build Wrangler cache proof
+returned a miss naming live CSS after rebuilding, then a hit naming the same live CSS. Removing the build
+parameter reproduced a hit naming the deleted CSS hash. Commands, observed headers and mutation evidence
+are in `docs/verification-57.md`. Committed locally; not deployed by this task.
 
 **Defect found and fixed 2026-11-24 — 56 was inert in production.** Task 56 made `/api/feed` the default feed
 base, but `.env` (untracked, baked at build) and the deploy `[vars]` both still pinned

@@ -31,7 +31,7 @@ export async function lookupEdgePage(event: H3Event, candidate: ReturnType<typeo
   if (!candidate.eligible) return
   const { cache, url } = candidate
 
-  const { feedSnapshotBinding, public: config } = useRuntimeConfig(event)
+  const { feedSnapshotBinding, public: config, app } = useRuntimeConfig(event)
   const identity = await getFeedCacheIdentity(event, feedSnapshotBinding, config, url)
   logPageBoundary(event, 'edge_cache_identity', { found: !!identity })
   if (!identity) return
@@ -40,7 +40,7 @@ export async function lookupEdgePage(event: H3Event, candidate: ReturnType<typeo
   // Nuxt serializes public runtime config on every page, including navigation entry points.
   const cacheQuery = new URLSearchParams(query)
   if (config.ads === true) cacheQuery.set('ads', '1')
-  const key = edgeCacheKey(url, identity, cacheQuery)
+  const key = edgeCacheKey(url, identity, app?.buildId, cacheQuery)
   const page = getPageRequest(event)
   const isFresh = (cached: Response) => !timed || Number(cached.headers.get(expiryHeader)) > Date.now() / 1000
   try {
