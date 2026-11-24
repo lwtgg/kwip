@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Acumin Pro Extra Condensed";
+  src: url('/fonts/acumin-digits.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0030-0039;
+}
+
+
 @theme static {
   --color-bg: #0c100f;
   --color-surface: #1b201e;
@@ -388,7 +397,7 @@
   column-gap: var(--row-column-gap);
   padding: var(--hero-pad);
 }
-@media (width >= 64rem) {
+@media (width >= 48rem) {
   .card-hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .card-hero .card-art { aspect-ratio: auto; min-height: var(--spacing-feature-art); }
 }
@@ -436,3 +445,127 @@
 }
 
 .fallback-initials { font-size: var(--fallback-initials); }
+
+/* 53: team artwork. The source colours remain the gradient's end stops; an
+   independently measured black scrim protects white at its brightest point. */
+:root {
+  --banner-base: #272624;
+  --banner-white: #ffffff;
+  --banner-black: #000000;
+  --banner-contrast-headroom: 0.05;
+  --banner-unplayed-alpha: 0.12;
+  --banner-edge-alpha: 0.45;
+  --banner-away-stop: 30%;
+  --banner-home-stop: 71%;
+  --banner-plate: 12rem;
+  --banner-plate-narrow: 6rem;
+  --banner-score-size: 3.5rem;
+  --banner-score-narrow: 2.75rem;
+  --banner-score-hero: 9.0625rem;
+  --banner-status-size: 0.75rem;
+  --banner-status-hero: 3.5rem;
+  --banner-team-hero: clamp(0.75rem, 2.2vw, 3.5rem);
+  --banner-logo: 1.5rem;
+  --banner-logo-narrow: 0.625rem;
+  --banner-logo-hero: clamp(2rem, 8vw, 7.25rem);
+  --banner-status-width: 2.75rem;
+  --banner-score-compression: 0.65;
+  --banner-score-compression-narrow: 0.28;
+  --banner-score-weight: 700;
+  --banner-label-weight: 400;
+  --banner-status-leading: 1.1;
+  --banner-status-leading-hero: 0.9;
+  --banner-abbreviation-compression: 1;
+  --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
+}
+.card-row.card-matched { --card-plate: var(--banner-plate); }
+.card-row.card-matched .card-art { aspect-ratio: auto; align-self: stretch; border-radius: 0; }
+.card-matched .card-time { font-weight: var(--banner-label-weight); }
+.match-banner {
+  position: absolute;
+  inset: 0;
+  color: var(--banner-white);
+  background-image:
+    linear-gradient(to bottom, color-mix(in srgb, var(--banner-black) calc(var(--banner-edge) * 100%), transparent), transparent 50%, color-mix(in srgb, var(--banner-black) calc(var(--banner-edge) * 100%), transparent)),
+    linear-gradient(color-mix(in srgb, var(--banner-black) calc(var(--banner-scrim) * 100%), transparent), color-mix(in srgb, var(--banner-black) calc(var(--banner-scrim) * 100%), transparent)),
+    var(--banner-team-field);
+}
+.banner-lineup {
+  display: grid;
+  grid-template-columns: var(--banner-logo) minmax(0, 1fr) var(--banner-status-width) minmax(0, 1fr) var(--banner-logo);
+  align-items: center;
+  height: 100%;
+  padding-inline: var(--spacing-1);
+  font-weight: var(--banner-label-weight);
+  text-align: center;
+}
+.banner-team { min-width: 0; font-size: var(--banner-status-size); }
+.banner-team img, .banner-initials {
+  display: block;
+  width: var(--banner-logo);
+  height: var(--banner-logo);
+  object-fit: contain;
+}
+.banner-initials {
+  display: grid;
+  place-items: center;
+  font-size: calc(var(--banner-logo) / 3);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.banner-abbreviation { display: block; font-size: inherit; transform: scaleX(var(--banner-abbreviation-compression)); }
+.banner-away-team { grid-column: 1; grid-row: 1; }
+.banner-away-score { grid-column: 2; grid-row: 1; }
+.banner-home-score { grid-column: 4; grid-row: 1; }
+.banner-home-team { grid-column: 5; grid-row: 1; }
+.banner-score {
+  justify-self: center;
+  font-family: var(--font-score);
+  font-size: var(--banner-score-size);
+  font-weight: var(--banner-score-weight);
+  font-stretch: extra-condensed;
+  font-variant-numeric: lining-nums tabular-nums;
+  line-height: 1;
+  transform: scaleX(calc(var(--banner-score-compression) * 2 / max(2, var(--banner-digits, 2))));
+}
+.banner-status {
+  grid-column: 3;
+  grid-row: 1;
+  width: var(--banner-status-width);
+  justify-self: center;
+  font-size: var(--banner-status-size);
+  line-height: 1;
+}
+.banner-status > span {
+  position: relative;
+  left: 50%;
+  display: block;
+  width: max-content;
+  white-space: nowrap;
+  line-height: var(--banner-status-leading);
+  transform: translateX(-50%) scaleX(var(--banner-line-fit, min(1, calc(var(--banner-status-width) / (var(--banner-status-size) * var(--banner-chars))))));
+}
+
+
+.banner-progress { position: absolute; inset-inline: 0; bottom: 0; }
+.banner-progress [role="progressbar"] { border: 0; background: var(--banner-base); }
+.banner-progress [role="progressbar"] > div { background: var(--banner-white); }
+.card-hero .banner-team { font-size: var(--banner-team-hero); }
+.card-hero .match-banner {
+  --banner-score-size: var(--banner-score-hero);
+  --banner-logo: var(--banner-logo-hero);
+  --banner-status-width: clamp(3rem, 7vw, 7rem);
+  --banner-status-size: var(--banner-status-hero);
+  --banner-status-leading: var(--banner-status-leading-hero);
+  --banner-score-compression: 0.65;
+}
+@media (width < 48rem) {
+  .card-row.card-matched { --card-plate: var(--banner-plate-narrow); }
+  .card-row .match-banner {
+    --banner-score-size: var(--banner-score-narrow);
+    --banner-logo: var(--banner-logo-narrow);
+    --banner-score-compression: var(--banner-score-compression-narrow);
+    --banner-abbreviation-compression: 0.4;
+  }
+}

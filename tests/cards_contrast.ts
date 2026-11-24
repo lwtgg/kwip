@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { bannerColor, bannerScrim, mixBannerColor } from '../app/composables/matchBanner.ts'
 import { tintField, fieldContrast, hexRGB } from '../app/composables/cardTint.ts'
 
 const css = readFileSync(new URL('../app/assets/css/theme.css', import.meta.url), 'utf8')
-const listing = JSON.parse(readFileSync(new URL('../public/fixtures/streams.json', import.meta.url), 'utf8'))
+const listing = JSON.parse(readFileSync(process.argv[3] ?? new URL('../public/fixtures/streams.json', import.meta.url), 'utf8'))
 const seeds = ['#000', '#fff', '#f00', '#0f0', '#00f', '#ff0', '#0ff', '#f0f', '#777', 'invalid']
 const results = []
 for (const theme of ['dark', 'light'] as const) {
@@ -32,6 +33,31 @@ for (const theme of ['dark', 'light'] as const) {
     })
   }
 }
-const report = { generatedAt: new Date().toISOString(), tokenHash: createHash('sha256').update(css).digest('hex'), results }
+const token = (name: string) => css.match(new RegExp(`--${name}:\\s*([^;]+)`))![1]!.trim()
+const base = token('banner-base')
+const matches = listing.streams.flatMap((category: { streams: { match?: { away: { color: string }; home: { color: string } } }[] }) =>
+  category.streams.flatMap(event => event.match ? [[event.match.away.color, event.match.home.color]] : []))
+const pairs = [...seeds.flatMap(a => seeds.map(b => [a, b])), ...matches, ['#192f23', '#361f24'], []]
+const banners = (['dark', 'light'] as const).flatMap(theme => (['listing', 'hero'] as const).flatMap(scale =>
+  (['pre', 'in', 'post'] as const).flatMap(state => pairs.map(seeds => {
+    const pair = [seeds[0], seeds[1]].map(color => state === 'pre' && scale === 'listing'
+      ? mixBannerColor(color, base, Number(token('banner-unplayed-alpha')))
+      : bannerColor(color, base))
+    const scrim = bannerScrim(pair, Number(token('card-text-contrast')) + Number(token('banner-contrast-headroom')))
+    const rgb = pair.map(color => hexRGB(color)!.map(channel => channel * (1 - scrim)))
+    const contrast = fieldContrast(rgb[0]!, rgb[1]!, hexRGB(token('banner-white'))!)
+    assert.ok(contrast >= 4.5, JSON.stringify({ theme, scale, state, pair, contrast }))
+    return { theme, scale, state, seeds, pair, scrim, contrast }
+  }))))
+const worstBanner = banners.reduce((a, b) => a.contrast < b.contrast ? a : b)
+console.log('Banner model sweep (rendered proof is in cards_browser.py)', JSON.stringify({ count: banners.length, worstBanner }))
+const report = { generatedAt: new Date().toISOString(), banners, worstBanner, tokenHash: createHash('sha256').update(css).digest('hex'), results }
 if (process.argv[2]) writeFileSync(process.argv[2], JSON.stringify(report, null, 2))
 console.log(JSON.stringify(results.map(({ theme, scale, minimum }) => ({ theme, scale, minimum })), null, 2))
+
+if (process.argv[4]) {
+  const rendered = JSON.parse(readFileSync(process.argv[4], 'utf8'))
+  assert.ok(rendered.length > 0)
+  for (const banner of rendered) assert.ok(banner.contrast >= 4.5, JSON.stringify(banner))
+  console.log('Rendered banner minimum', Math.min(...rendered.map(banner => banner.contrast)))
+}
