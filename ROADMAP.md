@@ -117,3 +117,11 @@ test floor is 3.5 with no exception plus an unbroken-numeral assertion. Producti
 both themes: no horizontal overflow, no truncated league label, banner still below the player, canonical and
 `og:url` absolute on every page, `/vods` 200, unknown path 404, tint contrast worst 5.25. Known pre-existing
 gap: at 200 % text the header grid (unchanged by 51, last touched `f396a24`) overflows 320 px by 80.
+
+**Direction (owner, 2026-11-24): scrap the provider thumbnails, own the art, score it.** The owner drew two
+mockups: a top event with the stream already playing muted beside a scoreboard, and a row whose plate is a
+two-team banner with logos, score and status. Provider posters stop being fetched; our own gradient/logo/
+score banner replaces them on the row and the hero, with `PosterFallback` still covering the no-match case.
+Live scores are best-effort enrichment from ESPN's public scoreboard, matched server-side per league in the
+collector (rules 24 and 25). The first home slot becomes the top event and mounts its player, muted, with
+sound opt-in (rule 26). Queue: 52 data and contract, 54 autoplay probe, 53 banner rendering, 55 top event.

@@ -35,6 +35,27 @@ One labelled issue is the state: comment at most every 30 minutes, close on the 
 authenticates on its own `GITHUB_ALERT_TOKEN` so the alarm survives the credential it reports on. Alerting is
 best-effort and must never change a tick's refresh outcome, and it is bounded to five extra subrequests, six
 on a cleanup tick. Supersedes the alerting clause of rule 21.
+24. **The artwork is ours.** Every event's visual is built in CSS from its own team colours plus the two team
+logos from the score match (rule 25) — a two-team gradient, the logos, and `vs`. Provider thumbnails are no
+longer the default art and are not fetched. Home/away decides the sides: away on the left, home on the right.
+No match, no logos, a missing colour or a failed logo all degrade to the gradient and the existing
+`PosterFallback` monogram — never to a hole. Logos are hotlinked from the score provider's CDN with an
+explicit box, `loading="lazy"` and `decoding="async"`, and no image proxy. Supersedes rule 8.
+25. **Live scores are best-effort enrichment, never asserted.** The collector reads one public scoreboard per
+league per tick and matches it to our fixtures by league, team and date; the result is published in the
+generation as away/home `{ name, abbreviation, color, logo, score }` plus a state and a detail line (`Live`,
+`Q3 7:42`, `Halftime`, `Final`). Which side is away comes from the provider, never from our fixture name
+order. A fixture with no match renders exactly as today, with no partial score. The generation is the trust
+boundary: the page renders what it carries and never fetches scores itself. Scores keep the same refresh
+clock as everything else — a stopped refresh shows an older score and the existing stale notice, not a
+guessed one.
+26. **The first home slot is the top event.** It is the highest-viewed event that is live (rule for the rest
+of the ordering unchanged), falling back to the soonest kickoff when nothing is live. Live, it mounts its
+player automatically and plays muted, so the front page shows a stream without a click; sound is opt-in on
+tap and never on load. The card stays a link and the player is a second, separate target. An auto-mounted
+top event does not itself count as the money click of rule 22 — that stays the first source click inside the
+event page. Autoplay is only assumed where the source accepts it; where it does not, the frame loads paused
+and the row is unchanged.
 
 
 ## Deferred (do not build, just note)
