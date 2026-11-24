@@ -68,7 +68,7 @@ export default defineNuxtConfig({
       },
       siteName: process.env.NUXT_PUBLIC_SITE_NAME || 'kwip',
       canonicalHost: process.env.NUXT_PUBLIC_CANONICAL_HOST || 'kwip.fyi',
-      feedBase: process.env.NUXT_PUBLIC_FEED_BASE || '/fixtures',
+      feedBase: process.env.NUXT_PUBLIC_FEED_BASE || '/api/feed',
       feedMirrorBase: process.env.NUXT_PUBLIC_FEED_MIRROR_BASE || '',
     },
   },

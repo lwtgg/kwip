@@ -209,7 +209,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
         const assets = import.meta.server ? getFeedAssets(event) : undefined
         return await fetchFeed<T>(fetcher, config.public, requestUrl, endpoint, assets)
       } catch (error) {
-        if (signal.aborted || key !== cacheKey.value) throw error
+        if (signal.aborted || key !== cacheKey.value || isSnapshotOmitted(error)) throw error
         if (previous) return { ...previous, fromCache: true }
         if (browserRefresh && endpoint.kind !== 'ping') {
           return fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, requestUrl.host).catch(() => {
