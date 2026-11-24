@@ -97,3 +97,12 @@ Still owed by the owner: `GITHUB_ALERT_TOKEN` does not exist yet, so alerting fa
 and will log `missing-issues-scope` on the first page. Create a fine-grained token for `lwtgg/kwip` with
 Issues: Read and write, then `wrangler secret put GITHUB_ALERT_TOKEN --config worker-cron/wrangler.jsonc`
 and give the refresh token Issues: Read and write as well.
+
+**Provider probe: taifood's own fetch endpoint (queued 2026-11-24).** On 2026-11-24 taifood's player host
+`taifood-blog.asia` served its embed and bundle but returned plain-text `500` from `POST /fetch` for every
+event including nonsense input, so every event page rendered a dead pane; the provider confirmed the outage
+and it reproduced on cellular, so it is their handler, not a block. Our source health only reads provider
+status responses, so nothing marked the source dead and no supplement was preferred. Add a bounded
+server-side probe of the embed's `/fetch` (POST, URI body, 500/405/non-JSON = dead) into the collector's
+source health, keep it inside the existing probe budget/subrequest caps, and have a dead primary fall back to
+a working supplement when one exists. Frame stays lazy and inert on a dead source.
