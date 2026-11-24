@@ -122,7 +122,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
   const pitSportListing = fixture ? undefined : fetchPitSportListing(deadline)
   const zliveListing = fixture ? undefined : fetchZliveListing(deadline)
-  if (!fixture) result.scores = { leagues: 0, requests: 0, matched: 0, unmatched: 0 }
+  if (!fixture) result.scores = { leagues: 0, requests: 0, matched: 0, unmatched: 0, shed: 0 }
   const now = Date.now()
 
   async function append(path, bytes) {
@@ -301,7 +301,11 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       maxRequests: providerRequestLimit - result.providerRequests,
       onRequest: () => result.providerRequests++,
     })
-    const byPath = new Map(scoreRecords.map(record => [record.entry.endpoint.path, record.item.match]))
+    result.scores.shed = 0
+    const hadMatch = new Set(scoreRecords.filter(record => record.payload.data.match !== undefined))
+    const listingBefore = json(streamListing.payload)
+    const byPath = new Map(scoreRecords.map(record => [record.entry.endpoint.path, record]))
+    const listingItems = new Map()
     for (const record of scoreRecords) {
       if (record.payload.data.match !== undefined || record.item.match) scoreChanged.add(record)
       delete record.payload.data.match
@@ -311,15 +315,48 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       for (const item of category.streams) {
         if (item.match !== undefined) scoreChanged.add(streamListing)
         delete item.match
-        const match = byPath.get(feedDetailPath('streams', item.uri_name))
+        const path = feedDetailPath('streams', item.uri_name)
+        const siblings = listingItems.get(path) ?? []
+        siblings.push(item)
+        listingItems.set(path, siblings)
+        const match = byPath.get(path)?.item.match
         if (match) { item.match = match; scoreChanged.add(streamListing) }
       }
     }
-    for (const { payload, entry, hash } of scoreChanged) {
-      const bytes = json(payload)
+    // Measure the complete proposed pack before writing anything. Shed the largest
+    // detail growth first, keeping every listing occurrence in sync with its detail.
+    const packed = new Map([...scoreChanged].map(record => [record, json(record.payload)]))
+    let proposedSize = size + [...packed].reduce((sum, [record, bytes]) =>
+      sum + bytes.length - record.entry.endpoint.length, 0)
+    const refresh = record => {
+      proposedSize -= (packed.get(record)?.length ?? record.entry.endpoint.length) - record.entry.endpoint.length
+      if (scoreChanged.has(record)) {
+        const bytes = json(record.payload)
+        packed.set(record, bytes)
+        proposedSize += bytes.length - record.entry.endpoint.length
+      } else packed.delete(record)
+    }
+    const enriched = [...scoreChanged].filter(record => record.payload.data?.match)
+      .sort((a, b) => (packed.get(b).length - b.entry.endpoint.length)
+        - (packed.get(a).length - a.entry.endpoint.length))
+    for (const record of enriched) {
+      if (packed.get(record).length <= fileLimit && proposedSize < snapshotLimit
+        && (packed.get(streamListing)?.length ?? streamListing.entry.endpoint.length) <= fileLimit) continue
+      delete record.payload.data.match
+      delete record.item.match
+      for (const item of listingItems.get(record.entry.endpoint.path) ?? []) delete item.match
+      if (!hadMatch.has(record)) scoreChanged.delete(record)
+      refresh(record)
+      if (json(streamListing.payload).equals(listingBefore)) scoreChanged.delete(streamListing)
+      refresh(streamListing)
+      result.scores.shed++
+    }
+    if (proposedSize >= snapshotLimit) throw new Error('Snapshot reached 40 MiB')
+    size = proposedSize
+    for (const record of scoreChanged) {
+      const { entry, hash } = record
+      const bytes = packed.get(record)
       if (bytes.length > fileLimit) throw new Error('Score enrichment exceeded file limit')
-      size += bytes.length - entry.endpoint.length
-      if (size >= snapshotLimit) throw new Error('Snapshot reached 40 MiB')
       entry.stored = bytes
       entry.endpoint.length = bytes.length
       if (hash) hash[1] = sha256(bytes)
