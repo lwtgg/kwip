@@ -32,17 +32,33 @@
   --text-feature: clamp(2rem, 5vw, 4.5rem);
   --text-feature--line-height: 1.08;
   --spacing-feature-art: 20rem;
-  --spacing-listing-thumb: 4.5rem;
   --text-card-name: 1rem;
   --text-detail-name: 2rem;
-  --text-card-time: 2.25rem;
+  --text-detail-name-narrow: 1.25rem;
+  --text-card-time: 1.75rem;
+  --text-card-time-narrow: 1.5rem;
   --text-detail-time: 3.5rem;
+  --text-detail-time-narrow: 2rem;
+  /* 51: the event row. A short contained ground, a poster plate at the leading edge,
+     the identity stack beside it and the numeric fact in its own trailing lane. */
+  --radius-row: 0.75rem;
+  --radius-plate: var(--radius-control);
+  --spacing-row-min: 26rem;
+  --spacing-rail-column: 30rem;
+  --spacing-row-plate: 6rem;
+  --spacing-row-plate-narrow: 3rem;
+  /* Lane floors: the widest one-line lane string at each scale (docs/redesign-51.md). */
+  --spacing-row-lane: 6.75rem;
+  --spacing-hero-lane: 11.25rem;
+  --spacing-hero-lane-narrow: 7rem;
 }
 
 :root {
-  --card-name-weight: 600;
+  --card-name-weight: 400;
+  --card-name-lines: 2;
   --card-time-weight: 850;
   --card-time-leading: 1;
+  --card-time-tracking: -0.02em;
   --card-time-width: 5ch;
   --card-art-ratio: 16 / 9;
   --card-tint-listing-color: 0.35;
@@ -55,6 +71,15 @@
   --card-tint-light-min: 0.84;
   --card-tint-light-max: 0.92;
   --card-text-contrast: 4.5;
+  --fallback-initials: 1.5rem;
+  --row-gap: 0.25rem;
+  --row-pad-block-narrow: 0.5rem;
+  --row-pad-inline-narrow: 0.75rem;
+  --row-column-gap-narrow: var(--spacing-2);
+  --row-column-gap: var(--spacing-3);
+  --row-stack-gap: 0.125rem;
+  --lane-gap: 0.125rem;
+  --hero-pad: calc(var(--card-pad) + var(--spacing-2));
   --focus-ring: var(--color-accent);
   --focus-ring-width: 0.125rem;
   --focus-ring-inset: calc(-1 * var(--focus-ring-width));
@@ -86,6 +111,13 @@
   --card-gap: 0.25rem;
   --grid-gap: 0.625rem;
   --rail-gap: 0.625rem;
+  --row-gap: 0.125rem;
+  --row-pad-block-narrow: 0.375rem;
+  --row-pad-inline-narrow: 0.5rem;
+  --row-column-gap-narrow: 0.375rem;
+  --row-column-gap: var(--spacing-2);
+  --row-stack-gap: 0;
+  --lane-gap: 0;
   --page-padding: 0.5rem;
   --section-gap: 0.5rem;
   --stack-gap: 0.25rem;
@@ -189,11 +221,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-@utility listing-rule {
-  border-block-end: thin solid var(--color-border);
-  padding-block-end: var(--card-gap);
-}
-
 @utility listing-hero {
   border-block-start: thin solid var(--listing-hero-rule, var(--color-border));
 }
@@ -206,7 +233,17 @@
   contain: size;
 }
 
+
 /* Interaction changes the cue, never the contrast-checked identity ground. */
+.event-card, .card-row {
+  --card-name-size: var(--text-card-name);
+  --card-time-size: var(--text-card-time);
+  --card-state-size: var(--text-metadata);
+  --card-lane-min: var(--spacing-row-lane);
+  --card-plate: var(--spacing-row-plate);
+  --row-pad-block: var(--card-pad);
+  --row-pad-inline: var(--card-pad);
+}
 .event-card {
   background: var(--card-field-dark, var(--color-surface));
   min-width: 0;
@@ -217,43 +254,185 @@
 }
 .card-art { aspect-ratio: var(--card-art-ratio); }
 .card-name {
-  font-size: var(--text-card-name);
+  font-size: var(--card-name-size);
   font-weight: var(--card-name-weight);
 }
-.card-time {
-  display: block;
-  width: fit-content;
-  min-width: min(var(--card-time-width), 100%);
-  max-width: 100%;
+
+/* The number lane grows above its floor for an intact time. Laid out RTL so each
+   box is anchored at the trailing edge and a changing label never shifts (bidi W7 keeps
+   every lane string one LTR run). */
+.card-lane {
+  grid-area: lane;
+  align-self: center;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--lane-gap);
+  direction: rtl;
+  text-align: start;
+}
+/* The schedule bar sits on the row's bottom edge, out of the lane's flow. */
+.card-lane-bar {
+  position: absolute;
+  inset-inline: var(--row-pad-inline);
+  bottom: calc((var(--row-pad-block) - var(--spacing-1)) / 2);
+  direction: ltr;
+}
+.card-lane-note {
+  contain: inline-size;
+  width: 100%;
   overflow-wrap: anywhere;
-  font-size: var(--text-card-time);
+}
+.card-fact {
+  display: flex;
+  max-width: 100%;
+  flex-flow: row-reverse wrap;
+  align-items: baseline;
+  gap: var(--spacing-1);
+}
+.card-time {
+  min-width: 0;
+  white-space: nowrap;
+  font-size: var(--card-time-size);
   font-weight: var(--card-time-weight);
   line-height: var(--card-time-leading);
+  letter-spacing: var(--card-time-tracking);
   font-variant-numeric: lining-nums tabular-nums;
+  /* Ignored by a face without a width axis; the floors hold the uncondensed time. */
   font-stretch: condensed;
 }
+/* A state word sits in the lane at label scale, in the height the time would take. */
 .card-state {
-  min-height: var(--text-card-time);
+  display: flex;
+  min-height: var(--card-time-size);
+  min-width: 0;
+  align-items: center;
   overflow-wrap: anywhere;
-  font-size: var(--text-card-name);
+  text-wrap: balance;
+  font-size: var(--card-state-size);
+  line-height: var(--text-metadata--line-height);
 }
-.card-scale-hero .card-time { font-size: var(--text-detail-time); }
-.card-scale-hero .card-state { min-height: var(--text-detail-time); }
-.card-scale-hero .card-name { font-size: var(--text-detail-name); }
-.card-hero { display: grid; grid-template-columns: minmax(0, 1fr); }
+/* One line each: a trailing item that does not fit wraps onto a clipped line and drops
+   whole (the tag, `Watch`) before the first item truncates. */
+.card-category,
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  height: 1lh;
+  overflow: hidden;
+}
+.card-category { grid-area: label; margin-block-end: var(--row-stack-gap); }
+.card-category > *,
+.card-meta > * {
+  max-width: 100%;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-meta { grid-area: meta; }
+.card-name { grid-area: name; margin-block: var(--row-stack-gap); }
+.card-info { display: contents; }
+
+/* Row: the label across the top, then plate | identity | lane. */
+.card-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--card-plate) minmax(0, 1fr) minmax(var(--card-lane-min), max-content);
+  grid-template-rows: auto 1fr auto auto 1fr;
+  grid-template-areas:
+    "label label label"
+    "plate . lane"
+    "plate name lane"
+    "plate meta lane"
+    "plate . lane";
+  column-gap: var(--row-column-gap);
+  padding: var(--row-pad-block) var(--row-pad-inline);
+}
+.card-row .card-art {
+  grid-area: plate;
+  align-self: center;
+  border-radius: var(--radius-plate);
+  --fallback-initials: var(--text-metadata);
+}
+.card-row .card-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--card-name-lines);
+}
+
+/* Hero: the poster, then the row's arrangement at detail scale. The name is not clamped. */
+.card-hero {
+  --card-name-size: var(--text-detail-name);
+  --card-time-size: var(--text-detail-time);
+  --card-state-size: var(--text-card-name);
+  --card-lane-min: var(--spacing-hero-lane);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.card-hero .card-info {
+  --row-pad-block: var(--hero-pad);
+  --row-pad-inline: var(--hero-pad);
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(var(--card-lane-min), max-content);
+  grid-template-rows: 1fr auto auto auto 1fr;
+  grid-template-areas:
+    ". ."
+    "label label"
+    "name lane"
+    "meta lane"
+    ". .";
+  column-gap: var(--row-column-gap);
+  padding: var(--hero-pad);
+}
 @media (width >= 64rem) {
   .card-hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .card-hero .card-art { aspect-ratio: auto; min-height: var(--spacing-feature-art); }
 }
 
-.card-listing {
-  display: grid;
-  grid-template-columns: var(--spacing-listing-thumb) minmax(0, 1fr);
-  align-content: start;
-  gap: var(--card-gap);
-  padding: var(--card-pad);
+/* Below md: one name line and one quiet line beside a two-line lane. The date caption
+   gives way to any other note. */
+@media (width < 48rem) {
+  .card-row {
+    --card-time-size: var(--text-card-time-narrow);
+    --row-column-gap: var(--row-column-gap-narrow);
+    --card-plate: var(--spacing-row-plate-narrow);
+    --card-name-lines: 1;
+    --row-pad-block: var(--row-pad-block-narrow);
+    --row-pad-inline: var(--row-pad-inline-narrow);
+  }
+  .card-row .card-lane:has(.card-lane-note:not(.card-lane-caption)) > .card-lane-caption { display: none; }
 }
-.card-listing .card-art { grid-row: span 2; }
-.card-listing .card-content { display: contents; }
-.card-listing .card-name, .card-listing .card-category { grid-column: 2; }
-.card-listing .card-timing, .card-listing .card-action { grid-column: 1 / -1; }
+@media (width < 28rem) {
+  .card-hero {
+    --card-name-size: var(--text-detail-name-narrow);
+    --card-time-size: var(--text-detail-time-narrow);
+    --card-state-size: var(--text-metadata);
+    --card-lane-min: var(--spacing-hero-lane-narrow);
+  }
+}
+
+/* Groups: rows separated by a strip of canvas. Next up is a single column (.row-list). */
+.row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--spacing-row-min)), 1fr));
+  gap: var(--row-gap) var(--grid-gap);
+}
+.row-list,
+.rail-track {
+  display: grid;
+  gap: var(--row-gap);
+}
+@media (width >= 48rem) {
+  .rail-track {
+    grid-auto-flow: column;
+    grid-auto-columns: var(--spacing-rail-column);
+    grid-template-rows: var(--rail-rows, auto);
+    column-gap: var(--rail-gap);
+  }
+}
+
+.fallback-initials { font-size: var(--fallback-initials); }

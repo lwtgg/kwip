@@ -13,7 +13,6 @@ const props = withDefaults(
     countdown?: string
     to?: string
     metricLabel?: 'viewers' | 'views'
-    layout?: 'card' | 'listing'
     headingLevel?: 'h1' | 'h2' | 'h3'
     scale?: 'listing' | 'hero'
     hero?: boolean
@@ -25,7 +24,6 @@ const props = withDefaults(
     countdown: '',
     to: '',
     metricLabel: 'viewers',
-    layout: 'card',
     headingLevel: 'h3',
     scale: 'listing',
   },
@@ -67,6 +65,8 @@ const targetHref = computed(() => {
 
 const compact = computed(() => formatViewersCompact(props.stream?.viewers ?? 0))
 const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
+// "1 viewer", "2 viewers": the unit follows the exact count the label reads out.
+const metric = computed(() => exact.value === '1' ? props.metricLabel.replace(/s$/, '') : props.metricLabel)
 </script>
 
 <template>
@@ -74,13 +74,13 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
     v-if="!stream"
     aria-hidden="true"
     data-variant="skeleton"
-    class="overflow-hidden rounded-[var(--radius-card)] border-t border-border bg-surface"
+    class="card-row min-h-target rounded-row bg-surface"
   >
-    <div class="aspect-video w-full bg-surface-2" />
-    <div class="space-y-[calc(var(--card-gap)+0.125rem)] p-(--card-pad)">
-      <div class="h-3.5 w-20 rounded-listing bg-surface-2" />
-      <div class="h-4 w-4/5 rounded-listing bg-surface-2" />
-      <div class="h-4 w-3/5 rounded-listing bg-surface-2" />
+    <div class="card-art bg-surface-2" />
+    <div class="card-category h-3 w-16 rounded-plate bg-surface-2" />
+    <div class="card-name h-4 w-4/5 rounded-plate bg-surface-2" />
+    <div class="card-lane">
+      <div class="h-(--card-time-size) w-full rounded-plate bg-surface-2" />
     </div>
   </div>
 
@@ -89,12 +89,12 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
     :to="targetHref"
     :data-variant="effectiveVariant"
     :style="tint"
-    class="event-card group h-full min-h-target"
-    :class="[hero ? 'card-hero rounded-panel' : layout === 'listing' ? 'card-listing rounded-card' : 'flex flex-col rounded-card', { 'card-scale-hero': scale === 'hero' }]"
+    class="event-card group h-full min-h-target rounded-row"
+    :class="hero ? 'card-hero' : 'card-row'"
   >
     <div
-      class="card-art relative w-full shrink-0 overflow-hidden bg-surface-2"
-      :class="hero ? 'rounded-panel' : 'rounded-card'"
+      class="card-art relative w-full overflow-hidden bg-surface-2"
+      :class="{ 'rounded-row': hero }"
     >
       <span
         v-if="!imgLoaded && background && effectiveVariant === 'default' && !imgError"
@@ -120,18 +120,19 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
       <PosterFallback v-else :name="stream.name" :colors="stream.colors" :blurhash="stream.blurhash" />
     </div>
 
-    <div class="card-content flex min-w-0 flex-1 flex-col gap-(--card-gap) p-(--card-pad)">
-      <component :is="headingLevel" class="card-name line-clamp-2 wrap-anywhere leading-snug text-fg group-hover:underline">
+    <div class="card-info">
+      <span class="card-category text-metadata text-muted"><span>{{ stream.category_name }}</span><span v-if="stream.tag"> · {{ stream.tag }}</span></span>
+      <component :is="headingLevel" class="card-name wrap-anywhere leading-snug text-fg group-hover:underline">
         {{ stream.name }}
       </component>
-      <span class="card-category text-metadata text-muted wrap-anywhere">{{ stream.category_name }}<template v-if="stream.tag"> · {{ stream.tag }}</template></span>
-      <CardTiming class="card-timing" :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
+      <CardTiming :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
         :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
-      <div class="card-action mt-auto flex flex-wrap items-center justify-between gap-(--card-gap) text-metadata">
-        <span v-if="!stale" role="img" :aria-label="`${exact} ${metricLabel}`" class="listing-numeric text-muted">
-          <span aria-hidden="true">{{ compact }} {{ metricLabel }}</span>
+      <div class="card-meta gap-x-3 text-metadata text-muted">
+        <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
+        <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
+          <span aria-hidden="true">{{ compact }} {{ metric }}</span>
         </span>
-        <span class="ml-auto font-semibold text-fg group-hover:underline">Watch</span>
+        <span class="group-hover:underline">Watch</span>
       </div>
     </div>
   </NuxtLink>

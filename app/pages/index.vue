@@ -231,12 +231,10 @@ useSeoMeta({
         <AdSlot v-if="heroStream" format="leaderboard" placement="home-banner" />
 
         <section v-if="nextUpStreams.length" aria-labelledby="next-up-heading" class="space-y-(--card-gap)">
-          <h2 id="next-up-heading" class="listing-display listing-rule text-lg text-fg">
-            Next up
-          </h2>
-          <ul class="flex gap-(--grid-gap) overflow-x-auto p-(--focus-scroll-gutter) sm:grid sm:grid-cols-3">
-            <li v-for="stream in nextUpStreams" :key="stream.uri_name" class="w-64 shrink-0 sm:w-auto">
-              <StreamCard scale="hero" layout="listing" :stream="stream" :now="nowSeconds" :stale="isStale" />
+          <GroupHeader heading-id="next-up-heading" title="Next up" />
+          <ul class="row-list">
+            <li v-for="stream in nextUpStreams" :key="stream.uri_name" class="min-w-0">
+              <StreamCard :stream="stream" :now="nowSeconds" :stale="isStale" />
             </li>
           </ul>
         </section>
@@ -271,15 +269,9 @@ useSeoMeta({
         />
 
         <!-- Upcoming block with relative countdown -->
-        <section v-if="activeFilter !== 'live' && upcomingBelowHero.length > 0" class="space-y-3">
-          <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
-            <h2 class="listing-display text-lg text-fg">
-              Upcoming
-            </h2>
-            <span class="listing-numeric text-xs text-muted">{{ upcomingBelowHero.length }} scheduled</span>
-          </div>
-
-          <div class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">
+        <section v-if="activeFilter !== 'live' && upcomingBelowHero.length > 0" class="space-y-(--card-gap)">
+          <GroupHeader title="Upcoming" :count="`${upcomingBelowHero.length} scheduled`" />
+          <div class="row-grid">
             <StreamCard
               v-for="stream in upcomingBelowHero"
               :key="stream.id"

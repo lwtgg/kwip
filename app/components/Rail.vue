@@ -29,6 +29,13 @@ function slugifyCategory(name: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
+const countLabel = computed(() => {
+  const n = props.streams.length
+  return props.metricLabel === 'views' ? `${n} ${n === 1 ? 'replay' : 'replays'}` : `${n} listed`
+})
+// At md and up the scroller holds columns of up to three rows.
+const railRows = computed(() => `repeat(${Math.min(props.streams.length, 3)}, auto)`)
+
 const categoryHref = computed(() => {
   if (!props.category) return null
   const slug = slugifyCategory(props.category)
@@ -38,34 +45,16 @@ const categoryHref = computed(() => {
 
 <template>
   <section v-if="streams.length > 0" class="space-y-(--card-gap)">
-    <div class="listing-rule flex flex-wrap items-baseline justify-between gap-(--card-gap)">
-      <h2 class="listing-display text-lg text-fg">
-        <NuxtLink
-          v-if="categoryHref"
-          :to="categoryHref"
-          class="inline-flex items-center gap-1.5 min-h-11 hover:underline"
-        >
-          <span>{{ title }}</span>
-          <span aria-hidden="true" class="text-sm text-muted">→</span>
-        </NuxtLink>
-        <span v-else>{{ title }}</span>
-      </h2>
-      <NuxtLink
-        v-if="categoryHref"
-        :to="categoryHref"
-        class="inline-flex min-h-target items-center gap-1 text-xs font-medium text-muted hover:underline"
-      >
-        View all <span class="listing-numeric">({{ streams.length }})</span>
-      </NuxtLink>
-    </div>
+    <GroupHeader :title="title" :to="categoryHref ?? undefined" :count="countLabel" />
 
     <div
-      class="flex flex-col gap-(--rail-gap) md:flex-row md:snap-x md:snap-mandatory md:overflow-x-auto md:p-(--focus-scroll-gutter) md:has-[:focus-visible]:snap-none"
+      class="rail-track md:snap-x md:snap-mandatory md:overflow-x-auto md:p-(--focus-scroll-gutter) md:has-[:focus-visible]:snap-none"
+      :style="{ '--rail-rows': railRows }"
     >
       <div
         v-for="stream in streams"
         :key="stream.id"
-        class="w-full md:w-72 md:shrink-0 md:snap-start xl:w-80"
+        class="min-w-0 md:snap-start"
       >
         <StreamCard
           :stream="stream"

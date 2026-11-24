@@ -26,7 +26,7 @@ def fixtures(assets, stale=False):
         ('missing-end', dict(starts_at=now-60, ends_at=0)),
         ('channel', dict(always_live=1, starts_at=0, ends_at=0)),
         ('ended', dict(starts_at=now-7200, ends_at=now-60)),
-        ('no-seeds', dict(colors=[])),
+        ('no-seeds', dict(colors=[], viewers='1')),
         ('bad-seeds', dict(colors=['not-a-color', '#12345678'])),
         ('live', dict(starts_at=now-60, ends_at=now+7200)),
     ]
@@ -53,6 +53,19 @@ def double_text(page):
         if (leading !== 'normal') el.style.lineHeight = `${parseFloat(leading) * 2}px`;
       }
     }''')
+
+
+def assert_unbroken_time(page):
+    for timing in page.locator('.card-time').all():
+        measurement = timing.evaluate('''el => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return {rects: range.getClientRects().length,
+            height: el.getBoundingClientRect().height,
+            line: parseFloat(getComputedStyle(el).lineHeight)};
+        }''')
+        assert measurement['rects'] == 1, (timing.inner_text(), measurement)
+        assert measurement['height'] <= measurement['line'] + 1, measurement
 
 
 def check(browser, origin, width, theme, density, dest, stale=False):
@@ -88,6 +101,35 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                 expect(card).to_have_accessible_name(re.compile('Watch'))
                 fact = card.locator('.card-time, .card-state').inner_text()
                 expect(card).to_have_accessible_name(re.compile(re.escape(fact)))
+                # 51 anatomy: the fact owns a lane at the trailing edge; the name never enters it.
+                box = card.evaluate('''el => {
+                  const r = s => el.querySelector(s).getBoundingClientRect(), c = el.getBoundingClientRect();
+                  const info = el.querySelector('.card-info'), pad = parseFloat(getComputedStyle(
+                    el.classList.contains('card-hero') ? info : el).paddingRight);
+                  const label = el.querySelector('.card-category');
+                  // Only the time is heavy: every other text in the card (the plate's art aside) stays under 600.
+                  const heavy = [...el.querySelectorAll('*')].filter(n => !n.closest('.card-time, .card-art')
+                    && [...n.childNodes].some(t => t.nodeType === 3 && t.textContent.trim())
+                    && parseInt(getComputedStyle(n).fontWeight) >= 600).map(n => n.textContent.trim());
+                  return { right: c.right - pad, width: c.width, height: c.height, hero: el.classList.contains('card-hero'),
+                    lane: [r('.card-lane').left, r('.card-lane').right], name: [r('.card-name').left, r('.card-name').right],
+                    fact: r('.card-fact').right, art: r('.card-art').left, heavy,
+                    labelTop: label.getBoundingClientRect().top, nameTop: r('.card-name').top, laneTop: r('.card-lane').top,
+                    labelWhole: [...label.children].every(s => s.offsetTop === label.children[0].offsetTop)
+                      && label.scrollWidth <= label.clientWidth + 1,
+                    twoLineNote: [...el.querySelectorAll('.card-lane-note')].some(n => n.offsetHeight
+                      && n.getBoundingClientRect().height > 1.5 * parseFloat(getComputedStyle(n).lineHeight)) };
+                }''')
+                assert abs(box['lane'][1] - box['right']) <= 1 and abs(box['fact'] - box['right']) <= 1, (prefix, label, box)
+                assert box['name'][1] <= box['lane'][0] + 0.5, (prefix, label, 'name enters lane', box)
+                assert not box['heavy'], (prefix, label, 'only the time is heavy', box['heavy'])
+                # The league label is a whole line of its own above the name and the lane.
+                assert box['labelTop'] < box['nameTop'] and box['labelTop'] < box['laneTop'], (prefix, label, 'label first', box)
+                if len(card.locator('.card-category').inner_text()) <= len('Football · Champions League'):
+                    assert box['labelWhole'], (prefix, label, 'label truncated', box)
+                if not box['hero']:
+                    assert box['art'] <= box['name'][0], (prefix, label, 'plate leads', box)
+                    assert box['width'] / box['height'] >= 3.5, (prefix, label, 'row proportion', box)
             if label in ('category', 'stale'):
                 for card in cards.all():
                     slug = card.get_attribute('href').split('/')[-1]
@@ -100,6 +142,13 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                             expect(card.get_by_text('Last listed:', exact=False)).to_have_text(
                                 re.compile(r'^Last listed: \d{2}:\d{2}$'))
                 if not stale:
+                    # The lane is reserved: a state row leaves the name exactly the column a time row does.
+                    columns = {slug: page.locator(f'a.event-card[href$="/{slug}"] .card-name').bounding_box()['width']
+                               for slug in ('two-seeds', 'unknown-time', 'channel', 'ended', 'live')}
+                    assert max(columns.values()) - min(columns.values()) <= 0.5, (prefix, 'lane reserved', columns)
+                    single = page.locator('a.event-card[href$="/no-seeds"]')
+                    assert re.search(r'\b1 viewer\b(?!s)', single.inner_text()), single.inner_text()
+                    expect(single).to_have_accessible_name(re.compile(r'\b1 viewer\b(?!s)'))
                     expected = {slug: 'Time unavailable' for slug in ('unknown-time', 'invalid-start')}
                     expected.update(channel='24/7', ended='Ended')
                     for slug, text in expected.items():
@@ -110,10 +159,13 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     for slug in ('invalid-end', 'missing-end'):
                         card = page.locator(f'a.event-card[href$="/{slug}"]')
                         assert card.locator('.card-time').count() == 1
-                        assert 'Availability unconfirmed' in card.inner_text()
+                        assert 'Unconfirmed' in card.inner_text()
+                        expect(card).to_have_accessible_name(re.compile('Availability unconfirmed'))
                         assert card.get_by_role('progressbar').count() == 0
                     live = page.locator('a.event-card[href$="/live"]')
-                    assert 'Started at' in live.inner_text()
+                    # Below md the lane keeps one note: the status replaces the date caption.
+                    assert ('Started at' in live.inner_text()) == (width >= 768), (prefix, live.inner_text())
+                    assert re.search(r'\bLive\b', live.locator('.card-lane').inner_text())
                     assert live.get_by_role('progressbar').count() == 1
                     # Same checked field on hover, active, and keyboard focus.
                     for card in cards.all():
@@ -135,6 +187,7 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     page.screenshot(path=str(dest / f'{prefix}-focus.png'))
                     # Text-only 200% stress: keep the layout viewport unchanged.
                     double_text(page)
+                    assert_unbroken_time(page)
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (prefix, '200% overflow')
                     for timing in page.locator('.card-time, .card-state').all():
                         assert timing.evaluate('(el) => el.scrollWidth <= el.clientWidth + 1'), (prefix, timing.inner_text())
@@ -142,6 +195,7 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                     page.screenshot(path=str(dest / f'{prefix}-200percent.png'), full_page=True)
             if label == 'home':
                 double_text(page)
+                assert_unbroken_time(page)
                 page.screenshot(path=str(dest / f'{prefix}-home-200percent.png'), full_page=True)
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (prefix, 'hero 200% overflow')
                 for timing in page.locator('.card-time, .card-state').all():
@@ -172,10 +226,12 @@ def check_boundaries(browser, origin, assets, dest):
                 assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
                 card = page.locator('a.event-card')
                 kickoff = card.locator('.card-time').inner_text()
-                assert 'Upcoming' in card.inner_text()
+                # The lane's quiet status reads "In 1m"; the full wording is its accessible label.
+                assert re.search(r'\bIn \d+m\b', card.inner_text()), card.inner_text()
+                expect(card).to_have_accessible_name(re.compile('Upcoming in'))
                 page.clock.fast_forward(65_000)
                 assert card.locator('.card-time').inner_text() == kickoff
-                assert 'Started at' in card.inner_text()
+                assert ('Started at' in card.inner_text()) == (width >= 768), card.inner_text()
                 assert card.get_by_role('progressbar').count() == 1
                 assert page.evaluate(CLS_SCORE) == 0, (width, theme, 'kickoff CLS')
                 page.clock.fast_forward(65_000)
@@ -215,6 +271,7 @@ def check_known_hero(browser, origin, assets, dest):
                     expect(hero).to_have_css('outline-offset', '2px')
                     page.screenshot(path=str(dest / f'{prefix}-hero-known-focus.png'), full_page=True)
                     double_text(page)
+                    assert_unbroken_time(page)
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     assert hero.locator('.card-time').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
                     page.screenshot(path=str(dest / f'{prefix}-hero-known-200percent.png'), full_page=True)
