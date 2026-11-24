@@ -106,3 +106,14 @@ status responses, so nothing marked the source dead and no supplement was prefer
 server-side probe of the embed's `/fetch` (POST, URI body, 500/405/non-JSON = dead) into the collector's
 source health, keep it inside the existing probe budget/subrequest caps, and have a dead primary fall back to
 a working supplement when one exists. Frame stays lazy and inert on a dead source.
+
+**Shipped 2026-11-24. Task 51 — the listing is a row.** Version `1b186e32`, branch merged `805ac2d`, `main`
+pushed. Two review rounds failed first: round one on eleven defects (proportion 2.12:1, wrapped labels, the
+lane as a shared prefix, lane prefix repeated, `Watch` heavy, hero empty block, Next up two columns), round
+two on the three edges those fixes exposed — a wrapped note dropped the row to 2.91:1, a fixed lane split
+`06:44` at 200 % text, and the card test excused both with a 2.87 floor. Final state: every state ≥3.5:1 at
+320 (worst 3.56, then 4.42 at 390), the laned time never breaks at 200 % (96 → 48 px tall, one line), the
+test floor is 3.5 with no exception plus an unbroken-numeral assertion. Production verified at 320/390/1280,
+both themes: no horizontal overflow, no truncated league label, banner still below the player, canonical and
+`og:url` absolute on every page, `/vods` 200, unknown path 404, tint contrast worst 5.25. Known pre-existing
+gap: at 200 % text the header grid (unchanged by 51, last touched `f396a24`) overflows 320 px by 80.
