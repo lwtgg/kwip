@@ -9,7 +9,7 @@ A matched card (`stream.match`) is now only the `MatchBanner`, full-bleed and sq
 sentence, `CardTiming`, UTC and "Watch" are gone from matched cards. `CardTiming` loses its `banner` prop.
 Unmatched cards and `PosterFallback` are unchanged.
 
-The banner is a three-tier grid (`.banner-lineup`):
+The standard banner is a three-tier grid (`.banner-lineup`):
 
 | Tier | Content |
 |---|---|
@@ -26,22 +26,18 @@ Condensed, bold); all other text is SF Pro, regular weight, `--text-metadata` si
 `matchBannerContent()` in `app/composables/matchBanner.ts`, unit-tested. Every text node shares one fit pass
 (`.banner-fit-text`, `--banner-line-fit`). The initials fallback lives in the logo column, so it never enters the score column.
 
-Fit rules (review fixes 1, 2, 3, 6):
+The fit pass measures scores, abbreviations and status words against the actual card width.
+Scores share a scale between 0.60 and 0.85. Abbreviations reserve enough width to fit on one
+line at 0.60. The status column reserves at least four ems and enough width for its widest
+word at the floor. It can use more of the middle at 1024 px to keep a long detail on one line.
+Status leading is 1.3.
 
-- **Gutter.** Each score slot carries `--banner-gutter` (`0.5em`, so it follows the text size) on the side that faces the
-  detail. The fit measures the slot's content box, so a score can never be drawn into it.
-- **Floor.** `--banner-fit-floor` is 0.6. A fitted line is never drawn narrower; below it the line wraps at the width the
-  floor allows and is drawn at the floor, so the row grows in height only. Wrapping can break inside a word
-  (`overflow-wrap: anywhere`), so even `WWWWW` or 24 `W`s stay legible. Initials sit in a fixed logo box and are exempt.
-- **Scores fit together.** Both scores share one scale, sized for the wider: `min(0.85, column / widest)`, never below the
-  floor. `50`/`97` and `101`/`99` therefore draw at the same scale and only shrink when the column is genuinely tight.
-  The score columns are `minmax(floor × widest + gutter, 1fr)` (`--banner-score-min`, set by the fit pass), and the team
-  and status columns give way first.
-- **Wide listing card (`≥ 64rem`).** The status column narrows from 36 % to 16 % and each score hugs the detail. Logos and
-  their columns are unchanged.
-- The banner's own elements have `transition-property: none`: the fit pass reads layout straight after writing it, and
-  reduced motion stretches every zero-length transition to 0.01 ms, which handed those reads the old track sizes.
-- `--banner-status-leading` is 1.2 (was 1.1) so the tier text boxes never overlap, including the pre-game card at 200 %.
+If the five columns run out of room, logos and scores share the first row, abbreviations sit
+under the logos, and the state, detail and audience get full-width tiers below. The score
+gutter is 0.5 em horizontally in the five-column layout and vertically before the stacked
+status group. A status line can break between words at the floor. Unspaced scripts use
+word segmentation, and an exceptionally wide Latin word uses a narrower monospace face.
+Initials fit within the logo box.
 
 Accessibility: one link. An `sr-only` heading carries the banner's own content, in its words and order, one sentence each
 (`matchBannerContent().label`): matchup (`A 50, B 97`, or `A vs B` before a score exists), state (`Live`/`Upcoming`/`Final`),
@@ -56,7 +52,7 @@ Tokens removed with the old composition: `--banner-plate*`, `--banner-score-narr
 `--banner-logo-narrow`, `--banner-score-compression-narrow`, `--banner-status-leading-hero`,
 `--banner-abbreviation-compression`.
 
-## Measurements (match fixtures, `tests/cards_browser.py`)
+## First review pass (c1bbae0)
 
 Row size and ratio (width / height), both themes, the feed-realistic fixtures at normal text:
 
@@ -97,7 +93,7 @@ Probe: both builds, every fixture, 320/390/1280, both themes and densities, draw
 
 Floor 0.6; worst drawn scale at 320 / 200 % after the fix: 0.60.
 
-## Proof
+## First review proofs
 
 - `tests/cards_browser.py`, at 320/390/1280, both themes, both densities: no category/title/UTC/"Watch" text in a
   matched card; tiers paint in order; initials stay clear of the scores; ratio floor; hero uses the same rules.
@@ -121,3 +117,79 @@ Floor 0.6; worst drawn scale at 320 / 200 % after the fix: 0.60.
   after the fit wrote `--banner-score-min` returned the old column widths and some lines were fitted to stale widths. The
   banner's elements now have `transition-property: none`.
 - Before/after shots: before from `27ba445`, after from this build (`/tmp/kwip58-before`, `/tmp/kwip58-probe`, not committed).
+
+
+## Second review pass (515000f comparison)
+
+The matched browser matrix runs 13 fixtures at 320, 390, 1024 and 1280 px in both themes
+and densities. Each point has a normal run, a per-element doubling run and a root run
+that sets `document.documentElement.style.fontSize` to `200%` and checks that Chromium
+resolves the root to 32 px and banner metadata to 26 px. That yields 624 matched listing
+observations, including 208 at 200% root text. The two enlarged modes exercise different
+constraints because only the root mode also enlarges rem-based geometry.
+
+Each cell compares the clean `515000f` Worker with the corrected Worker in Chromium.
+Height ranges cover all 13 fixtures at that point. The last two columns show the narrowest
+status track and greatest horizontal ink overflow in the root run. Values are CSS pixels.
+
+| Width | Theme | Density | Normal height | Per-element 200% height | Root 200% height | Root min status | Root max overflow |
+|---:|---|---|---:|---:|---:|---:|---:|
+| 320 | dark | comfortable | 75.2–76.4 → 75.1–121.2 | 105.6–448.8 → 113.4–256.0 | 179.9–1333.9 → 208.6–276.2 | 0.0 → 224.0 | 30.0 → 0.0 |
+| 320 | dark | compact | 73.2–74.4 → 73.1–120.2 | 103.6–446.8 → 111.4–255.0 | 175.9–1329.9 → 206.6–274.2 | 0.0 → 224.0 | 30.0 → 0.0 |
+| 320 | light | comfortable | 75.2–76.4 → 75.1–121.2 | 105.6–448.8 → 113.4–256.0 | 179.9–1333.9 → 208.6–276.2 | 0.0 → 224.0 | 30.0 → 0.0 |
+| 320 | light | compact | 73.2–74.4 → 73.1–120.2 | 103.6–446.8 → 111.4–255.0 | 175.9–1329.9 → 206.6–274.2 | 0.0 → 224.0 | 30.0 → 0.0 |
+| 390 | dark | comfortable | 75.2–76.4 → 75.1–77.8 | 105.6–261.6 → 113.4–256.0 | 152.8–1022.0 → 150.2–276.2 | 24.0 → 105.8 | 0.0 → 0.0 |
+| 390 | dark | compact | 73.2–74.4 → 73.1–75.8 | 103.6–259.6 → 111.4–255.0 | 148.8–1018.0 → 146.2–274.2 | 24.0 → 105.8 | 0.0 → 0.0 |
+| 390 | light | comfortable | 75.2–76.4 → 75.1–77.8 | 105.6–261.6 → 113.4–256.0 | 152.8–1022.0 → 150.2–276.2 | 24.0 → 105.8 | 0.0 → 0.0 |
+| 390 | light | compact | 73.2–74.4 → 73.1–75.8 | 103.6–259.6 → 111.4–255.0 | 148.8–1018.0 → 146.2–274.2 | 24.0 → 105.8 | 0.0 → 0.0 |
+| 1024 | dark | comfortable | 75.2–90.0 → 77.8–77.8 | 200.8–324.0 → 143.6–222.2 | 150.4–179.9 → 150.2–155.6 | 143.4 → 143.4 | 0.0 → 0.0 |
+| 1024 | dark | compact | 73.2–88.0 → 75.8–75.8 | 198.8–290.8 → 141.6–221.2 | 146.4–175.9 → 146.2–151.6 | 143.4 → 143.4 | 0.0 → 0.0 |
+| 1024 | light | comfortable | 75.2–90.0 → 77.8–77.8 | 200.8–324.0 → 143.6–222.2 | 150.4–179.9 → 150.2–155.6 | 143.4 → 143.4 | 0.0 → 0.0 |
+| 1024 | light | compact | 73.2–88.0 → 75.8–75.8 | 198.8–290.8 → 141.6–221.2 | 146.4–175.9 → 146.2–151.6 | 143.4 → 143.4 | 0.0 → 0.0 |
+| 1280 | dark | comfortable | 75.2–76.4 → 77.8–77.8 | 138.4–200.8 → 143.6–222.2 | 150.4–152.8 → 150.2–155.6 | 184.3 → 184.3 | 0.0 → 0.0 |
+| 1280 | dark | compact | 73.2–74.4 → 75.8–75.8 | 136.4–198.8 → 141.6–221.2 | 146.4–148.8 → 146.2–151.6 | 184.3 → 184.3 | 0.0 → 0.0 |
+| 1280 | light | comfortable | 75.2–76.4 → 77.8–77.8 | 138.4–200.8 → 143.6–222.2 | 150.4–152.8 → 150.2–155.6 | 184.3 → 184.3 | 0.0 → 0.0 |
+| 1280 | light | compact | 73.2–74.4 → 75.8–75.8 | 136.4–198.8 → 141.6–221.2 | 146.4–148.8 → 146.2–151.6 | 184.3 → 184.3 | 0.0 → 0.0 |
+
+| Regression fixture | Before | After |
+|---|---|---|
+| 320 px, 200% root, Halftime | 834.88 px tall, 8 detail lines, home logo 4 px outside | 242.42 px tall, 1 detail line, 0 px outside |
+| 320 px, 200% root, 24-character detail and 999 scores | 1177.94 px tall, 19 detail lines, up to 30 px outside | 242.42 px tall, 1 detail line, 0 px outside |
+| 320 px, 200% root, 24 `W`s | 1333.88 px tall, 24 detail lines | 242.42 px tall, 1 detail line |
+| 320 px, 200% root, 24 unspaced Han characters and 999 scores | 1333.88 px tall, 24 detail lines | 276.22 px tall, 2 detail lines at segmented boundaries |
+| 320 px, 200% per element, long detail and `WWWWW` | 2 abbreviation lines, 324.03 px tall | 1 abbreviation line, 222.19 px tall |
+| 1024 px, normal, 24-character detail and 999 scores | 74.23 px status track, 2 detail lines, 0.00 px closest tier clearance | 91.00 px status track, 1 detail line, 8.44 px closest tier clearance |
+
+The fixture comparisons above use dark and comfortable. In this browser the clean 1024 px
+tier boxes touch, while the review measured a 0.41 px overlap. The separate `27ba445` build
+measured 145.19 px for Halftime at 320 px and 200% root text, with a minimum horizontal
+scale of 0.5625. The corrected row trades height for legibility and keeps Halftime on one
+line. The root assertions allow the reference height plus four metadata ems for a one-line
+detail and one metadata line-height per additional detail line, with a three-line cap.
+The minimum measured scale across all corrected points was 0.60. The minimum measured
+score-to-status gap was 6.76 px at normal text, 13.37 px with per-element doubling and
+13.19 px with root doubling.
+
+- **Root negative control.** The current `--text-mode root` assertions against the original
+  Worker stopped at the 320 px Halftime card with the home logo at x=292 and the card edge
+  at x=288. Disabling the stacked selectors in a separate copy of the corrected CSS also
+  failed the root test. The home logo reached x=396.
+- **Gutter negative control.** Setting only `--banner-gutter: 1px` in a copy of the corrected
+  CSS caused the measured gap assertion to fail at 2.57 px against a 6.50 px minimum.
+- The root check covers the matched card and its viewport containment. The category header
+  independently overflows the page at 320 px and 200% root text.
+- Per-fixture JSON is in `/tmp/kw58-before/match-report.json` and
+  `/tmp/kw58-final/match-report.json`. The latter directory also contains the corrected matrix
+  screenshots.
+
+### Verification gate
+
+- `pnpm test` passed all 189 tests. The Cloudflare and node-server presets built, and
+  the final Cloudflare rebuild passed `pnpm exec wrangler deploy --dry-run`.
+- `banner_browser.py`, `click_under_browser.py`, `density_browser.py`,
+  `generation_first_browser.py`, `notLive_browser.py` and `sourceHealth_browser.py` passed.
+  The click-under comparison used its documented `1942ccb` baseline. Source health used a
+  temporary build with a local seed. Generation-first used a locally packed fixture in
+  place of the missing production capture.
+- `cards_browser.py` passed the full fresh and stale sweep and the three-mode matched
+  matrix. `git diff --check` passed.

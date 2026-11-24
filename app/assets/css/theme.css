@@ -474,7 +474,8 @@
   --banner-gutter: 0.5em;
   --banner-score-weight: 700;
   --banner-label-weight: 400;
-  --banner-status-leading: 1.2;
+  --banner-status-leading: 1.3;
+  --banner-stacked-score-leading: 1.16;
   --banner-pad-inline: var(--spacing-2);
   --banner-pad-top: var(--spacing-1);
   --banner-pad-bottom: var(--spacing-2);
@@ -504,15 +505,23 @@
     linear-gradient(color-mix(in srgb, var(--banner-black) calc(var(--banner-scrim) * 100%), transparent), color-mix(in srgb, var(--banner-black) calc(var(--banner-scrim) * 100%), transparent)),
     var(--banner-team-field);
 }
+@property --banner-logo-resolved {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
 .banner-lineup {
   display: grid;
-  /* Team and status columns give way first; scores keep at least what the floor allows. */
+  min-width: 0;
+  --banner-logo-resolved: var(--banner-logo);
+  --banner-team-min: max(var(--banner-logo), var(--banner-label-min, 0px));
+  /* The fit pass reserves enough room for unbroken words, labels and scores. */
   grid-template-columns:
-    minmax(var(--banner-logo), var(--banner-team-width))
-    minmax(var(--banner-score-min, 0px), 1fr)
-    minmax(0, var(--banner-status-width))
-    minmax(var(--banner-score-min, 0px), 1fr)
-    minmax(var(--banner-logo), var(--banner-team-width));
+    minmax(var(--banner-team-min), var(--banner-team-width))
+    minmax(var(--banner-scored-min, 0px), 1fr)
+    minmax(var(--banner-status-min, 0px), var(--banner-status-width))
+    minmax(var(--banner-scored-min, 0px), 1fr)
+    minmax(var(--banner-team-min), var(--banner-team-width));
   grid-template-rows: minmax(1lh, 1fr) auto minmax(1lh, 1fr);
   align-items: center;
   padding: var(--banner-pad-top) var(--banner-pad-inline) var(--banner-pad-bottom);
@@ -524,7 +533,16 @@
 /* The fit pass reads layout straight after writing it. Reduced motion stretches every zero-length
    transition to 0.01ms, which would hand the read back the old track sizes. */
 .banner-lineup, .banner-lineup * { transition-property: none; }
-.banner-team { grid-row: 1 / 3; display: grid; place-items: center; min-width: 0; }
+.banner-lineup:has(.banner-score-slot) {
+  --banner-scored-min: calc(var(--banner-score-min, 0px) + var(--banner-gutter));
+}
+.banner-team {
+  grid-row: 1 / 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  min-width: 0;
+}
 .banner-team img, .banner-initials {
   width: var(--banner-logo);
   max-width: 100%;
@@ -582,27 +600,59 @@
 .banner-fit-text[data-wrap] {
   width: calc(100% / var(--banner-fit-floor));
   white-space: normal;
-  overflow-wrap: anywhere;
   text-wrap: balance;
+}
+
+.banner-status-word {
+  display: inline-block;
+  white-space: nowrap;
 }
 
 .banner-fit-text.banner-score {
   transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-score-compression)));
 }
 
+/* When the five columns cannot hold the fit floor, the status gets a full-width tier group. */
+.banner-lineup[data-stacked] {
+  grid-template-columns:
+    minmax(var(--banner-label-min), 1fr)
+    minmax(var(--banner-score-min), 1fr)
+    minmax(var(--banner-score-min), 1fr)
+    minmax(var(--banner-label-min), 1fr);
+  grid-template-rows: auto auto repeat(3, auto);
+  padding-block: calc(var(--banner-pad-top) / 2) calc(var(--banner-pad-bottom) / 2);
+  padding-inline: clamp(0px, calc(50% - var(--banner-label-min) - var(--banner-score-min)), var(--banner-pad-inline));
+}
+.banner-lineup[data-stacked] .banner-team,
+.banner-lineup[data-stacked] .banner-score-slot { grid-row: 1; }
+.banner-lineup[data-stacked] .banner-score-slot {
+  padding-inline: 0;
+  padding-block-start: var(--spacing-1);
+}
+.banner-lineup[data-stacked] .banner-score { line-height: var(--banner-stacked-score-leading); }
+.banner-lineup[data-stacked] .banner-abbreviation { grid-row: 2; }
+.banner-lineup[data-stacked] .banner-home-team,
+.banner-lineup[data-stacked] .banner-home-label { grid-column: 4; }
+.banner-lineup[data-stacked] .banner-home-score { grid-column: 3; }
+.banner-lineup[data-stacked] .banner-status {
+  grid-area: 3 / 1 / -1 / -1;
+  padding-block-start: var(--banner-gutter);
+}
+.banner-fit-text[data-mono] { font-family: ui-monospace, monospace; }
+
 /* Wide listing card: the middle columns narrow and each score hugs the detail, as in the mockup. */
 @media (width >= 64rem) {
   .match-banner[data-scale='listing'] {
     --banner-status-width: 16%;
   }
-  .match-banner[data-scale='listing'] .banner-score-slot { display: flex; }
-  .match-banner[data-scale='listing'] .banner-away-score { justify-content: flex-end; }
-  .match-banner[data-scale='listing'] .banner-fit-text.banner-score {
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-score-slot { display: flex; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-away-score { justify-content: flex-end; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-fit-text.banner-score {
     left: auto;
     transform: scaleX(var(--banner-line-fit, var(--banner-score-compression)));
   }
-  .match-banner[data-scale='listing'] .banner-away-score .banner-score { transform-origin: right center; }
-  .match-banner[data-scale='listing'] .banner-home-score .banner-score { transform-origin: left center; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-away-score .banner-score { transform-origin: right center; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-home-score .banner-score { transform-origin: left center; }
 }
 
 .banner-progress { position: absolute; inset-inline: var(--banner-pad-inline); bottom: 0; }
