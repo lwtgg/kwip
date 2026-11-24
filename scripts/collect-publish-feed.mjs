@@ -1,3 +1,4 @@
+import { enrichScoreboards, scoreboardEligible } from './scoreboard.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -115,9 +116,13 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   const supplementEvents = []
   const probeItems = []
   const matches = []
+  const scoreRecords = []
+  let streamListing
+  const scoreChanged = new Set()
   const supplementListing = fixture ? undefined : fetchSupplementListing(deadline)
   const pitSportListing = fixture ? undefined : fetchPitSportListing(deadline)
   const zliveListing = fixture ? undefined : fetchZliveListing(deadline)
+  if (!fixture) result.scores = { leagues: 0, requests: 0, matched: 0, unmatched: 0 }
   const now = Date.now()
 
   async function append(path, bytes) {
@@ -143,6 +148,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
 
   for (const collection of ['streams', 'vods']) {
     const { payload } = await read(collection)
+    if (collection === 'streams') streamListing = { payload, entry: entries.at(-1) }
     const { timestamp, performance, ...content } = payload
     hashes[collection] = sha256(canonical(content))
     if (!Array.isArray(payload[collection])) throw new Error(`Invalid ${collection} list`)
@@ -179,7 +185,9 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
       || (zlive?.byName.size && event.always_live === 1
         && (!event.channelSlug || matchZliveSources(event, zlive).length)))
     || (!publishedEvents && (listing?.streams.length || pitSport?.streams.length || zlive?.byName.size))
-  if (current && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
+  const needsScores = !fixture && streamListing.payload.streams.some(category => category.streams.some(item =>
+    scoreboardEligible({ ...item, always_live: Number(item.always_live ?? category.always_live) })))
+  if (current && !needsScores && !current.hasSupplements && !needsDetails && ['streams', 'vods'].every((key) => hashes[key] === current.hashes[key]) &&
       current.endpoints.length === details.size + 2 &&
       current.endpoints.every(({ path }) => path === 'streams' || path === 'vods' || details.has(path))) {
     if (zlive) result.zlive.unmatched = publishedEvents?.filter(event => event.always_live === 1).length ?? 0
@@ -199,6 +207,10 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     const timing = eventTimes.get(path)
     if (timing) {
       const item = payload.data
+      scoreRecords.push({ payload, entry: entries.at(-1), hash, item: {
+        ...item, always_live: Number(timing.always_live) === 1 || Number(item.always_live) === 1 ? 1 : 0,
+        starts_at: item.starts_at ?? item.start_timestamp ?? timing.starts_at,
+      } })
       const event = supplementEvent(item, timing)
       if (zlive?.byName.size && event.always_live === 1) event.channelSlug = path.split('/').at(-1)
       supplementEvents.push(event)
@@ -282,6 +294,36 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     }
     healthReserve = nextReserve
     hasSupplements = true
+  }
+  if (!fixture) {
+    result.scores = await enrichScoreboards(scoreRecords.map(record => record.item), {
+      deadline: Math.min(performance.now() + 8_000, deadline - probeBudgetMs - packReserveMs),
+      maxRequests: providerRequestLimit - result.providerRequests,
+      onRequest: () => result.providerRequests++,
+    })
+    const byPath = new Map(scoreRecords.map(record => [record.entry.endpoint.path, record.item.match]))
+    for (const record of scoreRecords) {
+      if (record.payload.data.match !== undefined || record.item.match) scoreChanged.add(record)
+      delete record.payload.data.match
+      if (record.item.match) record.payload.data.match = record.item.match
+    }
+    for (const category of streamListing.payload.streams) {
+      for (const item of category.streams) {
+        if (item.match !== undefined) scoreChanged.add(streamListing)
+        delete item.match
+        const match = byPath.get(feedDetailPath('streams', item.uri_name))
+        if (match) { item.match = match; scoreChanged.add(streamListing) }
+      }
+    }
+    for (const { payload, entry, hash } of scoreChanged) {
+      const bytes = json(payload)
+      if (bytes.length > fileLimit) throw new Error('Score enrichment exceeded file limit')
+      size += bytes.length - entry.endpoint.length
+      if (size >= snapshotLimit) throw new Error('Snapshot reached 40 MiB')
+      entry.stored = bytes
+      entry.endpoint.length = bytes.length
+      if (hash) hash[1] = sha256(bytes)
+    }
   }
   hashes.details = sha256(json(detailHashes))
 

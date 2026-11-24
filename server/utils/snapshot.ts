@@ -99,6 +99,19 @@ function validateDisplayFields(kind: string, item: Record<string, unknown>) {
           !Number.isFinite(Number(value)) || Math.abs(Number(value)) > 8.64e12) invalid()
     }
   }
+  if (item.match !== undefined) {
+    const match = record(item.match)
+    if (!['pre', 'in', 'post'].includes(String(match.state)) ||
+        typeof match.state !== 'string' || typeof match.detail !== 'string' || match.detail.length > 24) invalid()
+    for (const key of ['away', 'home']) {
+      const side = record(match[key])
+      if (typeof side.name !== 'string' || side.name.length > 60 ||
+          typeof side.abbreviation !== 'string' || side.abbreviation.length > 5 ||
+          (side.color !== null && (typeof side.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(side.color))) ||
+          (side.logo !== null && (typeof side.logo !== 'string' || URL.parse(side.logo)?.protocol !== 'https:')) ||
+          (side.score !== null && (typeof side.score !== 'number' || !Number.isInteger(side.score) || side.score < 0 || side.score > 999))) invalid()
+    }
+  }
   validateItemSources(item)
 }
 
@@ -165,7 +178,7 @@ export function containsHostToken(value: unknown): boolean {
 }
 
 const streamFields = ['id', 'name', 'tag', 'poster', 'blurhash', 'colors', 'uri_name', 'starts_at',
-  'ends_at', 'always_live', 'category_name', 'viewers']
+  'ends_at', 'always_live', 'category_name', 'viewers', 'match']
 const vodFields = ['id', 'name', 'tag', 'poster', 'blurhash', 'colors', 'uri_name', 'slug', 'added', 'event_date', 'views']
 function pick(value: Record<string, unknown>, keys: string[]) {
   const result: Record<string, unknown> = {}

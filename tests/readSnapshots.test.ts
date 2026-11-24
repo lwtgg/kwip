@@ -598,3 +598,28 @@ test('seed fallback keeps its listing when the requested live detail is absent f
   assert.equal(seed?.get(endpoints[1]), undefined)
   assert.deepEqual(calls, ['/feed-cache/streams.json'])
 })
+
+test('score matches survive list and detail compaction and invalid match fields reject the generation', async () => {
+  const side = { name: 'Team', abbreviation: 'TEAM', color: '#abcdef', logo: 'https://example.com/team.png', score: 12 }
+  const match = { state: 'in', detail: 'Q3 7:42', away: side, home: side }
+  const check = async (value: unknown) => {
+    const streams = { ...channels, streams: [{ category: 'Sports', streams: [
+      { id: 1, uri: 'sport/example', name: 'Example', match: value },
+    ] }] }
+    const payload = { ...detail, data: { ...detail.data, match: value } }
+    return createSnapshotReader(fixture(true, payload, false, 'sport/example', true, streams).bucket)
+      .read(['streams', 'streams/sport/example'])
+  }
+  const result = await check(match)
+  assert.deepEqual(result.payloads.get('streams')?.payload.streams[0].streams[0].match, match)
+  assert.deepEqual(result.payloads.get('streams/sport/example')?.payload.data.match, match)
+  for (const value of [null, [], { ...match, state: 'live' }, { ...match, detail: 'x'.repeat(25) },
+    { ...match, away: null }, ...[
+      { name: 'x'.repeat(61) }, { name: 1 }, { abbreviation: 'TOOLONG' }, { abbreviation: null },
+      { color: '#oops' }, { color: undefined }, { logo: 'http://example.com/logo' }, { logo: undefined },
+      { score: 1.5 }, { score: -1 }, { score: 1000 }, { score: '12' },
+    ].map(patch => ({ ...match, away: { ...side, ...patch } }))]) {
+    await assert.rejects(check(value), /Unreadable feed snapshot/)
+  }
+  await check({ state: 'pre', detail: '', away: { ...side, color: null, logo: null, score: null }, home: side })
+})

@@ -64,6 +64,11 @@ const mock = String.raw`
       name: mode === 'zlive-no-primary' ? 'Sky Sports F1 UK' : 'Unmatched Sports', always_live: 1,
     })
   }
+  if (mode === 'scores') {
+    for (const item of [fixture.streams.streams[0].streams[0], fixture['streams/foo'].data]) {
+      Object.assign(item, { name: 'Home FC vs. Away FC', tag: 'Premier League', always_live: 0, starts_at: start })
+    }
+  }
   const pitSportModes = ['pitsport', 'pitsport-down']
   const pitSportAvailable = mode === 'pitsport' || nearbyPitSport
   const pitSportUrl = id => 'https://pitsport.st/programs/' + id + '/play'
@@ -124,6 +129,15 @@ const mock = String.raw`
   globalThis.fetch = async (request, options) => {
     if (typeof request === 'string') {
       const url = new URL(request)
+      if (url.hostname === 'site.api.espn.com') {
+        assert.equal(mode, 'scores')
+        return Response.json({ events: [{ id: 'score1', competitions: [{
+          date: new Date(start * 1000).toISOString(), status: { type: { state: 'in', description: 'Halftime' } },
+          competitors: ['home', 'away'].map(homeAway => ({ homeAway, score: '2', team: {
+            displayName: homeAway === 'home' ? 'Home FC' : 'Away FC', abbreviation: homeAway === 'home' ? 'HOM' : 'AWY',
+          } })),
+        }] }] })
+      }
       if (url.href === 'https://zlive.st/embed/manifest.json') {
         zliveRequests++
         assert.equal(options.redirect, 'manual')
@@ -239,7 +253,14 @@ const mock = String.raw`
           assert.equal(offset, end)
           end += length
           const bytes = packed.subarray(offset, end)
-          if (path === 'health.json') {
+          if (mode === 'scores' && ['streams', 'streams/foo'].includes(path)) {
+            const payload = JSON.parse(bytes)
+            const item = path === 'streams' ? payload.streams[0].streams[0] : payload.data
+            assert.equal(item.match.away.name, 'Away FC')
+            assert.equal(item.match.home.name, 'Home FC')
+            assert.equal(item.match.detail, 'Halftime')
+            assert.equal(item.match.home.score, 2)
+          } else if (path === 'health.json') {
             const health = JSON.parse(bytes)
             assert.deepEqual(Object.keys(health).sort(), mode === 'deadline' ? []
               : expectedProbes.map(url => url.split('?')[0].slice(8)).sort())
@@ -452,4 +473,11 @@ test('zlive supplements 24/7 channels and a manifest network error publishes the
   assert.equal(empty.outcome, 'published')
   assert.deepEqual(failed.bytes, empty.bytes)
   assert.deepEqual(failedDryRun.manifest.hashes, emptyDryRun.manifest.hashes)
+})
+
+test('publisher packs scoreboard enrichment in lists and details and counts the request', async () => {
+  const result = await publish([], null, 'scores')
+  assert.equal(result.outcome, 'published')
+  assert.equal(result.providerRequests, 6)
+  assert.deepEqual(result.scores, { leagues: 1, requests: 1, matched: 1, unmatched: 0 })
 })

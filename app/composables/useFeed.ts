@@ -33,7 +33,16 @@ export interface FeedSubstream {
   iframe: string
 }
 
+export interface MatchSide {
+  name: string
+  abbreviation: string
+  color: string | null
+  logo: string | null
+  score: number | null
+}
+
 export interface FeedStreamItem {
+  match?: { state: 'pre' | 'in' | 'post'; detail: string; away: MatchSide; home: MatchSide }
   id: number
   name: string
   tag: string
