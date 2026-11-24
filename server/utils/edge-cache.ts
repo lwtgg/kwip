@@ -8,10 +8,12 @@ export function renderSearch(url: URL): URLSearchParams {
   return query
 }
 
-export function edgeCacheKey(url: URL, generation: string, query = renderSearch(url)): Request {
+export function edgeCacheKey(url: URL, generation: string, buildId: string | null | undefined, query = renderSearch(url)): Request {
   const key = new URL(url.origin)
   key.pathname = url.pathname
   key.searchParams.set('generation', generation)
+  // Omission keeps a missing build distinct from every real build id, including empty.
+  if (buildId !== undefined && buildId !== null) key.searchParams.set('build', buildId)
   key.searchParams.set('host', url.host)
   for (const [name, value] of query) key.searchParams.set(name, value)
   return new Request(key)
