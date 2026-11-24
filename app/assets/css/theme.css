@@ -33,9 +33,28 @@
   --text-feature--line-height: 1.08;
   --spacing-feature-art: 20rem;
   --spacing-listing-thumb: 4.5rem;
+  --text-card-name: 1rem;
+  --text-detail-name: 2rem;
+  --text-card-time: 2.25rem;
+  --text-detail-time: 3.5rem;
 }
 
 :root {
+  --card-name-weight: 600;
+  --card-time-weight: 850;
+  --card-time-leading: 1;
+  --card-time-width: 5ch;
+  --card-art-ratio: 16 / 9;
+  --card-tint-listing-color: 0.35;
+  --card-tint-listing-surface: 0.65;
+  --card-tint-hero-color: 0.5;
+  --card-tint-hero-surface: 0.5;
+  --card-tint-saturation-max: 0.6;
+  --card-tint-dark-min: 0.18;
+  --card-tint-dark-max: 0.26;
+  --card-tint-light-min: 0.84;
+  --card-tint-light-max: 0.92;
+  --card-text-contrast: 4.5;
   --focus-ring: var(--color-accent);
   --focus-ring-width: 0.125rem;
   --focus-ring-inset: calc(-1 * var(--focus-ring-width));
@@ -186,3 +205,55 @@
 @utility listing-hero-art {
   contain: size;
 }
+
+/* Interaction changes the cue, never the contrast-checked identity ground. */
+.event-card {
+  background: var(--card-field-dark, var(--color-surface));
+  min-width: 0;
+}
+:root.light .event-card,
+:root[data-theme="light"] .event-card {
+  background: var(--card-field-light, var(--color-surface));
+}
+.card-art { aspect-ratio: var(--card-art-ratio); }
+.card-name {
+  font-size: var(--text-card-name);
+  font-weight: var(--card-name-weight);
+}
+.card-time {
+  display: block;
+  width: fit-content;
+  min-width: min(var(--card-time-width), 100%);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--text-card-time);
+  font-weight: var(--card-time-weight);
+  line-height: var(--card-time-leading);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-stretch: condensed;
+}
+.card-state {
+  min-height: var(--text-card-time);
+  overflow-wrap: anywhere;
+  font-size: var(--text-card-name);
+}
+.card-scale-hero .card-time { font-size: var(--text-detail-time); }
+.card-scale-hero .card-state { min-height: var(--text-detail-time); }
+.card-scale-hero .card-name { font-size: var(--text-detail-name); }
+.card-hero { display: grid; grid-template-columns: minmax(0, 1fr); }
+@media (width >= 64rem) {
+  .card-hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+  .card-hero .card-art { aspect-ratio: auto; min-height: var(--spacing-feature-art); }
+}
+
+.card-listing {
+  display: grid;
+  grid-template-columns: var(--spacing-listing-thumb) minmax(0, 1fr);
+  align-content: start;
+  gap: var(--card-gap);
+  padding: var(--card-pad);
+}
+.card-listing .card-art { grid-row: span 2; }
+.card-listing .card-content { display: contents; }
+.card-listing .card-name, .card-listing .card-category { grid-column: 2; }
+.card-listing .card-timing, .card-listing .card-action { grid-column: 1 / -1; }

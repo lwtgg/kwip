@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { blurBackground } from '~/composables/usePosterBlur'
 import { useStreams, type FeedStreamItem } from '~/composables/useFeed'
-import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
 const route = useRoute()
 const { siteName } = useRuntimeConfig().public
@@ -118,7 +116,6 @@ const hasVisibleStreams = computed(() =>
 )
 
 const heroStream = computed(() => heroEntry.value?.stream ?? null)
-const heroMode = computed(() => heroEntry.value?.mode ?? 'archive')
 const otherLiveStreams = computed(() =>
   liveNowStreams.value.filter(stream => stream.uri_name !== heroStream.value?.uri_name),
 )
@@ -151,25 +148,6 @@ const categoryRails = computed(() =>
 const upcomingBelowHero = computed(() =>
   withoutNextUp(upcomingStreams.value).filter((stream) => stream.uri_name !== heroStream.value?.uri_name),
 )
-
-const heroImgRef = ref<HTMLImageElement | null>(null)
-const heroImgError = ref(false)
-const heroImgLoaded = ref(false)
-const heroBackground = blurBackground(() => heroStream.value?.blurhash)
-watch(
-  () => heroStream.value?.poster,
-  () => {
-    heroImgError.value = false
-    heroImgLoaded.value = false
-  },
-)
-
-onMounted(() => {
-  if (heroImgRef.value?.complete) {
-    heroImgLoaded.value = heroImgRef.value.naturalWidth > 0
-    heroImgError.value = !heroImgLoaded.value
-  }
-})
 
 const filterOptions = [
   { value: 'all', label: 'All' },
@@ -246,100 +224,8 @@ useSeoMeta({
 
       <template v-else>
         <!-- Hero -->
-        <section
-          v-if="heroStream"
-          aria-label="Featured event"
-          class="listing-hero relative overflow-hidden rounded-panel bg-surface"
-          :class="{ 'listing-live': heroMode === 'live' && !isStale }"
-        >
-          <div class="grid grid-cols-1 lg:grid-cols-12">
-            <div
-              class="listing-hero-art relative aspect-video overflow-hidden lg:col-span-7 lg:aspect-auto lg:min-h-feature-art"
-              :style="{ backgroundColor: heroStream.colors?.[0] || 'var(--color-surface-2)' }"
-            >
-              <span
-                v-if="!heroImgLoaded && heroBackground && heroStream.poster && !heroImgError"
-                aria-hidden="true"
-                class="absolute inset-0 scale-105 bg-cover bg-center blur-sm"
-                :style="{ backgroundImage: heroBackground }"
-              />
-              <img
-                v-if="heroStream.poster && !heroImgError"
-                ref="heroImgRef"
-                :src="heroStream.poster"
-                :alt="heroStream.name"
-                width="960"
-                height="540"
-                loading="eager"
-                decoding="async"
-                class="absolute inset-0 h-full w-full object-cover"
-                :class="heroImgLoaded ? 'opacity-100' : 'opacity-0'"
-                @load="heroImgLoaded = true"
-                @error="heroImgError = true"
-              >
-              <PosterFallback v-else :name="heroStream.name" :colors="heroStream.colors" :blurhash="heroStream.blurhash" />
-              <div v-if="heroStream.poster && !heroImgError" class="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg/80 via-transparent to-transparent lg:bg-gradient-to-r lg:from-transparent lg:to-surface/90" />
-            </div>
-
-            <div class="flex min-w-0 flex-col justify-center gap-(--stack-gap) p-(--page-padding) lg:col-span-5">
-              <div class="flex flex-wrap items-center gap-2 text-xs">
-                <StatusPill
-                  :starts-at="heroStream.starts_at"
-                  :ends-at="heroStream.ends_at"
-                  :always-live="heroStream.always_live"
-                  :now="nowSeconds"
-                  :stale="isStale"
-                />
-
-                <NuxtLink
-                  :to="`/c/${slugifyCategory(heroStream.category_name)}`"
-                  class="rounded-listing bg-surface-2 inline-flex min-h-target min-w-target items-center px-2.5 py-0.5 font-medium text-muted hover:text-fg"
-                >
-                  {{ heroStream.category_name }}
-                </NuxtLink>
-                <span v-if="heroStream.tag" class="text-muted">· {{ heroStream.tag }}</span>
-                <span
-                  v-if="!isStale"
-                  class="listing-numeric ml-auto text-muted"
-                  role="img"
-                  :aria-label="`${formatViewersExact(heroStream.viewers)} ${heroMode === 'live' ? 'watching' : 'interested'}`"
-                >
-                  <span aria-hidden="true">
-                    {{ formatViewersCompact(heroStream.viewers) }} {{ heroMode === 'live' ? 'watching' : 'interested' }}
-                  </span>
-                </span>
-              </div>
-
-              <LiveProgress
-                v-if="!isStale"
-                :starts-at="heroStream.starts_at"
-                :ends-at="heroStream.ends_at"
-                :always-live="heroStream.always_live"
-                :now="nowSeconds"
-              />
-
-              <h1 class="listing-display wrap-anywhere text-feature text-fg">
-                {{ heroStream.name }}
-              </h1>
-
-              <div class="pt-1">
-                <NuxtLink
-                  :to="`/live/${heroStream.uri_name}`"
-                  class="inline-flex min-h-11 items-center gap-2 rounded-listing bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg hover:underline"
-                >
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    class="h-4 w-4"
-                  >
-                    <path d="M8 5.14v14l11-7-11-7Z" />
-                  </svg>
-                  <span>{{ heroMode === 'live' && !isStale ? 'Watch live event' : 'Open event page' }}</span>
-                </NuxtLink>
-              </div>
-            </div>
-          </div>
+        <section v-if="heroStream" aria-label="Featured event">
+          <StreamCard :stream="heroStream" :now="nowSeconds" :stale="isStale" hero scale="hero" heading-level="h1" />
         </section>
 
         <AdSlot v-if="heroStream" format="leaderboard" placement="home-banner" />
@@ -350,7 +236,7 @@ useSeoMeta({
           </h2>
           <ul class="flex gap-(--grid-gap) overflow-x-auto p-(--focus-scroll-gutter) sm:grid sm:grid-cols-3">
             <li v-for="stream in nextUpStreams" :key="stream.uri_name" class="w-64 shrink-0 sm:w-auto">
-              <StreamCard layout="listing" :stream="stream" :now="nowSeconds" :stale="isStale" />
+              <StreamCard scale="hero" layout="listing" :stream="stream" :now="nowSeconds" :stale="isStale" />
             </li>
           </ul>
         </section>

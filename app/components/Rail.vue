@@ -38,7 +38,7 @@ const categoryHref = computed(() => {
 
 <template>
   <section v-if="streams.length > 0" class="space-y-(--card-gap)">
-    <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
+    <div class="listing-rule flex flex-wrap items-baseline justify-between gap-(--card-gap)">
       <h2 class="listing-display text-lg text-fg">
         <NuxtLink
           v-if="categoryHref"
