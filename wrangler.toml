@@ -13,7 +13,7 @@ routes = [
 ]
 
 [vars]
-NUXT_PUBLIC_FEED_BASE = "https://api.ppv.st/api"
+NUXT_PUBLIC_FEED_BASE = "/api/feed"
 NUXT_PUBLIC_FEED_MIRROR_BASE = "https://api.ppv.cx/api"
 
 [assets]

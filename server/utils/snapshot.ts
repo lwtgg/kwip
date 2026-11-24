@@ -54,7 +54,7 @@ function parseManifest(value: unknown) {
     end += length
   }
   if (end !== size) return invalid()
-  return { commitId, payloadId, payloadKey, size, ranges }
+  return { commitId, payloadId, payloadKey, size, ranges, listsVerifiedAt: Date.parse(listsVerifiedAt as string) }
 }
 
 type SnapshotPayload = Record<string, unknown> & { success: true }

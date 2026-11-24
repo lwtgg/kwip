@@ -623,3 +623,95 @@ test('score matches survive list and detail compaction and invalid match fields 
   }
   await check({ state: 'pre', detail: '', away: { ...side, color: null, logo: null, score: null }, home: side })
 })
+
+// Same-origin API and SSR share the validated generation reader.
+const { serveFeedPath } = await import('../server/utils/feed-route.ts')
+const { isCrossOriginFeed } = await import('../server/utils/feed.ts')
+const localConfig = { feedSnapshotBinding: 'FEED_SNAPSHOTS', public: {
+  feedBase: '/api/feed', feedMirrorBase: 'https://mirror.example', canonicalHost: 'kwip.fyi',
+} }
+function routeFixture(includeDetail = true) {
+  const data = fixture(includeDetail)
+  data.manifest.listsVerifiedAt = new Date(Date.now() - 1000).toISOString()
+  const event = { context: { cloudflare: { env: { FEED_SNAPSHOTS: data.bucket } } } } as never
+  return { ...data, event }
+}
+
+test('same-origin feed route reads ranges and replaces host tokens without proxying', async () => {
+  const { event, calls } = routeFixture()
+  const response = await serveFeedPath(event, 'streams/sport/example', (() => { throw Error('proxy') }) as never, localConfig, requestUrl)
+  assert.equal(response.status, 200)
+  assert.equal(response.headers['cache-control'], 'no-store')
+  assert.equal(response.body.data.sources[0].data, 'https://example.com/?host=kwip.fyi')
+  assert.equal(response.body.detailGeneration, commitId)
+  assert.equal(calls.length, 3)
+  assert.equal(isCrossOriginFeed('/api/feed', requestUrl, { kind: 'streams' }), false)
+})
+
+test('readable generation omissions return JSON 404 without provider or seed', async () => {
+  const { event } = routeFixture(false)
+  const response = await serveFeedPath(event, 'streams/sport/example', (() => { throw Error('proxy') }) as never, localConfig, requestUrl)
+  assert.equal(response.status, 404)
+  assert.deepEqual(response.body, { success: false, error: 'Not found', snapshotOmitted: true })
+})
+
+for (const state of ['missing', 'unreadable', 'ping']) {
+  test(`feed route proxies ${state} with bounded upstream fetching`, async () => {
+    const data = routeFixture()
+    const event = state === 'missing' ? { context: {} } as never : state === 'unreadable'
+      ? { context: { cloudflare: { env: { FEED_SNAPSHOTS: { get: async () => { throw Error('bad manifest') } } } } } } as never
+      : data.event
+    const urls: string[] = []
+    const fetcher = async (url: string, options: { signal: AbortSignal }) => {
+      assert.ok(options.signal instanceof AbortSignal)
+      urls.push(url)
+      return { success: true, timestamp: 123, streams: [] }
+    }
+    const response = await serveFeedPath(event, state === 'ping' ? 'ping' : 'streams', fetcher as never, localConfig, requestUrl)
+    assert.equal(response.status, 200)
+    assert.deepEqual(urls, [`https://api.ppv.st/api/${state === 'ping' ? 'ping' : 'streams'}`])
+    if (state === 'ping') assert.deepEqual(data.calls, [])
+  })
+}
+
+test('same-origin SSR reads the generation with a local feed base', async () => {
+  const data = routeFixture()
+  const generation = await getFeedGeneration(data.event, 'FEED_SNAPSHOTS', localConfig.public, requestUrl)
+  assert.equal(generation?.readable, true)
+  assert.equal(generation?.get(endpoints[1])?.detailGeneration, commitId)
+})
+
+test('same-origin SSR falls through provider, mirror and whole seed in order', async () => {
+  const calls: string[] = []
+  const fetcher = async (url: string, options: { onRequestError?: () => void }) => {
+    calls.push(url)
+    if (url.includes('/feed-cache/')) return channels
+    options.onRequestError?.()
+    throw new TypeError('network down')
+  }
+  const event = { context: {} } as never
+  const fallback = await getFeedFallback(event, 'FEED_SNAPSHOTS', fetcher as never, localConfig.public, new URL('https://kwip.fyi/'), [])
+  assert.ok(fallback?.get({ kind: 'streams' })?.fromCache)
+  assert.deepEqual(calls, ['https://api.ppv.st/api/streams', 'https://mirror.example/streams', 'https://kwip.fyi/feed-cache/streams.json'])
+})
+
+test('same-origin browser leaves authoritative API errors intact and never tries mirror or seed', async () => {
+  const calls: string[] = []
+  const error = Object.assign(new Error('Not found'), { data: { snapshotOmitted: true } })
+  await assert.rejects(fetchFeed(async (url) => { calls.push(url); throw error }, localConfig.public,
+    requestUrl, { kind: 'stream', uriName: 'missing' }), candidate => candidate === error)
+  assert.deepEqual(calls, ['https://kwip.fyi/api/feed/streams/missing'])
+})
+
+for (const age of [1, 46]) {
+  test(`readable generation remains authoritative at ${age} minutes`, async () => {
+    for (const included of [true, false]) {
+      const data = routeFixture(included)
+      data.manifest.listsVerifiedAt = new Date(Date.now() - age * 60_000).toISOString()
+      const noProxy = (() => { throw Error('must not proxy') }) as never
+      const response = await serveFeedPath(data.event, 'streams/sport/example', noProxy, localConfig, requestUrl)
+      assert.equal(response.status, included ? 200 : 404)
+      assert.equal(await getFeedCacheIdentity(data.event, 'FEED_SNAPSHOTS', localConfig.public, requestUrl), commitId)
+    }
+  })
+}
