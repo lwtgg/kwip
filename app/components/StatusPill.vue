@@ -52,8 +52,8 @@ const accessibleTime = computed(() => {
 
 <template>
   <span
-    class="inline-flex flex-wrap items-center gap-x-1 text-metadata font-semibold text-fg tabular-nums"
-    :class="{ 'rounded-control bg-surface-2 px-2.5 py-0.5': !quiet }"
+    class="inline-flex flex-wrap items-center gap-x-1 text-metadata tabular-nums"
+    :class="quiet ? 'text-muted' : 'rounded-control bg-surface-2 px-2.5 py-0.5 font-semibold text-fg'"
   >
     <!-- The clock moves between the server render and hydration. -->
     <time v-if="statusTime" :datetime="statusTime.toISOString()" :aria-label="accessibleTime" data-allow-mismatch="text attribute">{{ text }}</time>

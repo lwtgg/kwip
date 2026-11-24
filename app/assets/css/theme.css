@@ -34,28 +34,31 @@
   --spacing-feature-art: 20rem;
   --text-card-name: 1rem;
   --text-detail-name: 2rem;
-  --text-detail-name-narrow: 1.5rem;
-  --text-card-time: 2rem;
-  --text-card-time-narrow: 1.75rem;
+  --text-detail-name-narrow: 1.25rem;
+  --text-card-time: 1.75rem;
+  --text-card-time-narrow: 1.5rem;
   --text-detail-time: 3.5rem;
-  --text-detail-time-narrow: 2.75rem;
+  --text-detail-time-narrow: 2rem;
   /* 51: the event row. A short contained ground, a poster plate at the leading edge,
      the identity stack beside it and the numeric fact in its own trailing lane. */
   --radius-row: 0.75rem;
   --radius-plate: var(--radius-control);
   --spacing-row-min: 26rem;
+  --spacing-rail-column: 30rem;
   --spacing-row-plate: 6rem;
-  --spacing-row-plate-narrow: 4rem;
-  --spacing-row-lane: 7.5rem;
-  --spacing-row-lane-narrow: 6.75rem;
+  --spacing-row-plate-narrow: 3rem;
+  /* Lane floors: the widest one-line lane string at each scale (docs/redesign-51.md). */
+  --spacing-row-lane: 6.75rem;
   --spacing-hero-lane: 11.25rem;
-  --spacing-hero-lane-narrow: 9.25rem;
+  --spacing-hero-lane-narrow: 7rem;
 }
 
 :root {
-  --card-name-weight: 600;
+  --card-name-weight: 400;
+  --card-name-lines: 2;
   --card-time-weight: 850;
   --card-time-leading: 1;
+  --card-time-tracking: -0.02em;
   --card-time-width: 5ch;
   --card-art-ratio: 16 / 9;
   --card-tint-listing-color: 0.35;
@@ -70,6 +73,9 @@
   --card-text-contrast: 4.5;
   --fallback-initials: 1.5rem;
   --row-gap: 0.25rem;
+  --row-pad-block-narrow: 0.5rem;
+  --row-pad-inline-narrow: 0.75rem;
+  --row-column-gap-narrow: var(--spacing-2);
   --row-column-gap: var(--spacing-3);
   --row-stack-gap: 0.125rem;
   --lane-gap: 0.125rem;
@@ -106,6 +112,9 @@
   --grid-gap: 0.625rem;
   --rail-gap: 0.625rem;
   --row-gap: 0.125rem;
+  --row-pad-block-narrow: 0.375rem;
+  --row-pad-inline-narrow: 0.5rem;
+  --row-column-gap-narrow: 0.375rem;
   --row-column-gap: var(--spacing-2);
   --row-stack-gap: 0;
   --lane-gap: 0;
@@ -229,7 +238,11 @@
 .event-card, .card-row {
   --card-name-size: var(--text-card-name);
   --card-time-size: var(--text-card-time);
+  --card-state-size: var(--text-metadata);
   --card-lane-min: var(--spacing-row-lane);
+  --card-plate: var(--spacing-row-plate);
+  --row-pad-block: var(--card-pad);
+  --row-pad-inline: var(--card-pad);
 }
 .event-card {
   background: var(--card-field-dark, var(--color-surface));
@@ -245,12 +258,9 @@
   font-weight: var(--card-name-weight);
 }
 
-/* The number lane: the trailing edge of every row and of the hero's information block.
-   Its column grows to fit the time; notes inside it never widen it.
-   It is laid out right-to-left so every box is anchored at the trailing edge: a status
-   that changes length at hydration, kickoff or full time keeps its starting point, and
-   Chrome scores no layout shift. Every lane string opens with a Latin letter or is digits
-   only, so bidi rule W7 keeps it one left-to-right run. */
+/* The number lane: a fixed column at its floor; text wraps inside it. Laid out RTL so each
+   box is anchored at the trailing edge and a changing label never shifts (bidi W7 keeps
+   every lane string one LTR run). */
 .card-lane {
   grid-area: lane;
   align-self: center;
@@ -262,7 +272,13 @@
   direction: rtl;
   text-align: start;
 }
-.card-lane-bar { direction: ltr; }
+/* The schedule bar sits on the row's bottom edge, out of the lane's flow. */
+.card-lane-bar {
+  position: absolute;
+  inset-inline: var(--row-pad-inline);
+  bottom: calc((var(--row-pad-block) - var(--spacing-1)) / 2);
+  direction: ltr;
+}
 .card-lane-note {
   contain: inline-size;
   width: 100%;
@@ -271,7 +287,7 @@
 .card-fact {
   display: flex;
   max-width: 100%;
-  flex-direction: row-reverse;
+  flex-flow: row-reverse wrap;
   align-items: baseline;
   gap: var(--spacing-1);
 }
@@ -281,7 +297,9 @@
   font-size: var(--card-time-size);
   font-weight: var(--card-time-weight);
   line-height: var(--card-time-leading);
+  letter-spacing: var(--card-time-tracking);
   font-variant-numeric: lining-nums tabular-nums;
+  /* Ignored by a face without a width axis; the floors hold the uncondensed time. */
   font-stretch: condensed;
 }
 /* A state word sits in the lane at label scale, in the height the time would take. */
@@ -292,29 +310,45 @@
   align-items: center;
   overflow-wrap: anywhere;
   text-wrap: balance;
-  font-size: var(--text-card-name);
-  font-weight: var(--card-name-weight);
+  font-size: var(--card-state-size);
   line-height: var(--text-metadata--line-height);
 }
-.card-category { grid-area: label; }
+/* One line each: a trailing item that does not fit wraps onto a clipped line and drops
+   whole (the tag, `Watch`) before the first item truncates. */
+.card-category,
+.card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  height: 1lh;
+  overflow: hidden;
+}
+.card-category { grid-area: label; margin-block-end: var(--row-stack-gap); }
+.card-category > *,
+.card-meta > * {
+  max-width: 100%;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .card-meta { grid-area: meta; }
 .card-name { grid-area: name; margin-block: var(--row-stack-gap); }
 .card-info { display: contents; }
 
-/* Row: plate | identity | lane. Empty flexible rows above and below the identity stack
-   keep it centred when the lane is the taller column. */
+/* Row: the label across the top, then plate | identity | lane. */
 .card-row {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--spacing-row-plate) minmax(0, 1fr) minmax(var(--card-lane-min), auto);
-  grid-template-rows: 1fr auto auto auto 1fr;
+  grid-template-columns: var(--card-plate) minmax(0, 1fr) var(--card-lane-min);
+  grid-template-rows: auto 1fr auto auto 1fr;
   grid-template-areas:
+    "label label label"
     "plate . lane"
-    "plate label lane"
     "plate name lane"
     "plate meta lane"
     "plate . lane";
   column-gap: var(--row-column-gap);
-  padding: var(--card-pad);
+  padding: var(--row-pad-block) var(--row-pad-inline);
 }
 .card-row .card-art {
   grid-area: plate;
@@ -322,25 +356,35 @@
   border-radius: var(--radius-plate);
   --fallback-initials: var(--text-metadata);
 }
+.card-row .card-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--card-name-lines);
+}
 
-/* Hero: the retained poster, then the same identity and lane logic at detail scale. */
+/* Hero: the poster, then the row's arrangement at detail scale. The name is not clamped. */
 .card-hero {
   --card-name-size: var(--text-detail-name);
   --card-time-size: var(--text-detail-time);
+  --card-state-size: var(--text-card-name);
   --card-lane-min: var(--spacing-hero-lane);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
 }
 .card-hero .card-info {
+  --row-pad-block: var(--hero-pad);
+  --row-pad-inline: var(--hero-pad);
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(var(--card-lane-min), auto);
+  grid-template-columns: minmax(0, 1fr) var(--card-lane-min);
   grid-template-rows: 1fr auto auto auto 1fr;
   grid-template-areas:
-    ". lane"
-    "label lane"
+    ". ."
+    "label label"
     "name lane"
     "meta lane"
-    ". lane";
+    ". .";
   column-gap: var(--row-column-gap);
   padding: var(--hero-pad);
 }
@@ -349,48 +393,35 @@
   .card-hero .card-art { aspect-ratio: auto; min-height: var(--spacing-feature-art); }
 }
 
-/* Phones: the plate shrinks and shares a line with the league label; the full name runs
-   under both, so it truncates for the lane rather than for the plate. The lane keeps its edge. */
-@media (width < 28rem) {
-  .event-card, .card-row {
-    --card-time-size: var(--text-card-time-narrow);
-    --card-lane-min: var(--spacing-row-lane-narrow);
-  }
+/* Below md: one name line and one quiet line beside a two-line lane. The date caption
+   gives way to any other note. */
+@media (width < 48rem) {
   .card-row {
-    grid-template-columns: var(--spacing-row-plate-narrow) minmax(0, 1fr) minmax(var(--card-lane-min), auto);
-    grid-template-rows: auto auto auto 1fr;
-    grid-template-areas:
-      "plate label lane"
-      "name name lane"
-      "meta meta lane"
-      ". . lane";
-    row-gap: var(--row-stack-gap);
+    --card-time-size: var(--text-card-time-narrow);
+    --row-column-gap: var(--row-column-gap-narrow);
+    --card-plate: var(--spacing-row-plate-narrow);
+    --card-name-lines: 1;
+    --row-pad-block: var(--row-pad-block-narrow);
+    --row-pad-inline: var(--row-pad-inline-narrow);
   }
-  .card-row .card-category { align-self: center; }
+  .card-row .card-lane:has(.card-lane-note:not(.card-lane-caption)) > .card-lane-caption { display: none; }
+}
+@media (width < 28rem) {
   .card-hero {
     --card-name-size: var(--text-detail-name-narrow);
     --card-time-size: var(--text-detail-time-narrow);
+    --card-state-size: var(--text-metadata);
     --card-lane-min: var(--spacing-hero-lane-narrow);
-  }
-  /* The featured name takes the full width under the league label and the lane. */
-  .card-hero .card-info {
-    grid-template-rows: 1fr auto auto auto;
-    grid-template-areas:
-      ". lane"
-      "label lane"
-      "name name"
-      "meta meta";
-    row-gap: var(--row-stack-gap);
   }
 }
 
-/* Groups: rows separated by a strip of canvas. One column below md, an auto-fill grid of
-   row-width columns above it. Rails keep their scroller and stack up to three rows a column. */
+/* Groups: rows separated by a strip of canvas. Next up is a single column (.row-list). */
 .row-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--spacing-row-min)), 1fr));
   gap: var(--row-gap) var(--grid-gap);
 }
+.row-list,
 .rail-track {
   display: grid;
   gap: var(--row-gap);
@@ -398,7 +429,7 @@
 @media (width >= 48rem) {
   .rail-track {
     grid-auto-flow: column;
-    grid-auto-columns: var(--spacing-row-min);
+    grid-auto-columns: var(--spacing-rail-column);
     grid-template-rows: var(--rail-rows, auto);
     column-gap: var(--rail-gap);
   }

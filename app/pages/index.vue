@@ -232,7 +232,7 @@ useSeoMeta({
 
         <section v-if="nextUpStreams.length" aria-labelledby="next-up-heading" class="space-y-(--card-gap)">
           <GroupHeader heading-id="next-up-heading" title="Next up" />
-          <ul class="row-grid">
+          <ul class="row-list">
             <li v-for="stream in nextUpStreams" :key="stream.uri_name" class="min-w-0">
               <StreamCard :stream="stream" :now="nowSeconds" :stale="isStale" />
             </li>

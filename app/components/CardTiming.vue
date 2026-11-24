@@ -50,21 +50,21 @@ const schedule = computed(() => !props.stale && !props.replay && scheduled.value
 
 <template>
   <div class="card-lane" data-allow-mismatch="text children">
-    <span v-if="caption" class="card-lane-note text-metadata text-muted">{{ caption }}</span>
+    <span v-if="caption" class="card-lane-note card-lane-caption text-metadata text-muted">{{ caption }}</span>
     <div class="card-fact">
       <template v-if="numeric && start">
         <time :datetime="start.toISOString()" class="card-time text-fg">{{ fact }}</time>
-        <span class="text-metadata font-semibold text-muted">UTC</span>
+        <span class="text-metadata text-muted">UTC</span>
       </template>
       <span v-else class="card-state text-fg">{{ fact }}</span>
     </div>
-    <span v-if="schedule" class="card-lane-note">
+    <span v-if="schedule" class="card-lane-note text-metadata">
       <StatusPill quiet :starts-at="startsAt" :ends-at="endsAt" :always-live="alwaysLive" :now="now" />
     </span>
     <span v-if="!stale && !replay && start && !scheduled && !channel" class="card-lane-note text-metadata text-muted">Availability unconfirmed</span>
     <span v-if="stale" class="card-lane-note text-metadata text-muted">Last listed: {{ listedTime }}</span>
-    <!-- Reserve the schedule bar before kickoff and after the window closes. -->
-    <div v-if="schedule" class="card-lane-bar h-1 w-full">
+    <!-- The bar is placed on the row's bottom edge, out of the lane's flow (theme.css). -->
+    <div v-if="schedule" class="card-lane-bar h-1">
       <LiveProgress v-if="started && now !== undefined"
         :starts-at="startsAt" :ends-at="endsAt" :always-live="alwaysLive" :now="now" />
     </div>

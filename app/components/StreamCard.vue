@@ -65,6 +65,8 @@ const targetHref = computed(() => {
 
 const compact = computed(() => formatViewersCompact(props.stream?.viewers ?? 0))
 const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
+// "1 viewer", "2 viewers": the unit follows the exact count the label reads out.
+const metric = computed(() => exact.value === '1' ? props.metricLabel.replace(/s$/, '') : props.metricLabel)
 </script>
 
 <template>
@@ -119,18 +121,18 @@ const exact = computed(() => formatViewersExact(props.stream?.viewers ?? 0))
     </div>
 
     <div class="card-info">
-      <span class="card-category truncate text-metadata text-muted">{{ stream.category_name }}<template v-if="stream.tag"> · {{ stream.tag }}</template></span>
-      <component :is="headingLevel" class="card-name line-clamp-2 wrap-anywhere leading-snug text-fg group-hover:underline">
+      <span class="card-category text-metadata text-muted"><span>{{ stream.category_name }}</span><span v-if="stream.tag"> · {{ stream.tag }}</span></span>
+      <component :is="headingLevel" class="card-name wrap-anywhere leading-snug text-fg group-hover:underline">
         {{ stream.name }}
       </component>
       <CardTiming :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
         :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
-      <div class="card-meta flex min-w-0 flex-wrap items-baseline gap-x-3 text-metadata text-muted">
+      <div class="card-meta gap-x-3 text-metadata text-muted">
         <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
-        <span v-if="!stale" role="img" :aria-label="`${exact} ${metricLabel}`" class="listing-numeric">
-          <span aria-hidden="true">{{ compact }} {{ metricLabel }}</span>
+        <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
+          <span aria-hidden="true">{{ compact }} {{ metric }}</span>
         </span>
-        <span class="font-semibold text-fg group-hover:underline">Watch</span>
+        <span class="group-hover:underline">Watch</span>
       </div>
     </div>
   </NuxtLink>
