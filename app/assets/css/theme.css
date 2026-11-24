@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Acumin Pro Extra Condensed";
+  src: url('/fonts/acumin-digits.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+  unicode-range: U+0030-0039;
+}
+
+
 @theme static {
   --color-bg: #0c100f;
   --color-surface: #1b201e;
@@ -454,7 +463,8 @@
   --banner-score-narrow: 2.75rem;
   --banner-score-hero: 9.0625rem;
   --banner-status-size: 0.75rem;
-  --banner-status-hero: clamp(0.75rem, 2.2vw, 3.5rem);
+  --banner-status-hero: 3.5rem;
+  --banner-team-hero: clamp(0.75rem, 2.2vw, 3.5rem);
   --banner-logo: 1.5rem;
   --banner-logo-narrow: 0.625rem;
   --banner-logo-hero: clamp(2rem, 8vw, 7.25rem);
@@ -464,6 +474,7 @@
   --banner-score-weight: 700;
   --banner-label-weight: 400;
   --banner-status-leading: 1.1;
+  --banner-status-leading-hero: 0.9;
   --banner-abbreviation-compression: 1;
   --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
 }
@@ -495,7 +506,14 @@
   height: var(--banner-logo);
   object-fit: contain;
 }
-.banner-initials { display: grid; place-items: center; }
+.banner-initials {
+  display: grid;
+  place-items: center;
+  font-size: calc(var(--banner-logo) / 3);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
 .banner-abbreviation { display: block; font-size: inherit; transform: scaleX(var(--banner-abbreviation-compression)); }
 .banner-away-team { grid-column: 1; grid-row: 1; }
 .banner-away-score { grid-column: 2; grid-row: 1; }
@@ -533,11 +551,13 @@
 .banner-progress { position: absolute; inset-inline: 0; bottom: 0; }
 .banner-progress [role="progressbar"] { border: 0; background: var(--banner-base); }
 .banner-progress [role="progressbar"] > div { background: var(--banner-white); }
+.card-hero .banner-team { font-size: var(--banner-team-hero); }
 .card-hero .match-banner {
   --banner-score-size: var(--banner-score-hero);
   --banner-logo: var(--banner-logo-hero);
   --banner-status-width: clamp(3rem, 7vw, 7rem);
   --banner-status-size: var(--banner-status-hero);
+  --banner-status-leading: var(--banner-status-leading-hero);
   --banner-score-compression: 0.65;
 }
 @media (width < 48rem) {

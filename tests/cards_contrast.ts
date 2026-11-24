@@ -50,7 +50,14 @@ const banners = (['dark', 'light'] as const).flatMap(theme => (['listing', 'hero
     return { theme, scale, state, seeds, pair, scrim, contrast }
   }))))
 const worstBanner = banners.reduce((a, b) => a.contrast < b.contrast ? a : b)
-console.log('Banner sweep', JSON.stringify({ count: banners.length, worstBanner }))
+console.log('Banner model sweep (rendered proof is in cards_browser.py)', JSON.stringify({ count: banners.length, worstBanner }))
 const report = { generatedAt: new Date().toISOString(), banners, worstBanner, tokenHash: createHash('sha256').update(css).digest('hex'), results }
 if (process.argv[2]) writeFileSync(process.argv[2], JSON.stringify(report, null, 2))
 console.log(JSON.stringify(results.map(({ theme, scale, minimum }) => ({ theme, scale, minimum })), null, 2))
+
+if (process.argv[4]) {
+  const rendered = JSON.parse(readFileSync(process.argv[4], 'utf8'))
+  assert.ok(rendered.length > 0)
+  for (const banner of rendered) assert.ok(banner.contrast >= 4.5, JSON.stringify(banner))
+  console.log('Rendered banner minimum', Math.min(...rendered.map(banner => banner.contrast)))
+}

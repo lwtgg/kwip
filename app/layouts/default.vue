@@ -2,6 +2,8 @@
 import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useStreams } from '~/composables/useFeed'
 
+useHead({ link: [{ rel: 'preload', href: '/fonts/acumin-digits.woff2', as: 'font', type: 'font/woff2', crossorigin: 'anonymous' }] })
+
 const { siteName } = useRuntimeConfig().public
 const route = useRoute()
 const { theme, toggleTheme } = useTheme()

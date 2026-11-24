@@ -1,4 +1,5 @@
 """50a card matrix. Run after pnpm build: python tests/cards_browser.py .output --screenshots /tmp/kwip50a-shots"""
+from banner_rendered_contrast import assert_banner_contrast
 import argparse
 from datetime import datetime, timezone
 import json
@@ -303,6 +304,7 @@ def check_matches(browser, origin, assets, dest):
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=events)])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
+    hero_results = []
     for width in (320, 390, 1280):
         for theme in ('dark', 'light'):
             for density in ('comfortable', 'compact'):
@@ -337,6 +339,8 @@ def check_matches(browser, origin, assets, dest):
                             heavy, colors:[el.style.getPropertyValue('--banner-away'),el.style.getPropertyValue('--banner-home')],
                             background:getComputedStyle(el).backgroundImage};
                         }''')
+                        page.evaluate('document.fonts.ready')
+                        contrast = assert_banner_contrast(banner)
                         assert not geometry['heavy'], (slug, geometry)
                         assert geometry['away'][1] <= geometry['status'][0] < geometry['home'][0], geometry
                         for line in geometry['lines']:
@@ -359,7 +363,25 @@ def check_matches(browser, origin, assets, dest):
                             assert banner.locator('.banner-away-team .banner-initials').inner_text() == 'CS'
                         if slug in ('matched-bad-color', 'matched-no-color'):
                             assert geometry['colors'][0] == '#272624', geometry
-                        results.append(dict(viewport=width, theme=theme, density=density, fixture=slug,
+                        initials_measurements = []
+                        for initial in banner.locator('.banner-initials').all():
+                            for text in (initial.inner_text(), 'WWW'):
+                                size = initial.evaluate('''(el, text) => {
+                                  const old = el.textContent; el.textContent = text;
+                                  const range = document.createRange(); range.selectNodeContents(el);
+                                  const r = range.getBoundingClientRect(), box = el.getBoundingClientRect();
+                                  el.textContent = old;
+                                  const score = el.closest('.banner-team').classList.contains('banner-away-team')
+                                    ? el.closest('.banner-lineup').querySelector('.banner-away-score')
+                                    : el.closest('.banner-lineup').querySelector('.banner-home-score');
+                                  const sr = score?.getBoundingClientRect();
+                                  const gap = !sr ? null : el.closest('.banner-team').classList.contains('banner-away-team') ? sr.left-r.right : r.left-sr.right;
+                                  return {text, width:r.width, box:box.width, left:r.left, right:r.right, gap};
+                                }''', text)
+                                assert size['width'] <= size['box'] + .1, size
+                                assert size['gap'] is None or size['gap'] >= 0, size
+                                initials_measurements.append(size)
+                        results.append(dict(scores=geometry['scores'], initials=initials_measurements, contrast=contrast, viewport=width, theme=theme, density=density, fixture=slug,
                                             height=box['height'], ratio=box['width']/box['height']))
                     page.screenshot(path=str(dest / f'{width}-{theme}-{density}-matches.png'), full_page=True)
                     double_text(page)
@@ -369,7 +391,33 @@ def check_matches(browser, origin, assets, dest):
                     hero = page.locator('.card-hero .match-banner')
                     assert hero.is_visible()
                     assert hero.locator('.banner-score').count() == 2
+                    page.evaluate('document.fonts.ready')
+                    assert page.evaluate("document.fonts.check('700 145px \"Acumin Pro Extra Condensed\"', '0123456789')")
+                    assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
+                    def measure_hero():
+                        data = hero.evaluate('''el => {
+                          const box = el.getBoundingClientRect(), lane = el.querySelector('.banner-status').getBoundingClientRect();
+                          return {height:box.height, teamSizes:[...el.querySelectorAll('.banner-team')].map(n=>parseFloat(getComputedStyle(n).fontSize)), lines:[...el.querySelectorAll('.banner-status > span')].map(n => {
+                            const r=n.getBoundingClientRect(); const range=document.createRange();range.selectNodeContents(n);
+                            return {text:n.textContent,size:parseFloat(getComputedStyle(n).fontSize),width:r.width, scroll:n.scrollWidth, cssWidth:getComputedStyle(n).width, transform:getComputedStyle(n).transform, fit:n.style.cssText, lane:lane.width,
+                              fits:r.left>=lane.left-1 && r.right<=lane.right+1 && r.top>=box.top-1 && r.bottom<=box.bottom+1,
+                              rects:range.getClientRects().length};
+                          })};
+                        }''')
+                        assert all(size < 56 for size in data['teamSizes']), data
+                        assert all(line['size'] == 56 and line['fits'] and line['rects'] == 1 for line in data['lines']), data
+                        hero_results.append(dict(viewport=width, theme=theme, density=density, **data))
+                    measure_hero()
+                    for label, state in (('Live', 'in'), ('Halftime', 'in'), ('Final', 'post')):
+                        single = dict(events[0], match=dict(match, state=state, detail=label))
+                        hero_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[single])])
+                        (assets / 'fixtures/streams.json').write_text(json.dumps(hero_listing))
+                        assert page.goto(origin, wait_until='networkidle').ok
+                        measure_hero()
+                    (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
+                    assert_banner_contrast(hero)
                     page.screenshot(path=str(dest / f'{width}-{theme}-{density}-matched-hero.png'), full_page=True)
+    (dest / 'hero-status-report.json').write_text(json.dumps(hero_results, indent=2))
     (dest / 'match-report.json').write_text(json.dumps(results, indent=2))
 
 
@@ -377,12 +425,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
     parser.add_argument('--screenshots', type=Path, required=True)
+    parser.add_argument('--matches-only', action='store_true')
     args = parser.parse_args()
     args.screenshots.mkdir(parents=True, exist_ok=True)
     report = []
     with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
         directory = Path(tmp)
         browser = pw.chromium.launch()
+        if args.matches_only:
+            with worker(directory, 'matches', args.output.resolve(), '', False) as origin:
+                check_matches(browser, origin, directory / 'matches-assets', args.screenshots)
+            browser.close()
+            return
         for stale in (False, True):
             name = 'stale' if stale else 'fresh'
             with worker(directory, name, args.output.resolve(), '', False) as origin:

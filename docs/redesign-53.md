@@ -33,10 +33,10 @@ and 145 px in the hero; longer scores condense proportionally. Status lines fit 
 breaking words. A conservative CSS fit covers SSR, and measured fitting refines each line after mount
 and resize. Large visible viewer counts use the shared compact formatter; the accessible count is exact.
 
-**Font limitation:** no licensed Acumin Pro Extra Condensed asset exists in the repo or local font
-folders. The score stack declares it first, followed by Arial Narrow and the existing system family,
-with condensed width and horizontal scaling. It is not a bundled Acumin font and fidelity is not claimed.
-No dependency, raster image or package change was added.
+The owner-supplied Acumin Pro Extra Condensed Bold is bundled as a digits-only WOFF2 at
+`public/fonts/acumin-digits.woff2` (1,780 B). The 700 face uses `font-display: swap`, a digit-only
+Unicode range and one layout preload; Arial Narrow remains the fallback. No dependency or package
+change was added.
 
 ## Measurements
 
@@ -103,3 +103,55 @@ Logs, JSON measurements and screenshots are under `/tmp/kwip53-*` on the test ma
 - New `app/composables/matchBanner.ts`, `useMatchBannerStyle.ts`.
 - `tests/cards_browser.py`, `cards_contrast.ts`; new `matchBanner.test.ts`.
 - This record. `package.json` is unchanged.
+
+## Review fixes (2026-11-24)
+
+The missing-logo initials now derive their size from the logo box, stay on one line and clip at the
+box edge. Hero status is 56 px at all three widths, with 0.9 line height so three lines fit the 162 px
+phone banner. Hero abbreviations keep their earlier size independently. The score face is the bundled
+owner-supplied digit subset described above; scores remain 44/56 px in rows and 145 px in the hero.
+
+| Review defect | Before (review at a74d369) | After |
+|---|---|---|
+| Missing-logo `NL`, 320/390 | 15.73 px paint in 10 px box; 5.35 px score overlap | 4.64 px paint; 4.19 px score clearance |
+| Missing-logo `NL`, 1280 | Unconstrained inherited type | 10.91 px paint in 24 px box; 16.24 px clearance |
+| Hero status, 320/390 | 12 px | 56 px; Live, Halftime, Final and viewers fit |
+| Hero status, 1280 | 28.16 px | 56 px; all tested states fit |
+| Rendered contrast regression | Zero-scrim mutation passed the suite | Built zero-scrim mutation fails at 1.0:1; restored fixture minimum 4.550007:1 |
+
+The browser contrast helper reads each live banner's resolved background layers and each banner text
+colour. It samples the full interpolation between team stops under the rendered uniform scrim; the
+vertical shade is transparent at the brightest middle scanline. It does not call `bannerScrim` or
+rebuild intended token values. The TypeScript report labels its calculation as a model and also checks
+the browser-generated measurements when supplied as its fourth argument.
+
+With Acumin loaded, matched rows remain 81/73 px at 320 (comfortable/compact), and 116/102 px at 1280.
+Both themes and densities pass at 320, 390 and 1280. The tests check two-letter initials plus `WWW`,
+painted clearance, a loaded digit face, actual mounted hero states, single-line status and vertical
+containment. Minimum clearance over the wider initials stress cases is 1.43 px on phones.
+
+Fresh final gate: 173 unit tests; Node build and HTTP smoke for `/`, `/c/basketball`, `/vods`; default
+Worker rebuild; deployment dry-run; all six browser suites (`cards`, `density`, `banner`, `notLive`,
+`sourceHealth`, `click_under`) at 390/1280, with cards also at 320 and both themes/densities. All passed.
+The zero-scrim mutation was built, failed the matched-banner suite specifically on rendered contrast,
+and was removed before the final rebuild. Independent read-only review found no remaining Important
+issues. No deploy was run. `.prompts`, `DECISIONS.md` and `package.json` are unchanged.
+
+| Budget | Previous banner build | Review fixes | Change this round |
+|---|---:|---:|---:|
+| Client JS, gzip -9 | 128,514 B | 128,776 B | +262 B |
+| CSS, gzip -9 | 8,350 B | 8,467 B | +117 B |
+| Digit font, WOFF2 | 0 B | 1,780 B | +1,780 B |
+| Worker files | 1,287,597 B | 1,288,546 B | +949 B |
+
+The original +2,093 B client-JS addition becomes +2,355 B against the pre-banner baseline; including
+the font, the new addition is **4,135 B**. CSS is separate: +955 B against the original baseline, making
+**5,090 B** including CSS. The CSS raw import explains why additional CSS also adds some client JS.
+Worker directory remains 1,416 KiB, entry 253 B. Dry-run is 1069.54 KiB / 281.34 KiB gzip, with the same
+15 ignored-import warnings. No dependency was added.
+
+Evidence: `/tmp/53-fix-final-gate.log`, `/tmp/53-fix-mutation.log`, `/tmp/53-fix-captures/`,
+`/tmp/53-fix-initials.json`, `/tmp/53-fix-budget.json`, `/tmp/53-fix-contrast.json`.
+Changed files this round: `app/assets/css/theme.css`, `app/layouts/default.vue`,
+`public/fonts/acumin-digits.woff2`, `tests/cards_browser.py`, `tests/banner_rendered_contrast.py`,
+`tests/cards_contrast.ts`, and this record.
