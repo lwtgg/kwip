@@ -1017,10 +1017,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
 
       <!-- Related streams in same category -->
       <section class="space-y-(--related-heading-gap)">
-        <div class="listing-rule flex items-baseline justify-between gap-(--card-gap)">
-          <h2 class="listing-display text-lg text-fg">
-            Related in {{ detail.category_name }}
-          </h2>
+        <GroupHeader :title="`Related in ${detail.category_name}`">
           <NuxtLink
             v-if="categorySlug"
             :to="`/c/${categorySlug}`"
@@ -1028,11 +1025,11 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
           >
             More {{ detail.category_name }} →
           </NuxtLink>
-        </div>
+        </GroupHeader>
 
         <div
           v-if="relatedStreams.length > 0"
-          class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4"
+          class="row-grid"
         >
           <StreamCard
             v-for="stream in relatedStreams"

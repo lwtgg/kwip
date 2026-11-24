@@ -32,11 +32,24 @@
   --text-feature: clamp(2rem, 5vw, 4.5rem);
   --text-feature--line-height: 1.08;
   --spacing-feature-art: 20rem;
-  --spacing-listing-thumb: 4.5rem;
   --text-card-name: 1rem;
   --text-detail-name: 2rem;
-  --text-card-time: 2.25rem;
+  --text-detail-name-narrow: 1.5rem;
+  --text-card-time: 2rem;
+  --text-card-time-narrow: 1.75rem;
   --text-detail-time: 3.5rem;
+  --text-detail-time-narrow: 2.75rem;
+  /* 51: the event row. A short contained ground, a poster plate at the leading edge,
+     the identity stack beside it and the numeric fact in its own trailing lane. */
+  --radius-row: 0.75rem;
+  --radius-plate: var(--radius-control);
+  --spacing-row-min: 26rem;
+  --spacing-row-plate: 6rem;
+  --spacing-row-plate-narrow: 4rem;
+  --spacing-row-lane: 7.5rem;
+  --spacing-row-lane-narrow: 6.75rem;
+  --spacing-hero-lane: 11.25rem;
+  --spacing-hero-lane-narrow: 9.25rem;
 }
 
 :root {
@@ -55,6 +68,12 @@
   --card-tint-light-min: 0.84;
   --card-tint-light-max: 0.92;
   --card-text-contrast: 4.5;
+  --fallback-initials: 1.5rem;
+  --row-gap: 0.25rem;
+  --row-column-gap: var(--spacing-3);
+  --row-stack-gap: 0.125rem;
+  --lane-gap: 0.125rem;
+  --hero-pad: calc(var(--card-pad) + var(--spacing-2));
   --focus-ring: var(--color-accent);
   --focus-ring-width: 0.125rem;
   --focus-ring-inset: calc(-1 * var(--focus-ring-width));
@@ -86,6 +105,10 @@
   --card-gap: 0.25rem;
   --grid-gap: 0.625rem;
   --rail-gap: 0.625rem;
+  --row-gap: 0.125rem;
+  --row-column-gap: var(--spacing-2);
+  --row-stack-gap: 0;
+  --lane-gap: 0;
   --page-padding: 0.5rem;
   --section-gap: 0.5rem;
   --stack-gap: 0.25rem;
@@ -189,11 +212,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-@utility listing-rule {
-  border-block-end: thin solid var(--color-border);
-  padding-block-end: var(--card-gap);
-}
-
 @utility listing-hero {
   border-block-start: thin solid var(--listing-hero-rule, var(--color-border));
 }
@@ -206,7 +224,13 @@
   contain: size;
 }
 
+
 /* Interaction changes the cue, never the contrast-checked identity ground. */
+.event-card, .card-row {
+  --card-name-size: var(--text-card-name);
+  --card-time-size: var(--text-card-time);
+  --card-lane-min: var(--spacing-row-lane);
+}
 .event-card {
   background: var(--card-field-dark, var(--color-surface));
   min-width: 0;
@@ -217,43 +241,167 @@
 }
 .card-art { aspect-ratio: var(--card-art-ratio); }
 .card-name {
-  font-size: var(--text-card-name);
+  font-size: var(--card-name-size);
   font-weight: var(--card-name-weight);
 }
-.card-time {
-  display: block;
-  width: fit-content;
-  min-width: min(var(--card-time-width), 100%);
-  max-width: 100%;
+
+/* The number lane: the trailing edge of every row and of the hero's information block.
+   Its column grows to fit the time; notes inside it never widen it.
+   It is laid out right-to-left so every box is anchored at the trailing edge: a status
+   that changes length at hydration, kickoff or full time keeps its starting point, and
+   Chrome scores no layout shift. Every lane string opens with a Latin letter or is digits
+   only, so bidi rule W7 keeps it one left-to-right run. */
+.card-lane {
+  grid-area: lane;
+  align-self: center;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--lane-gap);
+  direction: rtl;
+  text-align: start;
+}
+.card-lane-bar { direction: ltr; }
+.card-lane-note {
+  contain: inline-size;
+  width: 100%;
   overflow-wrap: anywhere;
-  font-size: var(--text-card-time);
+}
+.card-fact {
+  display: flex;
+  max-width: 100%;
+  flex-direction: row-reverse;
+  align-items: baseline;
+  gap: var(--spacing-1);
+}
+.card-time {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--card-time-size);
   font-weight: var(--card-time-weight);
   line-height: var(--card-time-leading);
   font-variant-numeric: lining-nums tabular-nums;
   font-stretch: condensed;
 }
+/* A state word sits in the lane at label scale, in the height the time would take. */
 .card-state {
-  min-height: var(--text-card-time);
+  display: flex;
+  min-height: var(--card-time-size);
+  min-width: 0;
+  align-items: center;
   overflow-wrap: anywhere;
+  text-wrap: balance;
   font-size: var(--text-card-name);
+  font-weight: var(--card-name-weight);
+  line-height: var(--text-metadata--line-height);
 }
-.card-scale-hero .card-time { font-size: var(--text-detail-time); }
-.card-scale-hero .card-state { min-height: var(--text-detail-time); }
-.card-scale-hero .card-name { font-size: var(--text-detail-name); }
-.card-hero { display: grid; grid-template-columns: minmax(0, 1fr); }
+.card-category { grid-area: label; }
+.card-meta { grid-area: meta; }
+.card-name { grid-area: name; margin-block: var(--row-stack-gap); }
+.card-info { display: contents; }
+
+/* Row: plate | identity | lane. Empty flexible rows above and below the identity stack
+   keep it centred when the lane is the taller column. */
+.card-row {
+  display: grid;
+  grid-template-columns: var(--spacing-row-plate) minmax(0, 1fr) minmax(var(--card-lane-min), auto);
+  grid-template-rows: 1fr auto auto auto 1fr;
+  grid-template-areas:
+    "plate . lane"
+    "plate label lane"
+    "plate name lane"
+    "plate meta lane"
+    "plate . lane";
+  column-gap: var(--row-column-gap);
+  padding: var(--card-pad);
+}
+.card-row .card-art {
+  grid-area: plate;
+  align-self: center;
+  border-radius: var(--radius-plate);
+  --fallback-initials: var(--text-metadata);
+}
+
+/* Hero: the retained poster, then the same identity and lane logic at detail scale. */
+.card-hero {
+  --card-name-size: var(--text-detail-name);
+  --card-time-size: var(--text-detail-time);
+  --card-lane-min: var(--spacing-hero-lane);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.card-hero .card-info {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(var(--card-lane-min), auto);
+  grid-template-rows: 1fr auto auto auto 1fr;
+  grid-template-areas:
+    ". lane"
+    "label lane"
+    "name lane"
+    "meta lane"
+    ". lane";
+  column-gap: var(--row-column-gap);
+  padding: var(--hero-pad);
+}
 @media (width >= 64rem) {
   .card-hero { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .card-hero .card-art { aspect-ratio: auto; min-height: var(--spacing-feature-art); }
 }
 
-.card-listing {
-  display: grid;
-  grid-template-columns: var(--spacing-listing-thumb) minmax(0, 1fr);
-  align-content: start;
-  gap: var(--card-gap);
-  padding: var(--card-pad);
+/* Phones: the plate shrinks and shares a line with the league label; the full name runs
+   under both, so it truncates for the lane rather than for the plate. The lane keeps its edge. */
+@media (width < 28rem) {
+  .event-card, .card-row {
+    --card-time-size: var(--text-card-time-narrow);
+    --card-lane-min: var(--spacing-row-lane-narrow);
+  }
+  .card-row {
+    grid-template-columns: var(--spacing-row-plate-narrow) minmax(0, 1fr) minmax(var(--card-lane-min), auto);
+    grid-template-rows: auto auto auto 1fr;
+    grid-template-areas:
+      "plate label lane"
+      "name name lane"
+      "meta meta lane"
+      ". . lane";
+    row-gap: var(--row-stack-gap);
+  }
+  .card-row .card-category { align-self: center; }
+  .card-hero {
+    --card-name-size: var(--text-detail-name-narrow);
+    --card-time-size: var(--text-detail-time-narrow);
+    --card-lane-min: var(--spacing-hero-lane-narrow);
+  }
+  /* The featured name takes the full width under the league label and the lane. */
+  .card-hero .card-info {
+    grid-template-rows: 1fr auto auto auto;
+    grid-template-areas:
+      ". lane"
+      "label lane"
+      "name name"
+      "meta meta";
+    row-gap: var(--row-stack-gap);
+  }
 }
-.card-listing .card-art { grid-row: span 2; }
-.card-listing .card-content { display: contents; }
-.card-listing .card-name, .card-listing .card-category { grid-column: 2; }
-.card-listing .card-timing, .card-listing .card-action { grid-column: 1 / -1; }
+
+/* Groups: rows separated by a strip of canvas. One column below md, an auto-fill grid of
+   row-width columns above it. Rails keep their scroller and stack up to three rows a column. */
+.row-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--spacing-row-min)), 1fr));
+  gap: var(--row-gap) var(--grid-gap);
+}
+.rail-track {
+  display: grid;
+  gap: var(--row-gap);
+}
+@media (width >= 48rem) {
+  .rail-track {
+    grid-auto-flow: column;
+    grid-auto-columns: var(--spacing-row-min);
+    grid-template-rows: var(--rail-rows, auto);
+    column-gap: var(--rail-gap);
+  }
+}
+
+.fallback-initials { font-size: var(--fallback-initials); }

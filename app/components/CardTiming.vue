@@ -17,41 +17,54 @@ const scheduled = computed(() => start.value !== null && Number.isFinite(props.e
   && props.endsAt > props.startsAt && !Number.isNaN(new Date(props.endsAt * 1000).getTime()))
 const ended = computed(() => scheduled.value && (props.now ?? initialNow.value) >= props.endsAt)
 const started = computed(() => scheduled.value && (props.now ?? initialNow.value) >= props.startsAt && !ended.value)
-const numeric = computed(() => !props.stale && !props.replay && props.alwaysLive !== 1 && start.value && !ended.value)
+const channel = computed(() => props.alwaysLive === 1)
+const numeric = computed(() => !props.stale && !props.replay && !channel.value && start.value && !ended.value)
 const kickoff = computed(() => start.value?.toLocaleTimeString('en-GB', {
   timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 }))
 const fact = computed(() => {
   if (props.stale) return 'Unconfirmed'
   if (props.replay) return 'Replay'
-  if (props.alwaysLive === 1) return '24/7'
+  if (channel.value) return '24/7'
   if (!start.value) return 'Time unavailable'
   if (ended.value) return 'Ended'
   return kickoff.value
 })
-const dateLabel = computed(() => start.value?.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }))
+const dateLabel = computed(() => start.value?.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }))
+// One short line above the fact. Its length never changes the lane's height at kickoff or full time.
+const caption = computed(() => {
+  if (props.stale) return ''
+  if (props.replay) return props.eventDate ? `${props.eventDate} · UTC` : ''
+  if (channel.value || !dateLabel.value) return ''
+  if (started.value) return 'Started at'
+  if (ended.value) return `${dateLabel.value} · UTC`
+  return dateLabel.value
+})
 const listedTime = computed(() => {
   if (props.replay) return 'Replay'
-  if (props.alwaysLive === 1) return '24/7'
+  if (channel.value) return '24/7'
   return kickoff.value ?? 'Time unavailable'
 })
+const schedule = computed(() => !props.stale && !props.replay && scheduled.value && !channel.value)
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-col gap-(--card-gap)" data-allow-mismatch="text children">
-    <time v-if="numeric && start" :datetime="start.toISOString()" class="card-time text-fg">{{ fact }}</time>
-    <span v-else class="card-state text-fg">{{ fact }}</span>
-    <div class="flex min-w-0 flex-col items-start gap-(--card-gap) text-metadata text-muted wrap-anywhere">
-      <span v-if="stale">Last listed: {{ listedTime }}</span>
-      <span v-if="replay && eventDate">{{ eventDate }} · UTC</span>
-      <span v-else-if="alwaysLive !== 1 && dateLabel">{{ started && !stale ? 'Started at · ' : '' }}{{ dateLabel }} · UTC</span>
-      <StatusPill v-if="!stale && !replay && scheduled && alwaysLive !== 1"
-        :starts-at="startsAt" :ends-at="endsAt" :always-live="alwaysLive" :now="now" />
-      <span v-if="!stale && !replay && start && !scheduled && alwaysLive !== 1">Availability unconfirmed</span>
-      <span v-if="stale">Listings may be out of date</span>
+  <div class="card-lane" data-allow-mismatch="text children">
+    <span v-if="caption" class="card-lane-note text-metadata text-muted">{{ caption }}</span>
+    <div class="card-fact">
+      <template v-if="numeric && start">
+        <time :datetime="start.toISOString()" class="card-time text-fg">{{ fact }}</time>
+        <span class="text-metadata font-semibold text-muted">UTC</span>
+      </template>
+      <span v-else class="card-state text-fg">{{ fact }}</span>
     </div>
+    <span v-if="schedule" class="card-lane-note">
+      <StatusPill quiet :starts-at="startsAt" :ends-at="endsAt" :always-live="alwaysLive" :now="now" />
+    </span>
+    <span v-if="!stale && !replay && start && !scheduled && !channel" class="card-lane-note text-metadata text-muted">Availability unconfirmed</span>
+    <span v-if="stale" class="card-lane-note text-metadata text-muted">Last listed: {{ listedTime }}</span>
     <!-- Reserve the schedule bar before kickoff and after the window closes. -->
-    <div v-if="!stale && !replay && scheduled && alwaysLive !== 1" class="h-1">
+    <div v-if="schedule" class="card-lane-bar h-1 w-full">
       <LiveProgress v-if="started && now !== undefined"
         :starts-at="startsAt" :ends-at="endsAt" :always-live="alwaysLive" :now="now" />
     </div>

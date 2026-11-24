@@ -18,18 +18,18 @@ const skeletonCount = computed(() => Math.max(1, props.rows))
     v-if="variant === 'skeleton'"
     aria-busy="true"
     aria-label="Loading events"
-    class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4"
+    class="row-grid"
   >
     <div
       v-for="idx in skeletonCount"
       :key="idx"
-      class="overflow-hidden rounded-card bg-surface"
+      class="card-row min-h-target rounded-row bg-surface"
     >
-      <div class="aspect-video w-full bg-surface-2" />
-      <div class="space-y-(--card-gap) p-(--card-pad)">
-        <div class="h-3.5 w-20 rounded-listing bg-surface-2" />
-        <div class="h-4 w-4/5 rounded-listing bg-surface-2" />
-        <div class="h-4 w-3/5 rounded-listing bg-surface-2" />
+      <div class="card-art bg-surface-2" />
+      <div class="card-category h-3 w-16 rounded-plate bg-surface-2" />
+      <div class="card-name h-4 w-4/5 rounded-plate bg-surface-2" />
+      <div class="card-lane">
+        <div class="h-(--card-time-size) w-full rounded-plate bg-surface-2" />
       </div>
     </div>
   </div>

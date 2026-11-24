@@ -88,6 +88,21 @@ def check(browser, origin, width, theme, density, dest, stale=False):
                 expect(card).to_have_accessible_name(re.compile('Watch'))
                 fact = card.locator('.card-time, .card-state').inner_text()
                 expect(card).to_have_accessible_name(re.compile(re.escape(fact)))
+                # 51 anatomy: the fact owns a lane at the trailing edge; the name never enters it.
+                box = card.evaluate('''el => {
+                  const r = s => el.querySelector(s).getBoundingClientRect(), c = el.getBoundingClientRect();
+                  const info = el.querySelector('.card-info'), pad = parseFloat(getComputedStyle(
+                    el.classList.contains('card-hero') ? info : el).paddingRight);
+                  return { right: c.right - pad, height: c.height, hero: el.classList.contains('card-hero'),
+                    lane: [r('.card-lane').left, r('.card-lane').right], name: [r('.card-name').left, r('.card-name').right],
+                    fact: r('.card-fact').right, art: r('.card-art').left };
+                }''')
+                assert abs(box['lane'][1] - box['right']) <= 1 and abs(box['fact'] - box['right']) <= 1, (prefix, label, box)
+                if not box['hero'] or width >= 448:
+                    assert box['name'][1] <= box['lane'][0] + 0.5, (prefix, label, 'name enters lane', box)
+                if not box['hero']:
+                    assert box['art'] <= box['name'][0], (prefix, label, 'plate leads', box)
+                    assert box['height'] <= 160, (prefix, label, 'row is short', box)
             if label in ('category', 'stale'):
                 for card in cards.all():
                     slug = card.get_attribute('href').split('/')[-1]
@@ -172,7 +187,9 @@ def check_boundaries(browser, origin, assets, dest):
                 assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
                 card = page.locator('a.event-card')
                 kickoff = card.locator('.card-time').inner_text()
-                assert 'Upcoming' in card.inner_text()
+                # The lane's quiet status reads "In 1m"; the full wording is its accessible label.
+                assert re.search(r'\bIn \d+m\b', card.inner_text()), card.inner_text()
+                expect(card).to_have_accessible_name(re.compile('Upcoming in'))
                 page.clock.fast_forward(65_000)
                 assert card.locator('.card-time').inner_text() == kickoff
                 assert 'Started at' in card.inner_text()

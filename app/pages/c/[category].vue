@@ -169,7 +169,7 @@ useSeoMeta({
         "
       />
 
-      <div v-else class="grid grid-cols-1 gap-(--grid-gap) sm:grid-cols-2 lg:grid-cols-4">
+      <div v-else class="row-grid">
         <StreamCard
           v-for="stream in filteredStreams"
           :key="stream.id"
