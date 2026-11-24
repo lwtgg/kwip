@@ -135,3 +135,12 @@ Observed on `kwip.fyi` after deploying 53: `/_nuxt/entry.2e4Hp8Sq.css` 404 while
 putting the build identity in the render-affecting cache key (or by making asset names survive a deploy), and
 prove with a cache-HIT fetch immediately after a deploy. Do not confuse with the feed generation, which is
 already in the key.
+
+**Defect found and fixed 2026-11-24 — 56 was inert in production.** Task 56 made `/api/feed` the default feed
+base, but `.env` (untracked, baked at build) and the deploy `[vars]` both still pinned
+`https://api.ppv.st/api`, so the client hydrated straight from the provider: every `match` was dropped on
+hydration, all 175 banners vanished, and the same-origin route went unused while the provider took the traffic.
+Fixed by setting `.env` to `/api/feed`, dropping both feed vars from the deploy config, and redeploying
+(`a4839204`). After the fix, a reload at 320/390/1280 keeps 175 banners through hydration and makes zero
+provider requests. Rule for future work: the deploy config must not re-pin a value the code already defaults,
+and a base-URL change must be verified on the *client* request log, not only on `curl /api/...`.
