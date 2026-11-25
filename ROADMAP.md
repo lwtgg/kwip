@@ -130,7 +130,15 @@ score banner replaces them on the row and the hero, with `PosterFallback` still 
 Live scores are best-effort enrichment from ESPN's public scoreboard, matched server-side per league in the
 collector (rules 24 and 25). The first home slot becomes the top event and mounts its player, muted, with
 sound opt-in (rule 26). Queue: 52 data and contract, 54 autoplay probe, 53 banner rendering, 55 top event,
-60 the scoreboard grid, 61 a banner for every event, 50b dated listings.
+60 the scoreboard grid, 61 a banner for every event, 62 the hero player beside the plate, 50b dated listings.
+
+**Paused at the end of 2026-11-25.** Codex hit its credit limit during 60 and Claude ran 60 to a committed,
+self-gated state on `task/60-scoreboard` (`ae0439b`) — state between the logos, audience under the detail, the
+timeline in the bottom row, six red controls, 199 tests and every suite green, `docs/redesign-60.md` recorded.
+**Not reviewed and not deployed.** The review was killed the moment the session ended, so the branch is a
+claim, not a result. Open in the CSS: `.banner-status > * { grid-column: var(--banner-middle) }` (0,1,1) beats
+`.banner-progress { grid-column: 1 / -1 }` (0,1,0), so the track may be confined to the middle column between
+the scores while the doc claims it runs abbreviation to abbreviation — settle that first in review one.
 
 **Shipped 2026-11-24. Tasks 53 and 58 — the banner is the whole card.** Version `b4cba298`, branch merged
 `4737a5e`. A matched card is now only the banner, per the owner's mockup: state, scores either side of the
