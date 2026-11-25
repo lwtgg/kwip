@@ -4,6 +4,7 @@ import argparse
 from base64 import b64encode
 from datetime import datetime, timezone
 import json
+from itertools import product
 from math import ceil, floor
 import platform
 import re
@@ -283,10 +284,14 @@ def check_known_hero(browser, origin, assets, dest):
     (dest / 'hero-report.json').write_text(json.dumps(results, indent=2))
 
 
+DEAD_BAND_WIDTHS = (320, 390, 1024, 1280, 1440, 1920)
+HERO_GAP_LIMIT = 1.6
+PAINTED_GAP_MARGIN_PCT = 5
+
 # Smallest width-to-height ratio of a listing row, measured per viewport for task 60 (docs/redesign-60.md).
 # The measured three-tier rows fall below 3.5 at 320px and 390px.
 # After restoring symmetric padding, the three-tier ratios are 2.6999 at 320px and 3.3561 at 390px.
-RATIO_FLOOR = {320: 2.69, 390: 3.35, 1024: 3.5, 1280: 3.5}
+RATIO_FLOOR = {320: 2.69, 390: 3.35, 1024: 3.5, 1280: 3.5, 1440: 3.5, 1920: 3.5}
 # Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
 WIDE_DETAIL = {
     (320, 'element'): {'matched-widest', 'matched-hangul-long-word'},
@@ -438,7 +443,7 @@ def banner_measurements(geometry):
 def assert_hero_dead_band(hero, listing, fixture):
     assert hero['digit_fill'] >= .6, ('hero digit fill below 60%', fixture, hero['digit_fill'])
     if listing:
-        assert hero['detail_ink_gap'] <= 1.6 * listing['detail_ink_gap'], (
+        assert hero['detail_ink_gap'] <= HERO_GAP_LIMIT * listing['detail_ink_gap'], (
             'hero digit-to-detail dead band', fixture, hero['detail_ink_gap'], listing['detail_ink_gap'])
 
 
@@ -869,7 +874,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
         (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
     hero_results = []
-    for width in (320, 390, 1024, 1280):
+    for width in DEAD_BAND_WIDTHS:
         for theme in ('dark', 'light'):
             for density in ('comfortable', 'compact'):
                 listing_rows = {}
@@ -917,7 +922,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                 if width == 1024:
                                     assert geometry['stacked'] == (slug == 'matched-widest' and mode == 'element'), (
                                         'unexpected 1024px stacking', prefix, mode, slug, geometry)
-                                if (width == 1280
+                                if (width >= 1280
                                         or (mode == 'normal' and width in (320, 390) and slug not in growth_fixtures)
                                         or (mode == 'root' and width == 390 and slug == 'matched-live')):
                                     assert not geometry['stacked'], ('unexpected stacking', prefix, mode, slug)
@@ -1038,6 +1043,7 @@ def measure_pixel_card(card, cell, dpr):
     state_ink, away_ink, home_ink, detail_ink = pixels
     score_ink = (away_ink, home_ink)
     detail_gap = detail_ink[0] - max(bottom for _, bottom in score_ink)
+    model_detail_gap = model[3][0] - max(bottom for _, bottom in model[1:3])
     digit_fill = min((bottom - top) / box['height']
                      for (top, bottom), box in zip(score_ink, geometry['scoreBoxes']))
     errors = [[prediction - observed for prediction, observed in zip(model_edges, pixel_edges)]
@@ -1045,9 +1051,11 @@ def measure_pixel_card(card, cell, dpr):
     offsets = [(sum(state_ink) - sum(score)) / 2 for score in score_ink]
     result = dict(**cell, dpr=dpr, os=f'macOS {platform.mac_ver()[0]}' if platform.mac_ver()[0] else platform.platform(),
                   pixels=pixels, model=model, edge_errors=errors, state_minus_score=offsets,
-                  detail_ink_gap=detail_gap, digit_fill=digit_fill)
+                  detail_ink_gap=detail_gap, model_detail_ink_gap=model_detail_gap, digit_fill=digit_fill)
     print(json.dumps(result), flush=True)
-    assert all(abs(edge) <= .5 for pair in errors for edge in pair), ('pixel/model ink parity', result)
+    # At DPR 1 a painted edge can move by a whole CSS pixel; keep the subpixel bound at DPR 4.
+    edge_tolerance = max(.5, 1 / dpr)
+    assert all(abs(edge) <= edge_tolerance for pair in errors for edge in pair), ('pixel/model ink parity', result)
     assert all(abs(offset) <= 1.25 for offset in offsets), ('pixel state ink centre offset', result)
     return result
 
@@ -1083,10 +1091,11 @@ def check_pixel_ink(pw, origin, assets, dest):
     results = []
     for engine in ('chromium', 'webkit'):
         browser = getattr(pw, engine).launch()
-        for width in (320, 390, 1024, 1280):
-            page = browser.new_page(viewport={'width': width, 'height': 900}, device_scale_factor=4)
+        scales = (4,) if engine == 'chromium' else (4, 1)
+        for dpr, width in product(scales, DEAD_BAND_WIDTHS):
+            page = browser.new_page(viewport={'width': width, 'height': 900}, device_scale_factor=dpr)
             variants = [('listing', '/c/basketball'), ('hero', '/')]
-            if width == 320:
+            if width == 320 and dpr == 4:
                 variants.append(('wrapped', '/c/basketball'))
             for scale, path in variants:
                 assert page.goto(origin + path, wait_until='networkidle').ok
@@ -1108,12 +1117,20 @@ def check_pixel_ink(pw, origin, assets, dest):
                     offset = state.evaluate("el => parseFloat(el.style.getPropertyValue('--banner-state-offset'))")
                     assert abs(offset) < 20, ('wrapped state displaced', engine, offset)
                 row = measure_pixel_card(card, dict(engine=engine, version=browser.version,
-                                                    width=width, scale=scale), 4)
+                                                    width=width, scale=scale), dpr)
                 if scale == 'listing':
                     listing_row = row
                 if scale == 'hero':
-                    assert_hero_dead_band(row, listing_row, (engine, width, 'paint'))
+                    assert_hero_dead_band(row, listing_row, (engine, width, dpr, 'paint'))
                     row['detail_gap_ratio'] = row['detail_ink_gap'] / listing_row['detail_ink_gap']
+                    row['detail_gap_margin_pct'] = 100 * (1 - row['detail_gap_ratio'] / HERO_GAP_LIMIT)
+                    print(json.dumps({key: row[key] for key in ('engine', 'width', 'dpr',
+                                                                'detail_gap_ratio', 'detail_gap_margin_pct')}), flush=True)
+                    assert row['detail_gap_margin_pct'] >= PAINTED_GAP_MARGIN_PCT, (
+                        'hero digit-to-detail painted margin', engine, width, dpr, row['detail_gap_margin_pct'])
+                    assert row['model_detail_ink_gap'] <= HERO_GAP_LIMIT * listing_row['model_detail_ink_gap'], (
+                        'hero digit-to-detail model dead band', engine, width, dpr,
+                        row['model_detail_ink_gap'], listing_row['model_detail_ink_gap'])
                 results.append(row)
             page.close()
         browser.close()

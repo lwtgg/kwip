@@ -23,7 +23,7 @@ Every matched banner (listing row, `Next up` row, hero) uses one four-row grid:
   whitespace-only rows. The offset does not change the grid rows. When there are no scores, the
   state box aligns with the logo boxes.
 - The score row's height is set by the tallest of the logo, the score and the state. Listings use
-  `--banner-score-leading` (1.16), and the hero uses `--banner-hero-score-leading` (0.87 as of round five).
+  `--banner-score-leading` (1.16), and the hero uses `--banner-hero-score-leading` (0.83 as of round six).
   At normal text the 40 px listing logo still sets the score row's height.
 - The grid has equal block padding at both edges. Listings use 8 px at comfortable density and
   2 px at compact density. Heroes use 16 px at both densities. The hero minimum height can add
@@ -378,6 +378,89 @@ The local gate passed all 199 unit tests, the default and node-server builds, th
 Worker check, the final default rebuild, Wrangler dry run, and the four-width browser and
 contrast suites. The browser runs used the same scratch drivers, click-under baseline, source
 health seed and packed generation as round four. Logs are in `/tmp/kw60-r5-final`.
+
+## Round six: shared hero growth ceiling
+
+Hero score leading is 0.83. The logo keeps its 7.25rem ceiling at 9vw. The score ceiling
+derives from that token as `7.25rem × 10 / 9` (128.89 px at a 16 px root), so both viewport
+terms stop growing at about 1288.89 px. The wide hero still caps the rendered logo at the
+score line-box height. At normal text both rendered boxes settle at about 106.97 px.
+
+With the logo ceiling alone, the score continued growing to 1450 px and its line box opened
+the row again. With both ceilings tied together, the score and logo row stays the same
+height above their shared breakpoint. The detail has its own font-size scale, which reaches
+its ceiling by 1440 px.
+
+### Painted sweep
+
+On macOS 27.3, Playwright Chromium 159.0.8154.6 and WebKit 27.2 measured the same
+two-digit Halftime fixture as a hero and a category listing at normal text. Each cell is
+the hero digit-to-detail gap divided by the listing gap, followed by its percentage
+margin below 1.6×. The sweep uses the same whole-banner scan as the round-five review.
+Across 128 measurements, the narrowest margin was 13.0% (WebKit, 1440 px and wider at DPR 2).
+The lowest digit fill was 79.4%. No normal-text score ink left its line box and no
+measured text crossed the banner edge.
+
+| Width (px) | Chromium 1× | Chromium 2× | Chromium 4× | Chromium 8× | WebKit 1× | WebKit 2× | WebKit 4× | WebKit 8× |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 320 | 0.6667× (58.3%) | 0.7826× (51.1%) | 0.7447× (53.5%) | 0.7604× (52.5%) | 0.8182× (48.9%) | 0.8261× (48.4%) | 0.8298× (48.1%) | 0.8105× (49.3%) |
+| 390 | 0.6667× (58.3%) | 0.7826× (51.1%) | 0.7447× (53.5%) | 0.7604× (52.5%) | 0.8182× (48.9%) | 0.8261× (48.4%) | 0.8298× (48.1%) | 0.8105× (49.3%) |
+| 640 | 0.7500× (53.1%) | 0.8261× (48.4%) | 0.8085× (49.5%) | 0.8021× (49.9%) | 0.8182× (48.9%) | 0.7826× (51.1%) | 0.7660× (52.1%) | 0.7660× (52.1%) |
+| 768 | 0.9167× (42.7%) | 1.0000× (37.5%) | 0.9574× (40.2%) | 0.9479× (40.8%) | 1.0000× (37.5%) | 0.9565× (40.2%) | 0.9362× (41.5%) | 0.9255× (42.2%) |
+| 1023 | 1.1667× (27.1%) | 1.2174× (23.9%) | 1.2340× (22.9%) | 1.1979× (25.1%) | 1.3636× (14.8%) | 1.2609× (21.2%) | 1.2979× (18.9%) | 1.2872× (19.5%) |
+| 1024 | 0.9167× (42.7%) | 0.9565× (40.2%) | 0.9787× (38.8%) | 0.9479× (40.8%) | 1.0000× (37.5%) | 1.0000× (37.5%) | 0.9787× (38.8%) | 0.9787× (38.8%) |
+| 1200 | 1.0000× (37.5%) | 1.0870× (32.1%) | 1.0638× (33.5%) | 1.0521× (34.2%) | 1.1818× (26.1%) | 1.1739× (26.6%) | 1.1702× (26.9%) | 1.1702× (26.9%) |
+| 1280 | 1.1667× (27.1%) | 1.2174× (23.9%) | 1.2128× (24.2%) | 1.1979× (25.1%) | 1.3636× (14.8%) | 1.2609× (21.2%) | 1.2340× (22.9%) | 1.2660× (20.9%) |
+| 1288 | 1.2500× (21.9%) | 1.3043× (18.5%) | 1.2766× (20.2%) | 1.2708× (20.6%) | 1.3636× (14.8%) | 1.2609× (21.2%) | 1.2766× (20.2%) | 1.2660× (20.9%) |
+| 1289 | 1.1667× (27.1%) | 1.2174× (23.9%) | 1.1915× (25.5%) | 1.1771× (26.4%) | 1.3636× (14.8%) | 1.3043× (18.5%) | 1.2553× (21.5%) | 1.2660× (20.9%) |
+| 1290 | 1.1667× (27.1%) | 1.2174× (23.9%) | 1.1915× (25.5%) | 1.1771× (26.4%) | 1.3636× (14.8%) | 1.2609× (21.2%) | 1.2553× (21.5%) | 1.2660× (20.9%) |
+| 1366 | 1.1667× (27.1%) | 1.2609× (21.2%) | 1.2553× (21.5%) | 1.2500× (21.9%) | 1.2727× (20.5%) | 1.3043× (18.5%) | 1.2979× (18.9%) | 1.3085× (18.2%) |
+| 1440 | 1.2500× (21.9%) | 1.2609× (21.2%) | 1.2766× (20.2%) | 1.2500× (21.9%) | 1.3636× (14.8%) | 1.3913× (13.0%) | 1.3404× (16.2%) | 1.3404× (16.2%) |
+| 1536 | 1.2500× (21.9%) | 1.2609× (21.2%) | 1.2766× (20.2%) | 1.2500× (21.9%) | 1.3636× (14.8%) | 1.3913× (13.0%) | 1.3404× (16.2%) | 1.3404× (16.2%) |
+| 1920 | 1.2500× (21.9%) | 1.2609× (21.2%) | 1.2766× (20.2%) | 1.2500× (21.9%) | 1.3636× (14.8%) | 1.3913× (13.0%) | 1.3404× (16.2%) | 1.3404× (16.2%) |
+| 2560 | 1.2500× (21.9%) | 1.2609× (21.2%) | 1.2766× (20.2%) | 1.2500× (21.9%) | 1.3636× (14.8%) | 1.3913× (13.0%) | 1.3404× (16.2%) | 1.3404× (16.2%) |
+
+At DPR 4, both 200% root and 200% element text were also checked at 320, 390, 1024,
+1280, 1440, 1920 and 2560 px in both engines. The whole-banner scan picks up nearby ink
+at 320 px with 200% root text. Isolating the digits gave 80.1% fill in Chromium and 80.4%
+in WebKit for that cell, with all digit ink inside the score line boxes.
+
+### Browser gate
+
+The matched-card matrix now visits 1440 and 1920 px as well as 320, 390, 1024 and 1280.
+The full fixture, density, theme and text-size matrix runs in Chromium. Both engines
+check the same six widths with the model and isolated-ink screenshots for the Halftime
+fixture, with WebKit running at DPR 1 and 4. The painted gap must be at least 5% below
+the 1.6× limit. Pixel/model edge tolerance is 1 px at DPR 1 and 0.5 px at DPR 4.
+The wrapped-state parity check runs at DPR 4 in both engines.
+
+The isolated-ink gate measures each text target separately, so its gap can differ by a
+device pixel from the whole-banner sweep. Its ratios and margins were:
+
+| Width (px) | Chromium 4× | WebKit 4× | WebKit 1× |
+| --- | --- | --- | --- |
+| 320 | 0.7500× (53.1%) | 0.8298× (48.1%) | 0.8182× (48.9%) |
+| 390 | 0.7500× (53.1%) | 0.8298× (48.1%) | 0.8182× (48.9%) |
+| 1024 | 0.9583× (40.1%) | 0.9787× (38.8%) | 1.0000× (37.5%) |
+| 1280 | 1.1875× (25.8%) | 1.2340× (22.9%) | 1.3636× (14.8%) |
+| 1440 | 1.2500× (21.9%) | 1.3404× (16.2%) | 1.4545× (9.1%) |
+| 1920 | 1.2500× (21.9%) | 1.3404× (16.2%) | 1.4545× (9.1%) |
+
+The same checks rejected round five at 1440 px in Chromium (2.3% margin) and at 1280 px
+in WebKit at DPR 1 (3.4% margin). At 1440 px WebKit at DPR 4 measured 19.25 / 11.75 px
+(1.6383×) on round five and failed the 1.6× limit.
+
+The expanded matrix covered 1,800 matched listings, 96 heroes, 24 stale matched listings,
+eight Next up cases and 38 pixel rows. It reported zero hydration or uncaught page errors.
+The largest block-padding difference was 0.016 px. The largest pixel/model edge difference
+was 0.361 px at DPR 4 and 0.971 px at DPR 1.
+
+The local gate ran all 199 unit tests, the default and node-server builds, the build-key
+Worker check, the final default rebuild, Wrangler dry run, the browser and contrast suites,
+and the padding, leading, alignment and Times controls. The supplemental WebKit top-event
+port reproduced the prior build's pointer-focus and sound-control hit-test failures. The
+below-fold probe needed whole-pixel scroll positioning on the current build to exercise Play.
+Logs and reports are in `/tmp/kw60-r6-final`.
 
 ## Review follow-ups
 
