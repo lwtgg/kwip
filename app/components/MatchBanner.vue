@@ -29,7 +29,7 @@ const statusWords = computed(() => props.content.tiers.map(line =>
   (line.match(/\s+|\S+/g) ?? []).flatMap(word => unspacedScript.test(word)
     ? (segmentAfterHydration.value && wordSegmenter
         ? Array.from(wordSegmenter.segment(word), part => part.segment)
-        : Array.from(word))
+        : (word.match(/\P{M}\p{M}*|\p{M}+/gu) ?? [word]))
     : [word])))
 function longestWord(line: HTMLElement) {
   return Math.max(0, ...Array.from(line.children, word => word.getBoundingClientRect().width))
@@ -48,8 +48,9 @@ function fitText() {
   delete lineup.dataset.stacked
   lineup.style.removeProperty('--banner-lineup-min')
   const preferredRoom = room(lineup)
-  // Match the CSS minimum inline padding of half the preferred padding.
-  const available = (preferredRoom + lineup.getBoundingClientRect().width) / 2
+  // Reserve the full width to read the minimum padding resolved by the CSS clamp.
+  lineup.style.setProperty('--banner-lineup-min', '100%')
+  const available = room(lineup)
   for (const line of lines) {
     observer?.observe(line)
     delete line.dataset.wrap
@@ -71,11 +72,12 @@ function fitText() {
   const statusPreferred = Math.ceil(Math.max(...status.map(line => natural.get(line)!)) * floor)
   const sideMin = Math.max(logo, labelMin) + scoreMin + gutter
   const statusRoom = available - 2 * sideMin
-  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + wordMin}px`)
+  const statusMin = Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
+  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
   lineup.toggleAttribute('data-stacked', statusRoom < wordMin)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
-  lineup.style.setProperty('--banner-status-min', `${Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))}px`)
+  lineup.style.setProperty('--banner-status-min', `${statusMin}px`)
 
   const scoreFit = Math.max(floor, Math.min(compression, ...scores.map(line => room(line.parentElement!) / widestScore)))
   for (const line of lines) {

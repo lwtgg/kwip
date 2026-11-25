@@ -252,3 +252,66 @@ screenshots and mutation logs are under `/tmp/kw58-fix3`.
   used the `1942ccb` baseline. Generation-first passed with a locally packed
   generation fixture. Source health passed against a build with the local feed
   seed on retry after a stalled-feed navigation timeout.
+
+## Fourth review pass
+
+The server and the initial client render use the same fallback spans. Each base
+character keeps its following combining marks, so Thai `รึ่` appears in one
+span in the response HTML for `ครึ่งหลังต่อเวลาพิเศษ`. The 3× screenshot with
+JavaScript disabled showed the marks attached before hydration. The earlier
+`Array.from` negative control failed the combining-mark assertion. After mount,
+`Intl.Segmenter` supplies word boundaries for fixtures such as the Thai detail
+and Japanese `クォーター延長`.
+
+The lineup clamp reserves both side minima and the assigned status-track
+minimum. The stack decision still uses the space needed by the widest word.
+A 390 px Chromium probe loaded the built SSR stylesheet and measured the
+padding with the custom property unset and with `100%` applied. The unset read
+supplies `preferredRoom` before the `100%` read supplies the minimum-padding
+room.
+
+| Text mode | Preferred padding per side | Minimum padding per side | Final padding per side |
+|---|---:|---:|---:|
+| Normal | 8 px | 4 px | 8 px |
+| Root 200% | 16 px | 8 px | 12 px |
+
+At 390 px and 200% root text, `matched-live` stays unstacked. The available width
+at the preferred padding is 294 px, the available width at the minimum padding
+is 310 px, and the final 302 px of content width fits the full column minimum,
+including the 58 px status track.
+
+At 200% root text, these are the dark, comfortable measurements. The
+stacking and detail-line counts agree across both themes and densities.
+
+| Viewport | Thai layout, detail lines, row height | Katakana layout, detail lines, row height |
+|---|---|---|
+| 320 px | Stacked, 1 line, 242.42 px | Stacked, 1 line, 242.42 px |
+| 390 px | Unstacked, 3 lines, 260.58 px | Stacked, 1 line, 242.42 px |
+| 1024 px | Unstacked, 1 line, 155.59 px | Unstacked, 1 line, 155.59 px |
+| 1280 px | Unstacked, 1 line, 155.59 px | Unstacked, 1 line, 155.59 px |
+
+Both fixtures stayed unstacked in normal and per-element 200% text.
+Their details fit on one line in those modes except Thai at 320 px with
+per-element doubling, which took two lines in a 108 px status track.
+
+The matrix covered 720 listing observations and 16 matched heroes. It
+recorded **0 hydration warnings or errors and 0 uncaught page errors**,
+with zero broken words and zero horizontal card overflow. At 1024 px only
+`matched-widest` stacked, in per-element 200% text. At 1280 px every listing
+stayed unstacked in all three modes. No matched hero stacked. The score
+and status gutter mutations still failed at 0.75 px and 3.80 px respectively,
+against a 13 px requirement.
+
+### Verification gate
+
+- `pnpm test` passed all 189 tests. The default Cloudflare build, node-server
+  preset build, default rebuild and `pnpm exec wrangler deploy --dry-run` passed.
+- The full card suite passed, including fresh and stale sweeps and the four-width,
+  three-mode matched matrix. The banner, density, not-live and click-under suites,
+  the card contrast sweep and the Worker build-key check also passed.
+- Click-under used the `1942ccb` baseline. Generation-first passed with the locally
+  packed generation fixture. Source health passed at both widths with the local
+  feed seed registered at build time. Copying seed assets into the default build
+  had produced a 404 for `/live/247-cows`.
+- `git diff --check` passed. Matrix artifacts and verification logs are under
+  `/tmp/kw58-resume.d50L5V`.

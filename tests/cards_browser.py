@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 import tempfile
 import time
+import unicodedata
 from playwright.sync_api import expect, sync_playwright
 from click_under_browser import worker, CLS_OBSERVER, CLS_SCORE
 
@@ -368,7 +369,13 @@ def banner_measurements(geometry):
                 stacked=geometry['stacked'])
 
 
+def assert_attached_marks(words, fixture):
+    assert all(word and not unicodedata.category(word[0]).startswith('M') for word in words), (
+        'status word starts with a combining mark', fixture, words)
+
+
 def assert_clean_banner(card, event, listing_row, allow_growth=False, root_text=False):
+    assert_attached_marks(card.locator('.banner-status-word').all_text_contents(), event['uri_name'])
     visible = card.evaluate("""el => {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       const text = [];
@@ -536,7 +543,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
         # Wider than the feed allows on purpose: the row may grow, the text may not shrink or collide.
         ('matched-widest', dict(match, detail='W' * 24, away=dict(away, score=148, abbreviation='WWWWW'), home=dict(home, score=152, abbreviation='WWWWW'))),
         ('matched-cjk', dict(match, detail='漢' * 24, away=dict(away, score=999, abbreviation='WWWWW'), home=dict(home, score=999, abbreviation='WWWWW'))),
+        ('matched-thai', dict(match, detail='ครึ่งหลังต่อเวลาพิเศษ')),
+        ('matched-katakana', dict(match, detail='クォーター延長')),
     ]
+    growth_fixtures = {'matched-widest', 'matched-cjk', 'matched-thai', 'matched-katakana'}
     events = [dict(template, id=9000+i, match=game, name='Colorado State Rams at Arizona Wildcats', uri_name=f'basketball/{slug}', viewers='62',
                    starts_at=now-3600, ends_at=now+3600, poster='/never-fetch-provider-thumbnail.jpg') for i, (slug, game) in enumerate(cases)]
     for event in events:
@@ -544,8 +554,21 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
             event['viewers'] = '123456789'
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=events)])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
+    if not measure_only:
+        with browser.new_context(viewport={'width': 1280, 'height': 850},
+                                 device_scale_factor=3, java_script_enabled=False) as context:
+            page = context.new_page()
+            response = page.goto(origin + '/c/basketball', wait_until='networkidle')
+            assert response.ok
+            detail = page.locator('a.event-card[href$="/matched-thai"] .banner-status-tier').nth(1)
+            words = detail.locator('.banner-status-word').all_text_contents()
+            assert_attached_marks(words, 'matched-thai SSR')
+            assert ''.join(words) == dict(cases)['matched-thai']['detail'], words
+            assert '<span class="banner-status-word">รึ่</span>' in response.text()
+            detail.screenshot(path=str(dest / 'thai-first-paint-3x.png'))
     results = []
     hero_results = []
+    hydration_errors = []
     for width in (320, 390, 1024, 1280):
         for theme in ('dark', 'light'):
             for density in ('comfortable', 'compact'):
@@ -555,6 +578,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                     requests = []
                     context.on('request', lambda req: requests.append(req.url))
                     page = context.new_page()
+                    if not measure_only:
+                        page.on('console', lambda message: hydration_errors.append(message.text)
+                                if message.type in ('error', 'warning') and 'hydrat' in message.text.lower() else None)
+                        page.on('pageerror', lambda error: hydration_errors.append(str(error)))
                     prefix = f'{width}-{theme}-{density}'
                     for mode in text_modes:
                         assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
@@ -581,9 +608,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                 if slug in ('matched-missing-logo', 'matched-failed-logo'):
                                     expect(card.locator('.banner-away-team .banner-initials')).to_have_text('WW' if slug == 'matched-missing-logo' else 'CS')
                                 geometry = assert_clean_banner(card, event, listing_row=mode == 'normal',
-                                                               allow_growth=slug in ('matched-widest', 'matched-cjk'), root_text=mode == 'root')
-                                if ((mode == 'normal' and (width == 1024 or (
-                                        width in (320, 390) and slug not in ('matched-widest', 'matched-cjk'))))
+                                                               allow_growth=slug in growth_fixtures, root_text=mode == 'root')
+                                if (width == 1280
+                                        or (width == 1024 and slug not in growth_fixtures)
+                                        or (mode == 'normal' and width in (320, 390) and slug not in growth_fixtures)
                                         or (mode == 'root' and width == 390 and slug == 'matched-live')):
                                     assert not geometry['stacked'], ('unexpected stacking', prefix, mode, slug)
                                 if mode == 'normal' and slug == 'matched-live':
@@ -609,6 +637,8 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                         hero_results.append(dict(viewport=width, theme=theme, density=density, **geometry))
                         hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
                 print(prefix, '/'.join(text_modes), flush=True)
+    print(f'Hydration and uncaught page errors: {len(hydration_errors)}', flush=True)
+    assert not hydration_errors, hydration_errors
     (dest / 'hero-status-report.json').write_text(json.dumps(hero_results, indent=2))
     (dest / 'match-report.json').write_text(json.dumps(results, indent=2))
 
