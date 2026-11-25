@@ -5,7 +5,7 @@ import { bannerAbbreviation, teamInitials } from '~/composables/matchBanner'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import type { matchBannerContent } from '~/composables/matchBanner'
 
-const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; audienceInFooter?: boolean; content: ReturnType<typeof matchBannerContent> }>()
+const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; content: ReturnType<typeof matchBannerContent> }>()
 const hangul = /\p{Script=Hangul}/u
 const logoImages: HTMLImageElement[] = []
 const lineupElement = ref<HTMLElement | null>(null)
@@ -30,6 +30,43 @@ function unbreakableWidth(line: HTMLElement) {
   return width
 }
 
+let inkContext: CanvasRenderingContext2D | null | undefined
+
+/** Measure the visible text relative to its own box, so the fit never changes the grid alignment. */
+function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
+  const text = line.firstChild
+  if (!(text instanceof Text)) return NaN
+  const style = getComputedStyle(line)
+  context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+  const range = document.createRange()
+  range.selectNodeContents(text)
+  const rects = range.getClientRects()
+  const rows = new Map<number, string>()
+  if (rects.length === 1) {
+    rows.set(rects[0]!.top, text.data)
+  } else {
+    // Read the text on each visual line after wrapping and horizontal fitting.
+    let index = 0
+    for (const character of text.data) {
+      range.setStart(text, index)
+      index += character.length
+      range.setEnd(text, index)
+      const { top } = range.getBoundingClientRect()
+      rows.set(top, (rows.get(top) ?? '') + character)
+    }
+  }
+  let top = Infinity
+  let bottom = -Infinity
+  for (const [rowTop, content] of rows) {
+    const metrics = context.measureText(content.trim())
+    const baseline = rowTop + metrics.fontBoundingBoxAscent
+    top = Math.min(top, baseline - metrics.actualBoundingBoxAscent)
+    bottom = Math.max(bottom, baseline + metrics.actualBoundingBoxDescent)
+  }
+  const box = line.getBoundingClientRect()
+  return (top + bottom - box.top - box.bottom) / 2
+}
+
 function fitText() {
   const lineup = lineupElement.value
   if (!lineup) return
@@ -41,6 +78,7 @@ function fitText() {
   const labels = lines.filter(line => line.parentElement!.classList.contains('banner-abbreviation'))
   const status = lines.filter(line => line.classList.contains('banner-status-line'))
   delete lineup.dataset.stacked
+  delete lineup.dataset.wideDetail
   lineup.style.removeProperty('--banner-lineup-min')
   const preferredRoom = room(lineup)
   // Reserve the full width to read the minimum padding resolved by the CSS clamp.
@@ -75,7 +113,23 @@ function fitText() {
   const statusRoom = available - 2 * sideMin
   const statusMin = Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
   lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
-  lineup.toggleAttribute('data-stacked', statusRoom < wordMin)
+  const compact = statusRoom < wordMin
+  lineup.toggleAttribute('data-stacked', compact)
+  // The compact layout lets each abbreviation span its team and score tracks, and lets the logo
+  // shrink to the text size, so the middle column keeps the state between the scores.
+  const compactSide = Math.max(labelMin, scoreMin + gutter + Math.min(logo, parseFloat(style.fontSize)))
+  const compactMiddle = Math.max(0, available - 2 * compactSide)
+  const share = Number.parseFloat(style.getPropertyValue('--banner-status-width')) / 100
+  // Detail and audience have their rows to themselves. When a word in them cannot fit the middle
+  // column even at the floor, they take the full row instead of breaking the word.
+  const stateLine = lineup.querySelector<HTMLElement>('.banner-status-tier:first-child .banner-status-line')
+  const lowerWords = status.flatMap((line, index) => line === stateLine ? [] : [statusWidths[index]!])
+  const stateWords = status.flatMap((line, index) => line === stateLine ? [statusWidths[index]!] : [])
+  const wideDetail = compact && Math.ceil(Math.max(0, ...lowerWords) * floor) + 1 > compactMiddle
+  const middleMin = wideDetail ? Math.ceil(Math.max(0, ...stateWords) * floor) + 1 : statusMin
+  const middleWidth = Number.isFinite(share) ? Math.max(middleMin, available * share) : middleMin
+  lineup.toggleAttribute('data-wide-detail', wideDetail)
+  lineup.style.setProperty('--banner-compact-middle', `${Math.min(compactMiddle, middleWidth)}px`)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
   lineup.style.setProperty('--banner-status-min', `${statusMin}px`)
@@ -90,6 +144,18 @@ function fitText() {
     if (fit < floor && status.includes(line)) line.dataset.wrap = ''
     const minimum = line.parentElement!.classList.contains('banner-initials') ? 0 : floor
     line.style.setProperty('--banner-line-fit', String(Math.max(minimum, Math.min(1, fit))))
+  }
+  if (stateLine && scores.length) {
+    if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
+    if (inkContext) {
+      const context = inkContext
+      const scoreCentre = scores.reduce((sum, score) => sum + inkOffset(score, context), 0) / scores.length
+      const offset = scoreCentre - inkOffset(stateLine, context)
+      if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset.toFixed(3)}px`)
+      else stateLine.style.removeProperty('--banner-state-offset')
+    }
+  } else {
+    stateLine?.style.removeProperty('--banner-state-offset')
   }
 }
 let observer: ResizeObserver | undefined
@@ -108,7 +174,7 @@ onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <template>
-  <div class="match-banner" :data-audience-in-footer="audienceInFooter ? '' : undefined" :style="art" :data-scale="scale">
+  <div class="match-banner" :style="art" :data-scale="scale">
     <div ref="lineupElement" class="banner-lineup" aria-hidden="true">
       <template v-for="(side, index) in [match.away, match.home]" :key="index">
         <div class="banner-team" :class="index === 0 ? 'banner-away-team' : 'banner-home-team'">
@@ -122,14 +188,14 @@ onBeforeUnmount(() => observer?.disconnect())
         </span>
       </template>
       <div class="banner-status">
-        <div v-for="(line, index) in (audienceInFooter ? content.tiers.slice(0, 2) : content.tiers)" :key="index" class="banner-status-tier">
+        <div v-for="(line, index) in content.tiers" :key="index" class="banner-status-tier">
           <span v-if="line" class="banner-fit-text banner-status-line" :class="{ 'banner-versus': line === 'vs' }"
             :data-hangul="hangul.test(line) ? '' : undefined" :style="{ '--banner-chars': line.length }">{{ line }}</span>
         </div>
+        <div v-if="!stale" class="banner-progress">
+          <LiveProgress :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live" :now="now ?? initialNow" />
+        </div>
       </div>
-    </div>
-    <div v-if="!stale" class="banner-progress" aria-hidden="true">
-      <LiveProgress :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live" :now="now ?? initialNow" />
     </div>
   </div>
 </template>

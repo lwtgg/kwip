@@ -299,7 +299,7 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             assert card.evaluate('el => el.scrollWidth === el.clientWidth && el.getBoundingClientRect().right <= innerWidth')
         else:
             assert page.evaluate('document.documentElement.scrollWidth === innerWidth')
-        assert_clean_banner(link, event, oracle, listing_row=False, audience_in_footer=True)
+        assert_clean_banner(link, event, oracle, listing_row=False)
         if variant == 'zlive':
             ad = page.locator('[data-ad-format]')
             expect(ad).to_have_count(1)
@@ -308,35 +308,36 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         link.focus()
         expect(link).to_have_css('outline-offset', '-4px' if root_text else '-2px')
 
-        expect(link.locator('.banner-status-tier')).to_have_count(2)
-        footer = hero.locator('.hero-footer')
-        audience = footer.get_by_text('62 Viewers', exact=True)
+        audience = link.locator('.banner-status-tier').get_by_text('62 Viewers', exact=True)
         expect(audience).to_be_visible()
-        expect(audience).to_have_attribute('aria-hidden', 'true')
         expect(link).to_have_accessible_name(re.compile(r'62 Viewers'))
+        footer = hero.locator('.hero-footer')
         if taifood:
+            expect(footer).to_have_count(0)
             expect(button).to_have_count(0)
         else:
+            expect(footer.locator(':scope > *')).to_have_count(1)
             expect(button).to_have_accessible_name('Sound on')
             expect(button).to_be_enabled()
             target = button.bounding_box()
             assert target['height'] >= 44 and target['width'] >= 44, target
-            geometry = footer.evaluate("""footer => {
-              const [audience, button] = footer.children;
+            # The footer holds only the button, disjoint from the banner and from the audience it used to sit beside.
+            geometry = hero.evaluate("""hero => {
+              const button = hero.querySelector('.hero-footer button').getBoundingClientRect();
+              const link = hero.querySelector('.hero-plate-link').getBoundingClientRect();
+              const audience = hero.querySelector('.banner-status-tier:nth-child(3) .banner-status-line');
               const range = document.createRange();
               range.selectNodeContents(audience);
-              const control = button.getBoundingClientRect();
-              const disjoint = rect => rect.right <= control.left || control.right <= rect.left
-                || rect.bottom <= control.top || control.bottom <= rect.top;
-              const metric = audience.getBoundingClientRect();
+              const disjoint = rect => rect.right <= button.left || button.right <= rect.left
+                || rect.bottom <= button.top || button.bottom <= rect.top;
               return {
-                disjoint: disjoint(metric) && [...range.getClientRects()].every(disjoint),
-                wraps: metric.bottom <= control.top,
+                disjoint: disjoint(link) && disjoint(audience.getBoundingClientRect())
+                  && [...range.getClientRects()].every(disjoint),
+                below: link.bottom <= button.top,
               };
             }""")
-            assert geometry['disjoint'], geometry
-            if root_text:
-                assert geometry['wraps'], geometry
+            assert geometry['disjoint'] and geometry['below'], geometry
+            assert target['y'] + target['height'] <= before['y'], (target, before)
             original = frame.element_handle()
             sound_url = ZLIVE + ('&autoplay=0' if variant.startswith('upcoming') else '')
             button.click()
@@ -469,8 +470,7 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             page.wait_for_load_state('networkidle')
         assert not errors, errors
         print(f"{width}px {variant} at {200 if root_text else 100}%: {plate_before['width']:.2f} × {plate_before['height']:.2f} plate, "
-              f"{before['width']:.2f} × {before['height']:.2f} player, CLS 0"
-              + (f", footer wraps: {geometry['wraps']}" if not taifood else ''), flush=True)
+              f"{before['width']:.2f} × {before['height']:.2f} player, CLS 0", flush=True)
 
 
 def main():
@@ -504,8 +504,10 @@ def main():
                     if variant in ('zlive', 'save-data', 'stale'):
                         widths = (1024, 1280) if variant == 'stale' else (320, 390)
                         for width in widths:
+                            # The footer no longer stacks the audience over the button (task 60), so the
+                            # 200% hero is shorter; a 500px viewport keeps the button below the fold.
                             check(browser, oracle, origin, feed, listing, event, width, variant,
-                                  root_text=True, below_fold=True)
+                                  root_text=True, below_fold=True, height=850 if variant == 'stale' else 500)
                     if variant == 'zlive':
                         for width, height in ((844, 390), (667, 375), (932, 430), (1280, 500)):
                             check(browser, oracle, origin, feed, listing, event, width, variant,

@@ -475,7 +475,10 @@
   --banner-score-weight: 700;
   --banner-label-weight: 400;
   --banner-status-leading: 1.3;
-  --banner-stacked-score-leading: 1.16;
+  /* The score opens the first row, so its line box holds the whole content area of the font. */
+  --banner-score-leading: 1.16;
+  /* The timeline track: translucent white over the team field, so it reads on any team colour. */
+  --banner-track: color-mix(in srgb, var(--banner-white) 36%, transparent);
   --banner-pad-inline: var(--spacing-2);
   --banner-pad-top: var(--spacing-1);
   --banner-pad-bottom: var(--spacing-2);
@@ -516,7 +519,7 @@
     minmax(var(--banner-status-min, 0px), var(--banner-status-width))
     minmax(var(--banner-scored-min, 0px), 1fr)
     minmax(var(--banner-team-min), var(--banner-team-width));
-  grid-template-rows: minmax(1lh, 1fr) auto minmax(1lh, 1fr);
+  grid-template-rows: auto auto auto minmax(1lh, auto);
   align-items: center;
   padding-block: var(--banner-pad-top) var(--banner-pad-bottom);
   padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
@@ -532,7 +535,7 @@
   --banner-scored-min: calc(var(--banner-score-min, 0px) + var(--banner-gutter));
 }
 .banner-team {
-  grid-row: 1 / 3;
+  grid-row: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   place-items: center;
@@ -555,30 +558,36 @@
   overflow: hidden;
 }
 .banner-abbreviation {
-  grid-row: 3;
+  grid-row: 4;
   min-width: 0;
 }
 .banner-away-team, .banner-away-label { grid-column: 1; }
 .banner-home-team, .banner-home-label { grid-column: 5; }
 .banner-away-score { grid-column: 2; padding-inline-end: var(--banner-gutter); }
 .banner-home-score { grid-column: 4; padding-inline-start: var(--banner-gutter); }
-.banner-score-slot { grid-row: 2; min-width: 0; }
+.banner-score-slot { grid-row: 1; min-width: 0; }
 .banner-score {
   font-family: var(--font-score);
   font-size: var(--banner-score-size);
   font-weight: var(--banner-score-weight);
   font-stretch: extra-condensed;
   font-variant-numeric: lining-nums tabular-nums;
-  line-height: 1;
+  line-height: var(--banner-score-leading);
 }
+/* The middle column's four tiers: state on the score row, then detail, audience and the timeline.
+   It spans the score tracks too, so the timeline can run from one abbreviation to the other; the
+   text tiers stay in the middle track. */
 .banner-status {
-  grid-column: 3;
+  --banner-middle: 2;
+  grid-column: 2 / 5;
   grid-row: 1 / -1;
   display: grid;
+  grid-template-columns: subgrid;
   grid-template-rows: subgrid;
   min-width: 0;
   align-self: stretch;
 }
+.banner-status > * { grid-column: var(--banner-middle); }
 .banner-status-tier { align-self: center; min-width: 0; }
 .banner-status-line {
   overflow-wrap: break-word;
@@ -591,7 +600,7 @@
   display: block;
   width: max-content;
   white-space: nowrap;
-  transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
+  transform: translate(-50%, var(--banner-state-offset, 0px)) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
 }
 /* Below the floor the line wraps at the width the floor allows, then is drawn at the floor. */
 .banner-fit-text[data-wrap] {
@@ -604,40 +613,30 @@
   transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-score-compression)));
 }
 
-/* When the five columns cannot hold the fit floor, the status gets a full-width tier group. */
+/* At tight widths each abbreviation spans its team and score tracks and the logo may shrink to the
+   text size, so the middle column keeps the state between the scores. */
 .banner-lineup[data-stacked] {
-  --banner-stacked-score-gutter: calc(var(--banner-gutter) / 2);
-  --banner-stacked-score-min: 0px;
+  --banner-stacked-score-min: calc(var(--banner-score-min, 0px) + var(--banner-gutter));
   grid-template-columns:
-    minmax(var(--banner-label-min), 1fr)
-    minmax(var(--banner-stacked-score-min), 1fr)
-    minmax(var(--banner-stacked-score-min), 1fr)
-    minmax(var(--banner-label-min), 1fr);
-  grid-template-rows: auto auto repeat(3, auto);
-  padding-block: calc(var(--banner-pad-top) / 2) calc(var(--banner-pad-bottom) / 2);
-  padding-inline: clamp(0px, calc(50% - var(--banner-label-min) - var(--banner-stacked-score-min)), var(--banner-pad-inline));
+    minmax(0, 1fr)
+    var(--banner-stacked-score-min)
+    var(--banner-compact-middle)
+    var(--banner-stacked-score-min)
+    minmax(0, 1fr);
+  padding-inline: calc(var(--banner-pad-inline) / 2);
 }
-.banner-lineup[data-stacked]:has(.banner-score-slot) {
-  --banner-stacked-score-min: calc(var(--banner-score-min) + var(--banner-stacked-score-gutter));
-}
-.banner-lineup[data-stacked] .banner-team,
-.banner-lineup[data-stacked] .banner-score-slot { grid-row: 1; }
-.banner-lineup[data-stacked] .banner-score-slot {
-  padding-block-start: var(--spacing-1);
-}
-.banner-lineup[data-stacked] .banner-score { line-height: var(--banner-stacked-score-leading); }
-.banner-lineup[data-stacked] .banner-abbreviation { grid-row: 2; }
-.banner-lineup[data-stacked] .banner-home-team,
-.banner-lineup[data-stacked] .banner-home-label { grid-column: 4; }
-.banner-lineup[data-stacked] .banner-away-score { padding-inline-end: var(--banner-stacked-score-gutter); }
-.banner-lineup[data-stacked] .banner-home-score {
-  grid-column: 3;
-  padding-inline-start: var(--banner-stacked-score-gutter);
-}
-.banner-lineup[data-stacked] .banner-status {
-  grid-area: 3 / 1 / -1 / -1;
+.banner-lineup[data-stacked] .banner-away-label { grid-column: 1 / 3; }
+.banner-lineup[data-stacked] .banner-home-label { grid-column: 4 / 6; }
+.banner-lineup[data-stacked] .banner-progress { grid-column: var(--banner-middle); }
+.banner-lineup[data-stacked] .banner-status-tier:nth-child(2):has(.banner-status-line) {
   padding-block-start: var(--banner-gutter);
 }
+/* A word that cannot fit the middle column at the floor takes its whole row; nothing else is on it. */
+.banner-lineup[data-wide-detail] .banner-status {
+  --banner-middle: 3;
+  grid-column: 1 / -1;
+}
+.banner-lineup[data-wide-detail] .banner-status > .banner-status-tier:not(:first-child) { grid-column: 1 / -1; }
 .banner-fit-text[data-mono] { font-family: ui-monospace, monospace; }
 
 /* Wide listing card: the middle columns narrow and each score hugs the detail, as in the mockup. */
@@ -655,8 +654,19 @@
   .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-home-score .banner-score { transform-origin: left center; }
 }
 
-.banner-progress { position: absolute; inset-inline: var(--banner-pad-inline); bottom: 0; }
-.banner-progress [role="progressbar"] { border: 0; background: var(--banner-base); }
+/* The timeline is the bottom row's middle cell: a track between the abbreviations, centred on them. */
+.banner-progress {
+  grid-row: 4;
+  grid-column: 1 / -1;
+  align-self: center;
+  margin-inline: var(--banner-gutter);
+  min-width: 0;
+}
+.banner-progress [role="progressbar"] {
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--banner-track);
+}
 .banner-progress [role="progressbar"] > div { background: var(--banner-white); }
 .match-banner[data-scale="hero"] {
   --banner-score-size: var(--banner-score-hero);
@@ -666,19 +676,14 @@
   --banner-pad-bottom: var(--banner-hero-pad);
   height: auto;
   min-height: var(--banner-hero-height);
+  align-items: center;
 }
 
 .hero-plate-link:focus-visible {
   outline-offset: var(--focus-ring-inset);
 }
-.match-banner[data-audience-in-footer] .banner-lineup[data-stacked] {
-  grid-template-rows: auto auto repeat(2, auto);
-}
 .hero-footer {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--spacing-2);
   padding: var(--spacing-2);
 }
 .hero-sound {
