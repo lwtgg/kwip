@@ -71,11 +71,15 @@ def fixtures(output, variant):
     top = dict(template, name='Featured fixture', uri_name=EVENT, id=8000, match=match, viewers='62',
                starts_at=now-60, ends_at=now+7200, iframe=TAIFOOD, always_live=0, poster='')
     popular = dict(top, name='Popular fixture', uri_name='basketball/popular', id=8001, viewers='1000')
-    if variant == 'taifood':
+    if variant.startswith('taifood') or variant.startswith('no-embed'):
         popular['viewers'] = '50'
     else:
         top['hero_embed'] = ZLIVE
-    if variant == 'upcoming':
+    if variant.startswith('no-embed'):
+        top['iframe'] = ''
+        if variant == 'no-embed-unmatched':
+            top.pop('match')
+    if variant.startswith('upcoming'):
         top.update(starts_at=now+60, match=dict(match, state='pre', detail='Scheduled',
                    away=dict(match['away'], score=None), home=dict(match['home'], score=None)))
         popular['starts_at'] = now+120
@@ -86,15 +90,15 @@ def fixtures(output, variant):
     ]), top
 
 
-def check(browser, oracle, origin, feed, listing, event, width, variant):
-    with browser.new_context(viewport={'width': width, 'height': 850}, reduced_motion='reduce') as context:
+def check(browser, oracle, origin, feed, listing, event, width, variant, root_text=False):
+    with browser.new_context(viewport={'width': width, 'height': 1300 if root_text else 850}, reduced_motion='reduce') as context:
         context.add_init_script(CLS_OBSERVER)
         context.add_init_script('''(() => {
           window.heroHidden = !location.search.includes('natural=1');
           Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => window.heroHidden ? 'hidden' : 'visible'});
           Object.defineProperty(navigator, 'connection', {value: new EventTarget()});
           navigator.connection.saveData = SAVE_DATA;
-        })();'''.replace('SAVE_DATA', str(variant == 'save-data').lower()))
+        })();'''.replace('SAVE_DATA', str(variant.endswith('save-data')).lower()))
         feed_requests = []
         player_requests = []
         ad_requests = []
@@ -126,6 +130,9 @@ def check(browser, oracle, origin, feed, listing, event, width, variant):
           await app.callHook('app:data:refresh');
         }''')
         assert feed_requests == [feed + '/streams'], feed_requests
+        if root_text:
+            page.add_style_tag(content='html { font-size: 200%; }')
+            assert page.evaluate('getComputedStyle(document.documentElement).fontSize') == '32px'
         hero = page.get_by_role('region', name='Featured event')
         card = hero.locator('.hero-card')
         link = hero.get_by_role('link')
@@ -133,76 +140,133 @@ def check(browser, oracle, origin, feed, listing, event, width, variant):
         frame = box.locator('iframe')
         button = hero.get_by_role('button')
         expect(link).to_have_attribute('href', f'/live/{EVENT}')
+        if variant.startswith('no-embed'):
+            expect(box).to_have_count(0)
+            expect(card).to_have_count(0)
+            expect(button).to_have_count(0)
+            assert hero.bounding_box()['height'] == link.bounding_box()['height']
+            if variant == 'no-embed-matched':
+                assert_clean_banner(link, event, oracle, listing_row=False)
+            else:
+                expect(link.locator('.card-art')).to_be_visible()
+            assert not player_requests and not errors, (player_requests, errors)
+            print(f"{width}px {variant}: banner only", flush=True)
+            return
         assert box.evaluate('(box) => box.previousElementSibling.classList.contains("hero-plate")')
         assert not link.locator('iframe, button').count()
         expect(frame).to_have_count(0)
         page.evaluate('document.fonts.ready')
         settle_fit(page)
+        if root_text:
+            # The test changes the root size after navigation. Measure from the settled 200% layout.
+            page.evaluate('layoutShifts.length = 0')
         before = box.bounding_box()
-        plate_before = link.bounding_box()
+        plate = hero.locator('.hero-plate')
+        plate_before = plate.bounding_box()
         page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
 
-        if variant == 'save-data':
+        taifood = variant.startswith('taifood')
+        held = variant.endswith('save-data') and not taifood
+        if held:
             page.wait_for_timeout(100)
             expect(frame).to_have_count(0)
             assert not player_requests
-            page.evaluate('navigator.connection.saveData = false; navigator.connection.dispatchEvent(new Event("change"))')
+            expect(button).to_have_accessible_name('Play')
+            expect(button).to_be_enabled()
+            button.focus()
+            page.evaluate('window.heroHidden = true; document.dispatchEvent(new Event("visibilitychange"))')
+            expect(button).to_be_focused()
+            page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
+            expect(button).to_be_focused()
+            held_target = button.bounding_box()
+            button.click()
+            expect(button).to_be_focused()
+            expect(button).to_have_accessible_name('Sound on')
+            assert button.bounding_box() == held_target
 
-        expected = TAIFOOD if variant == 'taifood' else ZLIVE + '&muted=1'
-        if variant == 'upcoming':
+        expected = TAIFOOD if taifood else ZLIVE + '&muted=1'
+        if variant.startswith('upcoming'):
             expected += '&autoplay=0'
         expect(frame).to_have_attribute('src', expected, timeout=4000)
-        expect(frame).to_have_attribute('sandbox', SANDBOX)
+        if taifood:
+            assert frame.get_attribute('sandbox') is None
+        else:
+            expect(frame).to_have_attribute('sandbox', SANDBOX)
         expect(frame).to_have_attribute('allow', 'autoplay; fullscreen; picture-in-picture')
         expect(frame.content_frame.get_by_role('heading', name='Third-party fixture')).to_be_visible()
         assert player_requests[0] == expected
         assert box.bounding_box() == before
-        assert link.bounding_box() == plate_before
+        assert plate.bounding_box() == plate_before
         assert before['y'] == plate_before['y'] + plate_before['height']
         assert card.bounding_box()['width'] == plate_before['width'] == before['width']
         assert abs(before['height'] - before['width'] * 9 / 16) < .02
         assert frame.evaluate('el => getComputedStyle(el).borderRadius') == '0px'
-        assert page.evaluate('document.documentElement.scrollWidth === innerWidth')
-        assert_clean_banner(link, event, oracle, listing_row=False, player=True)
+        if root_text:
+            assert card.evaluate('el => el.scrollWidth === el.clientWidth && el.getBoundingClientRect().right <= innerWidth')
+        else:
+            assert page.evaluate('document.documentElement.scrollWidth === innerWidth')
+        assert_clean_banner(link, event, oracle, listing_row=False, audience_in_footer=True)
         if variant == 'zlive':
             ad = page.locator('[data-ad-format]')
             expect(ad).to_have_count(1)
             assert ad.bounding_box()['y'] >= before['y'] + before['height']
         page.keyboard.press('Tab')
         link.focus()
-        expect(link).to_have_css('outline-offset', '-2px')
+        expect(link).to_have_css('outline-offset', '-4px' if root_text else '-2px')
 
-        if variant == 'taifood':
+        expect(link.locator('.banner-status-tier')).to_have_count(2)
+        footer = hero.locator('.hero-footer')
+        expect(footer.get_by_role('img', name='62 viewers')).to_be_visible()
+        if taifood:
             expect(button).to_have_count(0)
-        elif variant != 'upcoming':
-            expect(button).to_have_text('Sound on')
-            assert button.bounding_box()['height'] >= 44
-            assert button.evaluate("""button => {
-              const audience = button.previousElementSibling.querySelector('.banner-status-tier:last-child').getBoundingClientRect();
+        else:
+            expect(button).to_have_accessible_name('Sound on')
+            expect(button).to_be_enabled()
+            target = button.bounding_box()
+            assert target['height'] >= 44 and target['width'] >= 44, target
+            geometry = footer.evaluate("""footer => {
+              const [audience, button] = footer.children;
+              const range = document.createRange();
+              range.selectNodeContents(audience);
               const control = button.getBoundingClientRect();
-              return audience.right <= control.left && audience.top === control.top;
+              const disjoint = rect => rect.right <= control.left || control.right <= rect.left
+                || rect.bottom <= control.top || control.bottom <= rect.top;
+              const metric = audience.getBoundingClientRect();
+              return {
+                disjoint: disjoint(metric) && [...range.getClientRects()].every(disjoint),
+                wraps: metric.bottom <= control.top,
+              };
             }""")
+            assert geometry['disjoint'], geometry
+            if root_text:
+                assert geometry['wraps'], geometry
             original = frame.element_handle()
+            sound_url = ZLIVE + ('&autoplay=0' if variant.startswith('upcoming') else '')
             button.click()
-            expect(button).to_have_text('Muted')
-            expect(frame).to_have_attribute('src', ZLIVE)
+            expect(button).to_have_accessible_name('Mute')
+            expect(frame).to_have_attribute('src', sound_url)
             assert not original.evaluate('el => el.isConnected')
             expect(button).to_be_focused()
             assert box.bounding_box() == before
+            assert button.bounding_box() == target
             assert not ad_requests and page.evaluate("sessionStorage.getItem('ads:click-under') === null")
             button.click()
-            expect(button).to_have_text('Sound on')
+            expect(button).to_have_accessible_name('Sound on')
             expect(frame).to_have_attribute('src', expected)
             button.click()
-            expect(frame).to_have_attribute('src', ZLIVE)
-        else:
-            expect(button).to_have_text('Sound on')
+            expect(frame).to_have_attribute('src', sound_url)
 
         page.evaluate('window.heroHidden = true; document.dispatchEvent(new Event("visibilitychange"))')
         expect(frame).to_have_count(0)
-        assert box.bounding_box() == before and link.bounding_box() == plate_before
+        if not taifood:
+            expect(button).to_be_focused()
+            expect(button).to_be_enabled()
+        assert box.bounding_box() == before and plate.bounding_box() == plate_before
         page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
         expect(frame).to_have_attribute('src', expected)
+        if not taifood:
+            expect(button).to_be_focused()
+            expect(button).to_have_accessible_name('Sound on')
         page.evaluate('window.heroHidden = true; document.dispatchEvent(new Event("visibilitychange"))')
         expect(frame).to_have_count(0)
         page.evaluate('window.scrollTo(0, document.documentElement.scrollHeight)')
@@ -216,18 +280,20 @@ def check(browser, oracle, origin, feed, listing, event, width, variant):
         expect(frame).to_have_count(0)
         assert box.bounding_box()['height'] == before['height']
         page.evaluate('window.scrollTo(0, 0)')
-        expect(frame).to_have_attribute('src', expected)
+        page.wait_for_function('document.querySelector(".hero-player").getBoundingClientRect().top < innerHeight')
+        expect(frame).to_have_attribute('src', expected, timeout=8000)
         assert box.bounding_box() == before
         assert page.evaluate(CLS_SCORE) == 0
         assert not errors, errors
         link.click()
         page.wait_for_url(re.compile(f'/live/{EVENT}$'))
         assert not ad_requests
-        if variant == 'zlive':
+        if variant == 'zlive' and not root_text:
             assert page.goto(origin + '/?natural=1', wait_until='domcontentloaded').ok
             expect(frame).to_have_attribute('src', expected)
-        print(f"{width}px {variant}: {plate_before['width']:.2f} × {plate_before['height']:.2f} plate, "
-              f"{before['width']:.2f} × {before['height']:.2f} player, CLS 0", flush=True)
+        print(f"{width}px {variant} at {200 if root_text else 100}%: {plate_before['width']:.2f} × {plate_before['height']:.2f} plate, "
+              f"{before['width']:.2f} × {before['height']:.2f} player, CLS 0"
+              + (f", footer wraps: {geometry['wraps']}" if not taifood else ''), flush=True)
 
 
 def main():
@@ -238,7 +304,8 @@ def main():
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as pw:
         with pw.chromium.launch() as browser:
             oracle = browser.new_page()
-            for variant in ('zlive', 'taifood', 'upcoming', 'save-data'):
+            for variant in ('zlive', 'taifood', 'upcoming', 'save-data', 'upcoming-save-data', 'taifood-save-data',
+                            'no-embed-matched', 'no-embed-unmatched'):
                 listing, event = fixtures(output, variant)
                 creative = {'home-banner': {'image': '/banners/house.jpg', 'alt': 'House banner',
                                             'destination': 'https://advertiser.example'}}
@@ -248,6 +315,8 @@ def main():
                         banner_fixture=output / 'public/og-default.jpg' if variant == 'zlive' else None) as origin:
                     for width in (320, 390, 1024, 1280):
                         check(browser, oracle, origin, feed, listing, event, width, variant)
+                        if variant in ('zlive', 'save-data') and width in (320, 390):
+                            check(browser, oracle, origin, feed, listing, event, width, variant, root_text=True)
 
 
 if __name__ == '__main__':

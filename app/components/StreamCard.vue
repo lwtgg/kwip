@@ -61,19 +61,26 @@ const matchFacts = computed(() => {
   return props.stale ? `Unconfirmed. ${time}.` : `${time}.`
 })
 
-const reservesPlayer = computed(() => props.hero && (!!props.heroEmbed || !!props.stream?.match))
+const reservesPlayer = computed(() => props.hero && !!props.heroEmbed)
 const playerBox = ref<HTMLElement | null>(null)
 const inViewport = ref(false)
 const visible = ref(false)
 const saveData = ref(false)
+const playRequested = ref(false)
 const sound = ref(false)
+const soundOnLabel = 'Sound on'
 const frameKey = ref(0)
 const zlive = computed(() => !!props.heroEmbed && isZliveEmbed(props.heroEmbed))
+const held = computed(() => zlive.value && saveData.value && !playRequested.value)
 const frameMounted = computed(() => !!props.heroEmbed &&
-  canMountHeroFrame(inViewport.value, visible.value, zlive.value && !!props.heroLive, saveData.value))
+  canMountHeroFrame(inViewport.value, visible.value, held.value))
 const frameSrc = computed(() => props.heroEmbed && heroFrameUrl(props.heroEmbed, !!props.heroLive, sound.value))
 
-function toggleSound() {
+function handlePlayback() {
+  if (held.value) {
+    playRequested.value = true
+    return
+  }
   if (!frameMounted.value) return
   sound.value = !sound.value
   frameKey.value++
@@ -124,18 +131,18 @@ if (props.hero) {
   </div>
 
   <div v-else :class="reservesPlayer ? 'hero-card overflow-hidden rounded-row bg-surface' : 'contents'">
-    <div :class="reservesPlayer ? 'hero-plate relative rounded-row' : 'contents'">
+    <div :class="reservesPlayer ? 'hero-plate rounded-row' : 'contents'">
       <NuxtLink
         :to="targetHref"
         :data-variant="variant"
         :style="stream.match ? undefined : tint"
-        class="event-card group h-full min-h-target rounded-row"
-        :class="[hero ? 'card-hero' : 'card-row', { 'card-matched': stream.match, 'hero-plate-link': reservesPlayer }]"
+        class="event-card group min-h-target rounded-row"
+        :class="[hero ? 'card-hero' : 'card-row', { 'h-full': !reservesPlayer }, { 'card-matched': stream.match, 'hero-plate-link': reservesPlayer }]"
       >
         <template v-if="matchContent">
           <component :is="headingLevel" class="sr-only">{{ matchContent.label }}</component>
           <span class="sr-only">{{ matchFacts }}</span>
-          <MatchBanner :stream="stream" :now="now" :stale="stale" :scale="scale" :content="matchContent" />
+          <MatchBanner :stream="stream" :now="now" :stale="stale" :scale="scale" :content="matchContent" :audience-in-footer="reservesPlayer" />
         </template>
         <template v-else>
           <div
@@ -154,7 +161,7 @@ if (props.hero) {
               :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
             <div class="card-meta gap-x-3 text-metadata text-muted">
               <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
-              <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
+              <span v-if="!stale && !reservesPlayer" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
                 <span aria-hidden="true">{{ compact }} {{ metric }}</span>
               </span>
               <span class="group-hover:underline">Watch</span>
@@ -162,15 +169,21 @@ if (props.hero) {
           </div>
         </template>
       </NuxtLink>
-      <button
-        v-if="zlive"
-        type="button"
-        class="hero-sound min-h-11 rounded-control bg-surface-2 px-3 text-metadata text-fg hover:bg-surface"
-        :disabled="!frameMounted"
-        @click="toggleSound"
-      >
-        {{ sound ? 'Muted' : 'Sound on' }}
-      </button>
+      <div v-if="reservesPlayer && (!stale || zlive)" class="hero-footer">
+        <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`"
+          class="listing-numeric wrap-anywhere text-metadata text-muted">
+          <span aria-hidden="true">{{ matchContent?.tiers[2] ?? `${compact} ${metric}` }}</span>
+        </span>
+        <button
+          v-if="zlive"
+          type="button"
+          class="hero-sound min-h-11 min-w-11 rounded-control bg-surface-2 px-3 text-metadata text-fg hover:bg-surface"
+          :data-label="soundOnLabel"
+          @click="handlePlayback"
+        >
+          <span>{{ held ? 'Play' : sound ? 'Mute' : soundOnLabel }}</span>
+        </button>
+      </div>
     </div>
     <div v-if="reservesPlayer" ref="playerBox" class="hero-player aspect-video w-full bg-surface-2">
       <iframe
@@ -178,7 +191,7 @@ if (props.hero) {
         :key="frameKey"
         :src="frameSrc"
         :title="stream.name"
-        :sandbox="playerShieldSandbox"
+        :sandbox="zlive ? playerShieldSandbox : undefined"
         allow="autoplay; fullscreen; picture-in-picture"
         allowfullscreen
         class="block h-full w-full border-0"

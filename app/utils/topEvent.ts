@@ -1,12 +1,29 @@
-import { parseSourceUrl, sourceHost, sourceKey } from './sourceIdentity.ts'
+import { parseSourceUrl } from './sourceIdentity.ts'
 
 type Source = { type: string; data: string }
 type SourceList = { iframe?: string; sources?: Source[] }
 export type EventSources = SourceList & { hero_embed?: string; substreams?: SourceList[] }
 type Event = EventSources & { viewers: string; starts_at: number }
 
-export function isZliveEmbed(url: string): boolean {
-  return sourceHost(url) === 'zlive.st' && /^zlive\.st\/embed\/[^/]+$/.test(sourceKey(url))
+function isZliveUrl(url: URL): boolean {
+  return (url.protocol === 'https:' || url.protocol === 'http:') &&
+    url.host === 'zlive.st' && /^\/embed\/[^/]+\/*$/i.test(url.pathname)
+}
+
+export function isZliveEmbed(source: string): boolean {
+  const url = parseSourceUrl(source)
+  return !!url && isZliveUrl(url)
+}
+
+function normalizeZlive(url: URL) {
+  url.protocol = 'https:'
+  url.username = ''
+  url.password = ''
+  url.pathname = url.pathname.replace(/\/+$/, '')
+}
+
+function serializeEmbed(url: URL, source: string): string {
+  return source.includes('{host}') ? url.href.replaceAll(/%7Bhost%7D/gi, '{host}') : url.href
 }
 
 export function resolveHeroEmbed(item: EventSources, detail?: EventSources): string | undefined {
@@ -22,9 +39,11 @@ export function resolveHeroEmbed(item: EventSources, detail?: EventSources): str
   }
   const urls = [item.hero_embed, ...embeds(item), ...(detail ? embeds(detail) : [])]
     .flatMap(value => {
-      if (!value) return []
+      if (typeof value !== 'string' || !value) return []
       const url = parseSourceUrl(value)
-      return url && (url.protocol === 'https:' || url.protocol === 'http:') ? [url.href] : []
+      if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) return []
+      if (isZliveUrl(url)) normalizeZlive(url)
+      return [serializeEmbed(url, value)]
     })
   return urls.find(isZliveEmbed) ?? urls[0]
 }
@@ -57,17 +76,18 @@ export function selectTopEvent<T extends Event>(
 }
 
 export function heroFrameUrl(source: string, live: boolean, sound: boolean): string {
-  if (!isZliveEmbed(source)) return source
-  const url = new URL(source)
+  const url = parseSourceUrl(source)
+  if (!url || !isZliveUrl(url)) return source
+  normalizeZlive(url)
   if (sound) url.searchParams.delete('muted')
   else url.searchParams.set('muted', '1')
   if (!live) url.searchParams.set('autoplay', '0')
   else if (/^(0|false|off|no)$/i.test(url.searchParams.get('autoplay') ?? '')) {
     url.searchParams.set('autoplay', '1')
   }
-  return url.href
+  return serializeEmbed(url, source)
 }
 
-export function canMountHeroFrame(inViewport: boolean, visible: boolean, autoplay: boolean, saveData: boolean): boolean {
-  return inViewport && visible && !(autoplay && saveData)
+export function canMountHeroFrame(inViewport: boolean, visible: boolean, held: boolean): boolean {
+  return inViewport && visible && !held
 }

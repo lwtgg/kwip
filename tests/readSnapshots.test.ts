@@ -119,6 +119,19 @@ test('request consumers share the whole batch and keep origin and cache provenan
   assert.equal(calls.filter(key => key === 'current.json').length, 1)
 })
 
+test('an invalid optional hero embed leaves the generation readable', async () => {
+  const streams = structuredClone(channels)
+  Object.assign(streams.streams[0].streams[0], { hero_embed: 'javascript:alert(1)' })
+  Object.assign(streams.streams[0].streams[1], { hero_embed: 42 })
+  const { bucket } = fixture(true, detail, false, 'sport/example', true, streams)
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
+  assert.equal(generation.readable, true)
+  const items = generation.get(endpoints[0])?.streams[0].streams
+  assert.equal(items[0].hero_embed, 'https://example.com/player')
+  assert.equal(Object.hasOwn(items[1], 'hero_embed'), false)
+  assert.equal(generation.get(endpoints[1])?.data.name, 'Example')
+})
+
 const unreachable = async () => { throw new Error('Unexpected network access') }
 
 test('normalizes a validated live detail to the pinned route', async () => {

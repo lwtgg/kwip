@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { canMountHeroFrame, heroFrameUrl, resolveHeroEmbed, selectTopEvent } from '../app/utils/topEvent.ts'
+import { canMountHeroFrame, heroFrameUrl, isZliveEmbed, resolveHeroEmbed, selectTopEvent } from '../app/utils/topEvent.ts'
 
 const zlive = 'https://zlive.st/embed/TSN4?quality=high&muted=0&muted=0#player'
 const taifood = 'https://taifood-blog.asia/embed/247-fox-cricket'
@@ -53,10 +53,38 @@ test('the frame URL preserves other queries and fragments and sets muted once', 
   assert.equal(heroFrameUrl(taifood, true, false), taifood)
 })
 
-test('the player requires intersection and visibility, and saveData vetoes autoplay', () => {
-  assert.equal(canMountHeroFrame(true, true, true, false), true)
-  assert.equal(canMountHeroFrame(false, true, true, false), false)
-  assert.equal(canMountHeroFrame(true, false, true, false), false)
-  assert.equal(canMountHeroFrame(true, true, true, true), false)
-  assert.equal(canMountHeroFrame(true, true, false, true), true)
+test('normalizes zlive URLs before ranking and framing', () => {
+  const candidates = [
+    ['http://zlive.st/embed/TSN4', 'https://zlive.st/embed/TSN4'],
+    ['HTTPS://ZLIVE.ST/EMBED/TSN4', 'https://zlive.st/EMBED/TSN4'],
+    ['https://zlive.st/embed/TSN4/', 'https://zlive.st/embed/TSN4'],
+    ['https://user:secret@zlive.st/embed/TSN4', 'https://zlive.st/embed/TSN4'],
+  ]
+  for (const [source, expected] of candidates) {
+    const event = { ...popular, viewers: '62', iframe: source }
+    assert.equal(isZliveEmbed(source), true)
+    assert.equal(resolveHeroEmbed(event), expected)
+    assert.equal(selectTopEvent([popular, event], [], [], [], 'all')?.stream, event)
+    assert.equal(heroFrameUrl(source, true, false), expected + '?muted=1')
+  }
+  for (const source of ['javascript://zlive.st/embed/TSN4', 'https://zlive.st.evil.test/embed/TSN4',
+    'https://zlive.st@evil.test/embed/TSN4', 'https://zlive.st:8443/embed/TSN4']) {
+    assert.equal(isZliveEmbed(source), false)
+    assert.equal(selectTopEvent([popular, { ...popular, viewers: '62', iframe: source }], [], [], [], 'all')?.stream, popular)
+  }
+  assert.equal(resolveHeroEmbed({ iframe: 'javascript://zlive.st/embed/TSN4' }), undefined)
+})
+
+test('preserves host placeholders through projection and hero query updates', () => {
+  const source = 'https://zlive.st/embed/{host}?parent={host}'
+  assert.equal(resolveHeroEmbed({ iframe: source }), source)
+  assert.equal(heroFrameUrl(source, true, false), source + '&muted=1')
+  assert.equal(resolveHeroEmbed({ iframe: 'https://{host}/{host}/embed' }), 'https://{host}/{host}/embed')
+})
+
+test('the player requires intersection, visibility and release from the data hold', () => {
+  assert.equal(canMountHeroFrame(true, true, false), true)
+  assert.equal(canMountHeroFrame(false, true, false), false)
+  assert.equal(canMountHeroFrame(true, false, false), false)
+  assert.equal(canMountHeroFrame(true, true, true), false)
 })

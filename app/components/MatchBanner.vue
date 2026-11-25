@@ -5,7 +5,7 @@ import { bannerAbbreviation, teamInitials } from '~/composables/matchBanner'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import type { matchBannerContent } from '~/composables/matchBanner'
 
-const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; content: ReturnType<typeof matchBannerContent> }>()
+const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; audienceInFooter?: boolean; content: ReturnType<typeof matchBannerContent> }>()
 const hangul = /\p{Script=Hangul}/u
 const logoImages: HTMLImageElement[] = []
 const lineupElement = ref<HTMLElement | null>(null)
@@ -108,7 +108,7 @@ onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <template>
-  <div class="match-banner" :style="art" :data-scale="scale">
+  <div class="match-banner" :data-audience-in-footer="audienceInFooter ? '' : undefined" :style="art" :data-scale="scale">
     <div ref="lineupElement" class="banner-lineup" aria-hidden="true">
       <template v-for="(side, index) in [match.away, match.home]" :key="index">
         <div class="banner-team" :class="index === 0 ? 'banner-away-team' : 'banner-home-team'">
@@ -122,7 +122,7 @@ onBeforeUnmount(() => observer?.disconnect())
         </span>
       </template>
       <div class="banner-status">
-        <div v-for="(line, index) in content.tiers" :key="index" class="banner-status-tier">
+        <div v-for="(line, index) in (audienceInFooter ? content.tiers.slice(0, 2) : content.tiers)" :key="index" class="banner-status-tier">
           <span v-if="line" class="banner-fit-text banner-status-line" :class="{ 'banner-versus': line === 'vs' }"
             :data-hangul="hangul.test(line) ? '' : undefined" :style="{ '--banner-chars': line.length }">{{ line }}</span>
         </div>

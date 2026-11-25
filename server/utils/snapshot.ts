@@ -60,14 +60,18 @@ function parseManifest(value: unknown) {
 
 type SnapshotPayload = Record<string, unknown> & { success: true }
 
-function sourceUrl(value: unknown) {
+function isSourceUrl(value: unknown) {
   const url = typeof value === 'string' ? URL.parse(value) : null
-  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) invalid()
+  return url?.protocol === 'https:' || url?.protocol === 'http:'
+}
+
+function sourceUrl(value: unknown) {
+  if (!isSourceUrl(value)) invalid()
 }
 
 function validateItemSources(item: Record<string, unknown>) {
   if (item.iframe) sourceUrl(item.iframe)
-  if (item.hero_embed !== undefined) sourceUrl(item.hero_embed)
+  if (!isSourceUrl(item.hero_embed)) delete item.hero_embed
   if (item.source != null) sourceUrl(record(item.source).data)
   if (item.sources !== undefined) {
     if (!Array.isArray(item.sources)) invalid()
