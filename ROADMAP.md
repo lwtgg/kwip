@@ -140,6 +140,15 @@ claim, not a result. Open in the CSS: `.banner-status > * { grid-column: var(--b
 `.banner-progress { grid-column: 1 / -1 }` (0,1,0), so the track may be confined to the middle column between
 the scores while the doc claims it runs abbreviation to abbreviation — settle that first in review one.
 
+**Paused again 2026-11-25, after 60 shipped.** 60 merged (`6f62cf3`) and deployed (`f2824e5e`); track, order,
+audience and the full gate are green. Production then showed the hero state about 4 px below the digit ink at
+1280: `inkOffset()` builds a canvas font from the whole computed family list, Chromium resolves Arial Narrow
+(ascent 120) instead of Acumin (115), and the offset is ~5 px wrong. The fixture harnesses resolved the first
+family, so three reviews and the gate passed it. Round four is briefed and unrun at
+`.prompts/60-r4.md` on `task/60-scoreboard` (`137fb9c`); the two checks in flight were killed with the machine.
+**Next session: run the production review and the process audit first, then round four, then verify on
+production before calling 60 done.** 61 follows.
+
 **Shipped 2026-11-24. Tasks 53 and 58 — the banner is the whole card.** Version `b4cba298`, branch merged
 `4737a5e`. A matched card is now only the banner, per the owner's mockup: state, scores either side of the
 provider detail, abbreviations and viewers on the outer edges, no category line, fixture sentence, UTC or
