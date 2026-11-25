@@ -59,6 +59,15 @@ tap and only on zlive, which remounts without `muted` inside the gesture. The ca
 column only; the player is a sibling, never inside the link. An auto-mounted top event does not itself count
 as the money click of rule 22 — that stays the first source click inside the event page. Where the source
 cannot play itself, the frame loads paused and nothing else about the slot changes.
+27. **There is no longer an identity column, so the hero link is the plate.** Rule 26 said the card link
+covers the identity column only; task 58 removed that column and a matched card is only the banner. On the
+hero the banner becomes the plate at the top of the card, carrying state, scores, detail, viewers and
+abbreviations as on any other card, and the link covers that plate. The player is the card's art directly
+under it at a reserved 16:9 box, full-bleed, a sibling of the link and never inside it. The sound opt-in is
+a real control in the plate, outside the link and the frame, so it never lands on the provider's own
+controls; no provider control is ever overlaid. The card's height may grow by the reserved box when the
+hero mounts, but nothing moves after that: the box is reserved whether or not a frame is present, so the
+plate and the player never resize against each other. Everything else in rule 26 stands.
 
 
 ## Deferred (do not build, just note)
