@@ -66,20 +66,33 @@ const playerBox = ref<HTMLElement | null>(null)
 const inViewport = ref(false)
 const visible = ref(false)
 const saveData = ref(false)
-const playbackStarted = ref(false)
+const startedEmbed = ref<string>()
 const sound = ref(false)
 const soundOnLabel = 'Sound on'
 const frameKey = ref(0)
 const zlive = computed(() => !!props.heroEmbed && isZliveEmbed(props.heroEmbed))
-const held = computed(() => zlive.value && saveData.value && !playbackStarted.value)
-const frameMounted = computed(() => !!props.heroEmbed &&
-  canMountHeroFrame(inViewport.value, visible.value, held.value))
+const held = computed(() => saveData.value && zlive.value && startedEmbed.value !== props.heroEmbed)
+const heroUri = () => props.stream?.uri_name
+const heroPlayer = computed(() => props.heroEmbed && { uri: heroUri(), embed: props.heroEmbed })
+const mountedPlayer = computed<typeof heroPlayer.value | undefined>((previous) => {
+  const player = heroPlayer.value
+  // A Save-Data change can hold the next mount without interrupting the current frame.
+  if (player && canMountHeroFrame(inViewport.value, visible.value, held.value && previous !== player)) {
+    return player
+  }
+})
+const frameMounted = computed(() => !!mountedPlayer.value)
 const frameSrc = computed(() => props.heroEmbed && heroFrameUrl(props.heroEmbed, !!props.heroLive, sound.value))
 
-function handlePlayback() {
+function handlePlayback(event: MouseEvent) {
   if (!frameMounted.value) {
-    playbackStarted.value = true
-    playerBox.value?.scrollIntoView({ block: 'nearest' })
+    startedEmbed.value = props.heroEmbed
+    const button = event.currentTarget as HTMLButtonElement
+    const top = button.getBoundingClientRect().top
+    const clearance = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop)
+    if (top < clearance || (playerBox.value && playerBox.value.getBoundingClientRect().top >= window.innerHeight)) {
+      window.scrollBy({ top: top - clearance, behavior: 'instant' })
+    }
     return
   }
   sound.value = !sound.value
@@ -87,11 +100,7 @@ function handlePlayback() {
 }
 
 if (props.hero) {
-  const heroUri = () => props.stream?.uri_name
-  watch(heroUri, () => { playbackStarted.value = false }, { flush: 'sync' })
-  watch([frameMounted, heroUri], ([mounted]) => {
-    if (mounted) playbackStarted.value = true
-  }, { flush: 'post' })
+  watch(heroPlayer, () => { startedEmbed.value = undefined }, { flush: 'sync' })
 
   // Returning to the slot always starts muted. The only unmuting path is a tap.
   watch([frameMounted, () => props.heroEmbed, heroUri, () => props.heroLive], () => {

@@ -116,8 +116,11 @@ def check_below_fold(page, box, frame, button, expected):
     expect(box).to_be_in_viewport()
     expect(button).to_be_focused()
     expect(button).to_have_accessible_name('Sound on')
-    # A second user activation opts in to sound even if the first scroll moved the control away.
-    page.keyboard.press('Enter')
+    assert button.evaluate('''button => {
+      const { x, y, width, height } = button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    }'''), 'The Play tap left the sound control covered or outside the viewport'
+    button.click()
     expect(button).to_have_accessible_name('Mute')
     expect(frame).to_have_attribute('src', ZLIVE)
 
@@ -168,8 +171,9 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         refresh_feed(page)
         assert feed_requests == [feed + '/streams'], feed_requests
         if root_text:
-            page.add_style_tag(content='html { font-size: 200%; }')
-            assert page.evaluate('getComputedStyle(document.documentElement).fontSize') == '32px'
+            root = page.locator('html')
+            root.evaluate("element => { element.style.fontSize = '200%'; }")
+            expect(root).to_have_css('font-size', '32px')
         hero = page.get_by_role('region', name='Featured event')
         card = hero.locator('.hero-card')
         link = hero.get_by_role('link')
@@ -341,16 +345,29 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         assert page.evaluate(CLS_SCORE) == 0
         assert not errors, errors
         if variant == 'zlive' and not root_text:
+            mounted_frame = frame.element_handle()
+            change_save_data = '''enabled => {
+              navigator.connection.saveData = enabled;
+              navigator.connection.dispatchEvent(new Event('change'));
+            }'''
+            page.evaluate(change_save_data, True)
+            expect(button).to_have_accessible_name('Sound on')
+            assert mounted_frame.evaluate('el => el.isConnected')
+            page.evaluate('window.heroHidden = true; document.dispatchEvent(new Event("visibilitychange"))')
+            expect(frame).to_have_count(0)
+            page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
+            expect(button).to_have_accessible_name('Play')
+            expect(frame).to_have_count(0)
+
+            page.evaluate(change_save_data, False)
+            expect(frame).to_have_attribute('src', expected)
             button.click()
             expect(button).to_have_accessible_name('Mute')
-            started_frame = frame.element_handle()
-            page.evaluate('''() => {
-              navigator.connection.saveData = true;
-              navigator.connection.dispatchEvent(new Event('change'));
-            }''')
+            audible_frame = frame.element_handle()
+            page.evaluate(change_save_data, True)
             expect(frame).to_have_attribute('src', ZLIVE)
             expect(button).to_have_accessible_name('Mute')
-            assert started_frame.evaluate('el => el.isConnected')
+            assert audible_frame.evaluate('el => el.isConnected')
 
             # Keep the same source so the URI change alone must reset playback permission.
             original_listing = listing
@@ -371,6 +388,25 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             expect(link).to_have_attribute('href', f'/live/{EVENT}')
             expect(button).to_have_accessible_name('Play')
             expect(frame).to_have_count(0)
+        if variant in ('taifood-save-data', 'save-data') and not root_text:
+            upgraded_embed = ZLIVE if taifood else ZLIVE.replace('/TSN4', '/TSN5')
+            category = listing['streams'][0]
+            listing = dict(listing, streams=[dict(category, streams=[
+                dict(event, hero_embed=upgraded_embed) if stream['uri_name'] == EVENT else stream
+                for stream in category['streams']
+            ])])
+            player_requests.clear()
+            refresh_feed(page)
+            expect(link).to_have_attribute('href', f'/live/{EVENT}')
+            expect(button).to_have_accessible_name('Play')
+            expect(frame).to_have_count(0)
+            assert not player_requests, player_requests
+            button.click()
+            upgraded_muted = upgraded_embed + '&muted=1'
+            expect(frame).to_have_attribute('src', upgraded_muted)
+            expect(frame.content_frame.get_by_role('heading', name='Third-party fixture')).to_be_visible()
+            assert player_requests == [upgraded_muted], player_requests
+            expect(button).to_have_accessible_name('Sound on')
         link.click()
         page.wait_for_url(re.compile(f'/live/{EVENT}$'))
         assert not ad_requests
@@ -416,7 +452,9 @@ def main():
                             check(browser, oracle, origin, feed, listing, event, width, variant,
                                   root_text=True, below_fold=True)
                     if variant == 'zlive':
-                        check(browser, oracle, origin, feed, listing, event, 844, variant, height=390, below_fold=True)
+                        for width, height in ((844, 390), (667, 375), (932, 430), (1280, 500)):
+                            check(browser, oracle, origin, feed, listing, event, width, variant,
+                                  height=height, below_fold=True)
 
 
 if __name__ == '__main__':
