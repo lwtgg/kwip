@@ -146,8 +146,15 @@ audience and the full gate are green. Production then showed the hero state abou
 (ascent 120) instead of Acumin (115), and the offset is ~5 px wrong. The fixture harnesses resolved the first
 family, so three reviews and the gate passed it. Round four is briefed and unrun at
 `.prompts/60-r4.md` on `task/60-scoreboard` (`137fb9c`); the two checks in flight were killed with the machine.
-**Next session: run the production review and the process audit first, then round four, then verify on
-production before calling 60 done.** 61 follows.
+**Updated 2026-11-25 12:45.** Round three passed, 60 merged and deployed, then production showed the row sitting
+high (4 px above vs 8 px under; 23.6 vs 35.6 on the 1280 hero). Two reviews refuted the first diagnosis — Acumin's
+`@unicode-range` is digits-only, so layout and canvas both use Arial Narrow and the ink model was right. Round four
+fixed the real fault (symmetric padding, hero leading, layout baseline instead of canvas ascent, a pixel oracle in
+Chromium and WebKit); round five gave the leading headroom after a WebKit 1.617x gap. **On `task/60-scoreboard` at
+`816a55b`, unreviewed, undeployed.** Review five was started and killed with the session; the prompt is
+`/tmp/60-review5.md` if it survives, otherwise rewrite it from `.prompts/60-r5.md`. Then production pixel
+verification in both engines with engine/DPR/OS recorded, then merge. 61 follows. Open follow-ups: header overflows
+at 200 % root text (pre-existing), rail rows not in the ratio table.
 
 **Shipped 2026-11-24. Tasks 53 and 58 — the banner is the whole card.** Version `b4cba298`, branch merged
 `4737a5e`. A matched card is now only the banner, per the owner's mockup: state, scores either side of the
