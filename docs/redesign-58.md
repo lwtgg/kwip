@@ -26,17 +26,17 @@ Condensed, bold); all other text is SF Pro, regular weight, `--text-metadata` si
 `matchBannerContent()` in `app/composables/matchBanner.ts`, unit-tested. Every text node shares one fit pass
 (`.banner-fit-text`, `--banner-line-fit`). The initials fallback lives in the logo column, so it never enters the score column.
 
-The fit pass measures scores, abbreviations and status words against the actual card width.
+The fit pass measures scores, abbreviations and status tiers against the actual card width.
 Scores share a scale between 0.60 and 0.85. Abbreviations reserve enough width to fit on one
 line at 0.60. The status column reserves at least four ems and enough width for its widest
-word at the floor. It can use more of the middle at 1024 px to keep a long detail on one line.
+unbreakable unit at the floor. It can use more of the middle at 1024 px to keep a long detail on one line.
 Status leading is 1.3.
 
 If the five columns run out of room, logos and scores share the first row, abbreviations sit
 under the logos, and the state, detail and audience get full-width tiers below. The score
 gutter is 0.5 em horizontally in the five-column layout and vertically before the stacked
-status group. A status line can break between words at the floor. Unspaced scripts use
-word segmentation, and an exceptionally wide Latin word uses a narrower monospace face.
+status group. A status line wraps at the floor using the browser’s native line breaking. An exceptionally
+wide unit uses a narrower monospace face when it exceeds the full row.
 Initials fit within the logo box.
 
 Accessibility: one link. An `sr-only` heading carries the banner's own content, in its words and order, one sentence each
@@ -355,3 +355,63 @@ the standard normal-text ratio, wide score-centre and narrow stacking checks.
   overflow, hydration errors or uncaught page errors. Minimum rendered contrast
   was 4.55:1. Only `matched-widest` stacked at 1024 px, with per-element
   text doubling. Logs and screenshots are under `/tmp/kw58-fix5`.
+
+## Sixth review pass
+
+Each status tier renders its source as a single text node. SSR and the initial
+client render use identical markup by construction. The fit pass measures each
+tier at `white-space: normal` and `width: min-content`, then restores its styles.
+The widest unbreakable unit sets the status track minimum at the fit floor,
+with one pixel of slack. The pass measures again in monospace if the unit exceeds
+the full row. Wrapped tiers use native line breaking and keep
+`text-wrap: balance` and the width set by the fit floor.
+
+The Chromium probe checks the exact source text of the state, detail and audience
+tiers and measures one DOM Range per non-whitespace grapheme. It runs at 3× on
+320, 390 and 1280 px viewports at normal and 200% root text. It covers SSR with
+page JavaScript disabled, hydration with `Intl.Segmenter` removed, and normal
+hydration. A separate Chromium page provides grapheme offsets for every render.
+The fixtures cover Thai SARA AM, Lao, Devanagari, Arabic, emoji, decomposed
+Hangul, a precomposed Hangul syllable followed by a trailing jamo, Khmer coeng,
+and mixed Latin, Thai and Hangul.
+
+The negative control wraps each code point in a non-wrapping inline block.
+The same rectangle assertion reported these detail ranges, in UTF-16 offsets.
+Each range spans multiple rectangles under the control.
+
+| Fixture | Failing ranges, start inclusive and end exclusive |
+|---|---|
+| Thai SARA AM | `[0,2)`, `[2,4)`, `[6,8)`, `[9,11)`, `[13,16)`, `[16,18)` |
+| Thai | `[1,4)`, `[6,8)`, `[9,11)`, `[16,18)` |
+| Lao | `[0,2)`, `[2,4)`, `[6,8)`, `[9,11)` |
+| Devanagari | `[0,2)`, `[3,5)`, `[6,8)`, `[8,10)` |
+| Decomposed Hangul | `[0,2)`, `[2,5)`, `[5,8)` |
+| Hangul with trailing jamo | `[0,2)` |
+| Khmer coeng | `[0,3)` |
+| Mixed Latin, Thai and Hangul | `[3,5)`, `[5,7)`, `[9,11)`, `[11,14)` |
+| Emoji | `[2,8)`, `[8,12)` |
+
+At 390 px with 200% root text, `matched-live` stayed unstacked with a 58 px
+status track and one Halftime line in both themes and densities. At 1024 px,
+`matched-widest` at per-element 200% text was the only stack in the matrix,
+once in each theme and density.
+
+| Temporary CSS mutation | First failing assertion |
+|---|---|
+| Zero the stacked score gutter | `matched-long-status` score gap of 0.75 px against the required 13 px |
+| Zero the stacked status padding | `matched-widest` label-to-status gap of 0.89 px against the required 6.5 px |
+
+### Verification gate
+
+- The full card suite passed the fresh and stale sweeps and all three matched
+  text modes at 320, 390, 1024 and 1280 px. The 1,104 matched listing observations
+  and 16 matched heroes had zero horizontal overflow, hydration errors or uncaught
+  page errors. Minimum rendered contrast was 4.55:1.
+- The banner, density, not-live, click-under, generation-first and source-health
+  browser suites passed. Click-under used the `1942ccb` baseline, generation-first
+  used a local packed generation, and source health used a locally seeded build.
+  The card contrast sweep and Worker build-key check passed.
+- `pnpm test` passed all 189 tests. The default Cloudflare build,
+  `NITRO_PRESET=node-server pnpm build`, default rebuild,
+  `pnpm exec wrangler deploy --dry-run` and `git diff --check` passed.
+  Logs and screenshots are under `/tmp/kw58-fix6`.

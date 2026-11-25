@@ -297,27 +297,15 @@ def banner_geometry(card):
           const name = n.closest('.banner-team')?.className.match(/banner-(away|home)-team/)[0]
             || (n.matches('.banner-status-line') ? 'tier-' + [...n.closest('.banner-status').children].indexOf(n.parentElement)
               : n.parentElement.className.match(/banner-(away|home)-(label|score)/)[0]);
-          const words = [...n.querySelectorAll('.banner-status-word')];
-          const wordBoxes = words.map(word => {
-            const part = document.createRange();
-            part.selectNodeContents(word);
-            return [...part.getClientRects()];
-          });
-          const lineBoxes = words.length ? wordBoxes.flat() : [...range.getClientRects()];
-          const bounds = words.length ? DOMRect.fromRect({
-            x: Math.min(...lineBoxes.map(box => box.left)),
-            y: Math.min(...lineBoxes.map(box => box.top)),
-            width: Math.max(...lineBoxes.map(box => box.right)) - Math.min(...lineBoxes.map(box => box.left)),
-            height: Math.max(...lineBoxes.map(box => box.bottom)) - Math.min(...lineBoxes.map(box => box.top)),
-          }) : range.getBoundingClientRect();
+          const lineBoxes = [...range.getClientRects()];
           const breaksWord = node => node && [...node.textContent.matchAll(/\S+/g)].some(word => {
             const part = document.createRange();
             part.setStart(node, word.index);
             part.setEnd(node, word.index + word[0].length);
             return part.getClientRects().length !== 1;
           });
-          return [name, {...rect(logo ? n.getBoundingClientRect() : bounds),
-            brokenWords:!logo && (words.length ? wordBoxes.some(boxes => boxes.length !== 1) : breaksWord(n.firstChild)),
+          return [name, {...rect(logo ? n.getBoundingClientRect() : range.getBoundingClientRect()),
+            brokenWords:!logo && !n.matches('.banner-status-line') && breaksWord(n.firstChild),
             lines:logo ? 1 : new Set(lineBoxes.map(box => box.top)).size, font:getComputedStyle(n).fontFamily,
             weight:parseInt(getComputedStyle(n).fontWeight),
             wrap:n.hasAttribute('data-wrap'),
@@ -368,28 +356,47 @@ def banner_measurements(geometry):
                 stacked=geometry['stacked'])
 
 
-def assert_grapheme_boundaries(oracle, tier, source, fixture):
-    # Whitespace between spans is rendered as text nodes so it can collapse and wrap.
-    parts = tier.evaluate("""tier => Array.from(
-      tier.querySelector('.banner-status-line')?.childNodes ?? []
-    ).filter(node => node.nodeType !== Node.COMMENT_NODE).map(node => ({
-      text: node.textContent,
-      valid: node.nodeType === Node.TEXT_NODE
-        ? !node.textContent.trim()
-        : node.matches('.banner-status-word') && !!node.textContent
-    }))""")
-    words = [part['text'] for part in parts]
-    assert all(part['valid'] for part in parts) and ''.join(words) == source, (
-        'status spans changed source', fixture, source, parts)
-    invalid = oracle.evaluate("""([source, words]) => {
-      const boundaries = new Set(Array.from(
-        new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(source),
-        part => part.index));
-      boundaries.add(source.length);
+def assert_rendered_graphemes(oracle, card, sources, fixture):
+    tiers = card.locator('.banner-status-tier')
+    actual = tiers.all_text_contents()
+    assert actual == list(sources), ('status text changed', fixture, sources, actual)
+    clusters = oracle.evaluate("""sources => {
+      const segmenter = new Intl.Segmenter(undefined, {granularity: 'grapheme'});
+      return sources.map(source => Array.from(segmenter.segment(source)).flatMap(({index, segment}) =>
+        segment.trim() ? [[index, index + segment.length]] : []
+      ));
+    }""", list(sources))
+    invalid = tiers.evaluate_all("""(tiers, clusters) => tiers.flatMap((tier, index) => {
+      const walker = document.createTreeWalker(tier, NodeFilter.SHOW_TEXT);
+      const nodes = [];
       let offset = 0;
-      return words.map(word => offset += word.length).filter(end => !boundaries.has(end));
-    }""", [source, words])
-    assert not invalid, ('status span splits a grapheme', fixture, invalid, words)
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        nodes.push({node, offset});
+        offset += node.length;
+      }
+      return clusters[index].flatMap(([start, end]) => {
+        const first = nodes.find(({node, offset}) => start < offset + node.length);
+        const last = nodes.find(({node, offset}) => end <= offset + node.length);
+        const range = document.createRange();
+        range.setStart(first.node, start - first.offset);
+        range.setEnd(last.node, end - last.offset);
+        const count = range.getClientRects().length;
+        return count === 1 ? [] : [[index, start, end, count]];
+      });
+    })""", clusters)
+    assert not invalid, ('rendered grapheme rect count', fixture, invalid)
+
+
+def status_sources(event):
+    match = event['match']
+    state = {'in': 'Live', 'pre': 'Upcoming', 'post': 'Final'}[match['state']]
+    scored = all(match[side]['score'] is not None for side in ('away', 'home'))
+    detail = 'vs' if match['state'] == 'pre' and not scored else match['detail']
+    viewers = int(event['viewers'])
+    compact = '62' if viewers == 62 else '123.5m'
+    audience = f'{compact} {"Viewer" if viewers == 1 else "Viewers"}'
+    return state, '' if detail == state else detail, audience
 
 
 def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False):
@@ -410,11 +417,9 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
 
     match = event['match']
     scored = all(match[side]['score'] is not None for side in ('away', 'home'))
-    state = {'in': 'Live', 'pre': 'Upcoming', 'post': 'Final'}[match['state']]
-    detail = 'vs' if match['state'] == 'pre' and not scored else match['detail']
+    state, detail, audience = status_sources(event)
     viewers = int(event['viewers'])
-    compact = '62' if viewers == 62 else '123.5m'
-    audience = f'{compact} {"Viewer" if viewers == 1 else "Viewers"}'
+    compact = audience.split()[0]
     # The name is the banner's own content, in its words and order, one sentence each.
     teams = (', '.join(f"{match[side]['name']} {match[side]['score']}" for side in ('away', 'home')) if scored
              else f"{match['away']['name']} vs {match['home']['name']}")
@@ -429,9 +434,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
 
     banner = card.locator('.match-banner')
     assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
-    tiers = banner.locator('.banner-status-tier')
-    for index, source in enumerate((state, '' if detail == state else detail, audience)):
-        assert_grapheme_boundaries(oracle, tiers.nth(index), source, event['uri_name'])
+    assert_rendered_graphemes(oracle, card, (state, detail, audience), event['uri_name'])
     assert banner.locator('.banner-score').all_text_contents() == (
         [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
     # Never blank under a logo: an empty abbreviation falls back to the name's initials.
@@ -534,6 +537,43 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     return dict(**measurements, contrast=assert_banner_contrast(banner))
 
 
+def collect_render_errors(page, errors):
+    page.on('console', lambda message: errors.append(message.text)
+            if message.type in ('error', 'warning') and 'hydrat' in message.text.lower() else None)
+    page.on('pageerror', lambda error: errors.append(str(error)))
+
+
+def settle_fit(page):
+    page.evaluate('() => new Promise(resolve => { let n = 6; const tick = () => --n ? requestAnimationFrame(tick) : resolve(); tick() })')
+
+
+def check_codepoint_control(oracle, page, events):
+    page.locator('.banner-status-line').evaluate_all("""lines => {
+      for (const line of lines) {
+        line.replaceChildren(...Array.from(line.textContent, point => {
+          const span = document.createElement('span');
+          span.style.display = 'inline-block';
+          span.style.whiteSpace = 'nowrap';
+          span.textContent = point;
+          return span;
+        }));
+      }
+    }""")
+    failures = {}
+    for event in events:
+        slug = event['uri_name']
+        card = page.locator(f'a.event-card[href$="/{slug}"]')
+        try:
+            assert_rendered_graphemes(oracle, card, status_sources(event), slug)
+        except AssertionError as error:
+            reason, fixture, offsets = error.args[0]
+            assert reason == 'rendered grapheme rect count', error
+            failures[fixture] = offsets
+    for slug in ('thai-sara-am', 'hangul-jamo', 'hangul-trailing', 'khmer', 'mixed'):
+        assert f'basketball/matched-{slug}' in failures, ('code-point control stayed green', slug, failures)
+    print(f'Code-point control failures (tier, UTF-16 start, end, rect count): {failures}', flush=True)
+
+
 def check_matches(browser, origin, assets, dest, text_modes, measure_only=False):
     now = int(time.time())
     listing = json.loads((assets / 'fixtures/streams.json').read_text())
@@ -564,10 +604,13 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
         ('matched-lao', dict(match, detail='ກຳລັງແຂ່ງຂັນ')),
         ('matched-devanagari', dict(match, detail='दूसरा हाफ़')),
         ('matched-arabic', dict(match, detail='الشوط الثاني')),
+        ('matched-hangul-jamo', dict(match, detail='후반전')),
+        ('matched-hangul-trailing', dict(match, detail='훅')),
+        ('matched-khmer', dict(match, detail='ក្រ')),
+        ('matched-mixed', dict(match, detail='OT กำลัง 후반')),
         ('matched-emoji', dict(match, detail='延長👩🏽‍⚽🇹🇭')),
     ]
     growth_fixtures = {'matched-widest', 'matched-cjk'}
-    stack_at_1024 = growth_fixtures | {'matched-thai', 'matched-katakana'}
     events = [dict(template, id=9000+i, match=game, name='Colorado State Rams at Arizona Wildcats', uri_name=f'basketball/{slug}', viewers='62',
                    starts_at=now-3600, ends_at=now+3600, poster='/never-fetch-provider-thumbnail.jpg') for i, (slug, game) in enumerate(cases)]
     for event in events:
@@ -577,6 +620,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     # Keep the oracle in a separate, unmodified Chromium page, including for SSR.
     oracle = browser.new_page() if not measure_only else None
+    hydration_errors = []
     if oracle:
         # Keep the established geometry fixture and probe the longer SARA AM detail separately.
         thai_detail = 'กำลังแข่งขัน น้ำท่วมสนาม'
@@ -585,27 +629,35 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
         oracle_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[thai_event, *events])])
         (assets / 'fixtures/streams.json').write_text(json.dumps(oracle_listing))
         for render in ('SSR', 'fallback', 'hydrated'):
-            with browser.new_context(viewport={'width': 1280, 'height': 850},
-                                     device_scale_factor=3, java_script_enabled=render != 'SSR') as context:
-                if render == 'fallback':
-                    context.add_init_script('delete Intl.Segmenter')
-                page = context.new_page()
-                assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
-                for slug, game in [('matched-thai-sara-am', thai_event['match']), *cases]:
-                    card = page.locator(f'a.event-card[href$="/{slug}"]')
-                    if render != 'SSR':
-                        expect(card.locator('.banner-lineup')).to_have_attribute('style', re.compile('--banner-lineup-min'))
-                    detail = card.locator('.banner-status-tier').nth(1)
-                    source = 'vs' if game['state'] == 'pre' else game['detail']
-                    if source == {'in': 'Live', 'pre': 'Upcoming', 'post': 'Final'}[game['state']]:
-                        source = ''
-                    assert_grapheme_boundaries(oracle, detail, source, f'{slug} {render}')
-                    if slug == 'matched-thai-sara-am' and render == 'SSR':
-                        detail.screenshot(path=str(dest / 'thai-first-paint-3x.png'))
+            for width in (320, 390, 1280):
+                with browser.new_context(viewport={'width': width, 'height': 850},
+                                         device_scale_factor=3, java_script_enabled=render != 'SSR') as context:
+                    if render == 'fallback':
+                        context.add_init_script('delete Intl.Segmenter')
+                    page = context.new_page()
+                    collect_render_errors(page, hydration_errors)
+                    assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
+                    page.evaluate('document.fonts.ready')
+                    for mode in ('normal', 'root'):
+                        if mode == 'root':
+                            page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                            assert page.evaluate('getComputedStyle(document.documentElement).fontSize') == '32px'
+                            if render != 'SSR':
+                                settle_fit(page)
+                        for event in (thai_event, *events):
+                            slug = event['uri_name']
+                            card = page.locator(f'a.event-card[href$="/{slug}"]')
+                            if render != 'SSR':
+                                expect(card.locator('.banner-lineup')).to_have_attribute('style', re.compile('--banner-lineup-min'))
+                            assert_rendered_graphemes(oracle, card, status_sources(event), (slug, render, width, mode))
+                            if event is thai_event and (render, width, mode) == ('SSR', 320, 'normal'):
+                                card.locator('.banner-status-tier').nth(1).screenshot(path=str(dest / 'thai-first-paint-3x.png'))
+                    if (render, width) == ('hydrated', 320):
+                        check_codepoint_control(oracle, page, [thai_event, *events])
+        print('Rendered graphemes passed at 3× in SSR, fallback and hydrated renders', flush=True)
         (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
     hero_results = []
-    hydration_errors = []
     for width in (320, 390, 1024, 1280):
         for theme in ('dark', 'light'):
             for density in ('comfortable', 'compact'):
@@ -616,9 +668,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                     context.on('request', lambda req: requests.append(req.url))
                     page = context.new_page()
                     if not measure_only:
-                        page.on('console', lambda message: hydration_errors.append(message.text)
-                                if message.type in ('error', 'warning') and 'hydrat' in message.text.lower() else None)
-                        page.on('pageerror', lambda error: hydration_errors.append(str(error)))
+                        collect_render_errors(page, hydration_errors)
                     prefix = f'{width}-{theme}-{density}'
                     for mode in text_modes:
                         assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
@@ -628,7 +678,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                         elif mode == 'element':
                             double_text(page)
                         # Let ResizeObserver and the fit pass settle after changing font sizes.
-                        page.evaluate('() => new Promise(resolve => { let n = 6; const tick = () => --n ? requestAnimationFrame(tick) : resolve(); tick() })')
+                        settle_fit(page)
                         if not measure_only and mode != 'root':
                             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), (prefix, mode, 'page overflow')
                         for event, (slug, _) in zip(events, cases):
@@ -646,8 +696,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                     expect(card.locator('.banner-away-team .banner-initials')).to_have_text('WW' if slug == 'matched-missing-logo' else 'CS')
                                 geometry = assert_clean_banner(card, event, oracle, listing_row=mode == 'normal',
                                                                allow_growth=slug in growth_fixtures, root_text=mode == 'root')
+                                if width == 1024:
+                                    assert geometry['stacked'] == (slug == 'matched-widest' and mode == 'element'), (
+                                        'unexpected 1024px stacking', prefix, mode, slug, geometry)
                                 if (width == 1280
-                                        or (width == 1024 and slug not in stack_at_1024)
                                         or (mode == 'normal' and width in (320, 390) and slug not in growth_fixtures)
                                         or (mode == 'root' and width == 390 and slug == 'matched-live')):
                                     assert not geometry['stacked'], ('unexpected stacking', prefix, mode, slug)

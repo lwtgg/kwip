@@ -598,11 +598,6 @@
   text-wrap: balance;
 }
 
-.banner-status-word {
-  display: inline-block;
-  white-space: nowrap;
-}
-
 .banner-fit-text.banner-score {
   transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-score-compression)));
 }

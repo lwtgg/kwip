@@ -19,26 +19,14 @@ function room(slot: HTMLElement) {
   return slot.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
 }
 
-const wordSegmenter = typeof Intl.Segmenter === 'function'
-  ? new Intl.Segmenter('en', { granularity: 'word' })
-  : undefined
-// Use the same segmentation during SSR and hydration, regardless of browser support.
-const segmentAfterHydration = ref(false)
-const unspacedScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}]/u
-// SARA AM joins the preceding cluster despite being classified as a letter.
-const clusterTail = String.raw`[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u0E33\u0EB3]`
-const fallbackClusters = new RegExp(
-  String.raw`(?:\p{Regional_Indicator}{2}|.)${clusterTail}*(?:\u200D(?:\p{Extended_Pictographic}${clusterTail}*)?)*`,
-  'gu',
-)
-const statusWords = computed(() => props.content.tiers.map(line =>
-  (line.match(/\s+|\S+/g) ?? []).flatMap(word => unspacedScript.test(word)
-    ? (segmentAfterHydration.value && wordSegmenter
-        ? Array.from(wordSegmenter.segment(word), part => part.segment)
-        : (word.match(fallbackClusters) ?? [word]))
-    : [word])))
-function longestWord(line: HTMLElement) {
-  return Math.max(0, ...Array.from(line.children, word => word.getBoundingClientRect().width))
+/** Ask the layout engine for the widest unit it will keep together. */
+function unbreakableWidth(line: HTMLElement) {
+  line.style.whiteSpace = 'normal'
+  line.style.width = 'min-content'
+  const width = line.offsetWidth
+  line.style.removeProperty('width')
+  line.style.removeProperty('white-space')
+  return width
 }
 
 function fitText() {
@@ -63,10 +51,13 @@ function fitText() {
     delete line.dataset.mono
     line.style.setProperty('--banner-line-fit', '1')
   }
-  for (const line of status) {
-    // A single exceptionally wide word can exceed even the full stacked row.
-    if (longestWord(line) * floor > available) line.dataset.mono = ''
-  }
+  const statusWidths = status.map(line => {
+    const width = unbreakableWidth(line)
+    // A single exceptionally wide unit can exceed even the full stacked row.
+    if (Math.ceil(width * floor) + 1 <= available) return width
+    line.dataset.mono = ''
+    return unbreakableWidth(line)
+  })
 
   const natural = new Map(lines.map(line => [line, line.offsetWidth + 1]))
   const widestScore = Math.max(0, ...scores.map(line => natural.get(line)!))
@@ -74,7 +65,7 @@ function fitText() {
   const gutter = scores.length ? parseFloat(getComputedStyle(scores[0]!.parentElement!).paddingInlineEnd) : 0
   const labelMin = Math.ceil(Math.max(...labels.map(line => natural.get(line)!)) * floor)
   const logo = lineup.querySelector('.banner-team > *')!.getBoundingClientRect().width
-  const wordMin = Math.ceil(Math.max(...status.map(longestWord)) * floor) + 1
+  const wordMin = Math.ceil(Math.max(...statusWidths) * floor) + 1
   const statusPreferred = Math.ceil(Math.max(...status.map(line => natural.get(line)!)) * floor)
   const sideMin = Math.max(logo, labelMin) + scoreMin + gutter
   const statusRoom = available - 2 * sideMin
@@ -99,7 +90,6 @@ function fitText() {
 }
 let observer: ResizeObserver | undefined
 onMounted(() => {
-  segmentAfterHydration.value = !!wordSegmenter
   for (const [index, side] of [match.value.away, match.value.home].entries()) {
     const image = logoImages[index]
     if (side.logo && image?.complete && image.naturalWidth === 0) failed.value[side.logo] = true
@@ -109,7 +99,7 @@ onMounted(() => {
   if (lineupElement.value) observer.observe(lineupElement.value)
   void document.fonts.ready.then(fitText)
 })
-watch([match, () => props.content, failed, segmentAfterHydration], fitText, { flush: 'post', deep: true })
+watch([match, () => props.content, failed], fitText, { flush: 'post', deep: true })
 onBeforeUnmount(() => observer?.disconnect())
 </script>
 
@@ -130,8 +120,7 @@ onBeforeUnmount(() => observer?.disconnect())
       <div class="banner-status">
         <div v-for="(line, index) in content.tiers" :key="index" class="banner-status-tier">
           <span v-if="line" class="banner-fit-text banner-status-line" :class="{ 'banner-versus': line === 'vs' }"
-            :style="{ '--banner-chars': line.length }"><template v-for="(word, part) in statusWords[index]" :key="part"><template v-if="!word.trim()">{{ word }}</template><span
-              v-else class="banner-status-word">{{ word }}</span></template></span>
+            :style="{ '--banner-chars': line.length }">{{ line }}</span>
         </div>
       </div>
     </div>
