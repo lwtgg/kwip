@@ -315,3 +315,43 @@ against a 13 px requirement.
   had produced a 404 for `/live/247-cows`.
 - `git diff --check` passed. Matrix artifacts and verification logs are under
   `/tmp/kw58-resume.d50L5V`.
+
+## Fifth review pass
+
+The server and initial client render keep Thai and Lao SARA AM with the
+preceding base. The fallback also keeps the tested emoji modifier, ZWJ
+sequence and regional-indicator pair together. After hydration,
+`Intl.Segmenter` provides word boundaries wherever it is available.
+Without it, Thai and katakana can still wrap mid-word.
+
+The card suite reconstructs each tested tier from its status spans and
+intervening whitespace, then checks every boundary against Chromium's
+`Intl.Segmenter` in grapheme mode. The fixture set covers Thai SARA AM
+after a consonant and after a tone mark, Lao SARA AM, Devanagari, Arabic,
+and a mixed Japanese and emoji detail. An unmodified Chromium page supplies
+the same oracle when the test page has JavaScript or `Intl.Segmenter` disabled.
+The longer Thai detail runs in the SSR, hydrated and no-Segmenter probes.
+The layout matrix retains the original Thai detail and its three-line limit
+at 200% root text.
+
+Thai and katakana retain only the 1024 px stacking exemption. They share
+the standard normal-text ratio, wide score-centre and narrow stacking checks.
+
+### Verification gate
+
+- Both SSR controls failed the grapheme assertion on the new Thai fixture.
+  `Array.from` split seven boundaries. Removing just U+0E33 and U+0EB3 from
+  the corrected fallback split the two boundaries before Thai SARA AM.
+- `pnpm test` passed all 189 tests. The default Cloudflare build,
+  `NITRO_PRESET=node-server pnpm build`, default rebuild and
+  `pnpm exec wrangler deploy --dry-run` passed.
+- The banner, density, not-live, click-under, generation-first and
+  source-health suites passed, as did the contrast sweep and Worker build-key
+  check. Click-under used the `1942ccb` baseline, generation-first used a
+  local packed generation, and source health used a locally seeded build.
+- The full card suite passed the fresh and stale sweeps and all three text
+  modes at 320, 390, 1024 and 1280 px. Across 912 listing observations and
+  16 matched heroes, it recorded zero broken words, horizontal card
+  overflow, hydration errors or uncaught page errors. Minimum rendered contrast
+  was 4.55:1. Only `matched-widest` stacked at 1024 px, with per-element
+  text doubling. Logs and screenshots are under `/tmp/kw58-fix5`.

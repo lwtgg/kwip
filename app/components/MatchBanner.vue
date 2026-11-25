@@ -24,12 +24,18 @@ const wordSegmenter = typeof Intl.Segmenter === 'function'
   : undefined
 // Use the same segmentation during SSR and hydration, regardless of browser support.
 const segmentAfterHydration = ref(false)
-const unspacedScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u
+const unspacedScript = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}]/u
+// SARA AM joins the preceding cluster despite being classified as a letter.
+const clusterTail = String.raw`[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u0E33\u0EB3]`
+const fallbackClusters = new RegExp(
+  String.raw`(?:\p{Regional_Indicator}{2}|.)${clusterTail}*(?:\u200D(?:\p{Extended_Pictographic}${clusterTail}*)?)*`,
+  'gu',
+)
 const statusWords = computed(() => props.content.tiers.map(line =>
   (line.match(/\s+|\S+/g) ?? []).flatMap(word => unspacedScript.test(word)
     ? (segmentAfterHydration.value && wordSegmenter
         ? Array.from(wordSegmenter.segment(word), part => part.segment)
-        : (word.match(/\P{M}\p{M}*|\p{M}+/gu) ?? [word]))
+        : (word.match(fallbackClusters) ?? [word]))
     : [word])))
 function longestWord(line: HTMLElement) {
   return Math.max(0, ...Array.from(line.children, word => word.getBoundingClientRect().width))
