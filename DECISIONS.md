@@ -78,9 +78,9 @@ read as a picture with a caption. From the `md` breakpoint the hero card is two 
 left, the plate on the right at its natural height, each roughly half the card — and the card's height is the
 taller of the two, so the box no longer sets it. The player stays a sibling of the link with a reserved 16:9
 box and the link stays the plate; the plate is no longer full-bleed, it is the right-hand column with the card's
-own radius on its outer corners. Below `md` the plate is full width, the box goes under it as rule 27 had it,
-and the reserved box is 16:9 in both cases, so a reflow between the two never re-measures. Sound control stays
-in the plate. Nothing else in rule 27 changes.
+own radius on its right corners. Below `md` the card is one column again, the plate is full width and the box
+goes under it as rule 27 had it; the reserved box is 16:9 at every width, so a reflow between the two never
+re-measures it. Sound control stays in the plate. Nothing else in rule 27 changes.
 
 
 ## Deferred (do not build, just note)
