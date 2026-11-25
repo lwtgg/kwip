@@ -72,6 +72,16 @@ matched hero with none is banner-only like any other card, not a grey hole. Unde
 not mount by itself, because 16 MB of buffer is the user's choice to make: the plate button says "Play" and the
 first tap mounts the frame, muted. Everything else in rule 26 stands.
 
+28. **The hero player sits beside the plate, not under it.** Rule 27 put the box under the banner and the owner
+found it too tall: at 1280 it was 693 px inside an 850 px viewport, so the fold was mostly player and the card
+read as a picture with a caption. From the `md` breakpoint the hero card is two columns — the player on the
+left, the plate on the right at its natural height, each roughly half the card — and the card's height is the
+taller of the two, so the box no longer sets it. The player stays a sibling of the link with a reserved 16:9
+box and the link stays the plate; the plate is no longer full-bleed, it is the right-hand column with the card's
+own radius on its outer corners. Below `md` the plate is full width, the box goes under it as rule 27 had it,
+and the reserved box is 16:9 in both cases, so a reflow between the two never re-measures. Sound control stays
+in the plate. Nothing else in rule 27 changes.
+
 
 ## Deferred (do not build, just note)
 
