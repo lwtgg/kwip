@@ -51,5 +51,6 @@ is almost all player. Rule 28 replaces rule 27's under-the-plate placement.
 The owner also reports the hero not playing by itself. The reason is not the layout: every `hero_embed` in the
 current feed is taifood, and rule 26 mounts taifood paused because its player ignores our parameters. It has also
 stopped serving anything — the embed returns a 225-byte page that only prints "Remove sandbox attributes on the
-iframe tag", and its TLS handshake fails from curl. Re-measure taifood playback once their host recovers; if their
-player can start on load, revisit rule 26's taifood clause then.
+iframe tag", and its TLS handshake fails from curl. This is not blocking: the owner has said so. Re-measure
+taifood playback once their host recovers, and only if their player can start on load revisit rule 26's taifood
+clause then. Do not invent a workaround here.
