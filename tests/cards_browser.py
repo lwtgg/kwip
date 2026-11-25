@@ -216,7 +216,7 @@ def check_boundaries(browser, origin, assets, dest):
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=[event])])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
-    for width in (390, 1280):
+    for width in (320, 390, 1024, 1280):
         for theme in ('dark', 'light'):
             with browser.new_context(viewport={'width': width, 'height': 850}) as context:
                 context.add_cookies([dict(name='theme', value=theme, url=origin)])
@@ -254,7 +254,7 @@ def check_known_hero(browser, origin, assets, dest):
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=[event])])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
-    for width in (320, 390, 1280):
+    for width in (320, 390, 1024, 1280):
         for theme in ('dark', 'light'):
             for density in ('comfortable', 'compact'):
                 with browser.new_context(viewport={'width': width, 'height': 850}, reduced_motion='reduce') as context:
@@ -280,6 +280,20 @@ def check_known_hero(browser, origin, assets, dest):
     (dest / 'hero-report.json').write_text(json.dumps(results, indent=2))
 
 
+# Smallest width-to-height ratio of a listing row, measured per viewport for task 60 (docs/redesign-60.md).
+# Three tiers under the score row cannot reach 3.5 below 1024px; the floor there is the measurement.
+# Measured three-tier minimum: 2.8051 at 320px and 3.4868 at 390px.
+RATIO_FLOOR = {320: 2.8, 390: 3.48, 1024: 3.5, 1280: 3.5}
+# Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
+WIDE_DETAIL = {
+    (320, 'element'): {'matched-widest', 'matched-hangul-long-word'},
+    (320, 'root'): {'matched-widest', 'matched-hangul-long-word'},
+    (390, 'element'): {'matched-widest'},
+    (390, 'root'): {'matched-widest', 'matched-hangul-long-word'},
+    (1024, 'element'): {'matched-widest'},
+}
+
+
 def banner_geometry(card):
     return card.evaluate(r"""el => {
       const rect = r => ({left:r.left, right:r.right, top:r.top, bottom:r.bottom,
@@ -287,6 +301,8 @@ def banner_geometry(card):
       const banner = el.querySelector('.match-banner');
       const lineup = banner.querySelector('.banner-lineup');
       const nodes = [...banner.querySelectorAll('.banner-fit-text, .banner-team img')];
+      const track = banner.querySelector('[role=progressbar]');
+      const bounds = selector => rect(banner.querySelector(selector).getBoundingClientRect());
       return {
         card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
         radii:[getComputedStyle(el).borderRadius, getComputedStyle(banner).borderRadius],
@@ -311,13 +327,21 @@ def banner_geometry(card):
             mono:n.hasAttribute('data-mono'), wrap:n.hasAttribute('data-wrap'),
             scale:logo ? 1 : new DOMMatrix(getComputedStyle(n).transform).a}];
         })),
-        progress:rect(banner.querySelector('[role=progressbar]').getBoundingClientRect()),
+        progress:track && rect(track.getBoundingClientRect()),
+        progressFill:track && track.firstElementChild.getBoundingClientRect().width,
+        // The first tier always sits in the middle column, also when detail and audience take a full row.
+        middle:bounds('.banner-status-tier:first-child'),
+        wideDetail:lineup.hasAttribute('data-wide-detail'),
+        logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
+        labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
+        scoreBoxes:[...banner.querySelectorAll('.banner-score')].map(n => rect(n.getBoundingClientRect())),
+        tiers:[...banner.querySelectorAll('.banner-status-tier')].map(n => rect((n.firstElementChild || n).getBoundingClientRect())),
         floor:parseFloat(lineup.style.getPropertyValue('--banner-fit-floor') || getComputedStyle(lineup).getPropertyValue('--banner-fit-floor')),
         compression:parseFloat(getComputedStyle(lineup).getPropertyValue('--banner-score-compression')),
         gutter:parseFloat(lineup.hasAttribute('data-stacked')
-          ? getComputedStyle(banner.querySelector('.banner-status')).paddingBlockStart
+          ? getComputedStyle(banner.querySelector('.banner-status-tier:nth-child(2)')).paddingBlockStart
           : getComputedStyle(banner.querySelector('.banner-score-slot') || lineup).paddingInlineEnd) || 0,
-        statusWidth:banner.querySelector('.banner-status').getBoundingClientRect().width,
+        statusWidth:banner.querySelector('.banner-status-tier:first-child').getBoundingClientRect().width,
         stacked:lineup.hasAttribute('data-stacked'),
         fontSize:parseFloat(getComputedStyle(lineup).fontSize),
         rootSize:parseFloat(getComputedStyle(document.documentElement).fontSize),
@@ -332,18 +356,19 @@ def banner_geometry(card):
 def banner_measurements(geometry):
     box, paint = geometry['card'], geometry['paint']
     detail = paint.get('tier-1', paint['tier-0'])
-    middle = paint.get('tier-1')
-    scores = [paint.get(f'banner-{side}-score') for side in ('away', 'home')]
-    score_gap = None
-    stacked_status_gap = None
-    if geometry['stacked']:
-        stacked_status_gap = paint['tier-0']['top'] - max(paint[f'banner-{side}-label']['bottom']
-                                                        for side in ('away', 'home'))
-        if all(scores):
-            score_gap = scores[1]['left'] - scores[0]['right']
-    elif middle and all(scores):
-        score_gap = min(middle['left'] - scores[0]['right'], scores[1]['left'] - middle['right'])
+    left, right = (paint.get(f'banner-{side}-score') for side in ('away', 'home'))
+    score_gap = min(geometry['middle']['left'] - left['right'],
+                    right['left'] - geometry['middle']['right']) if left else None
+    # Clear space from the score row (logos, scores, state) to the detail below it.
+    status_gap = paint['tier-1']['top'] - max(item['bottom'] for item in (
+        *geometry['logoBoxes'], *geometry['scoreBoxes'], geometry['tiers'][0])) if 'tier-1' in paint else None
+    state = geometry['tiers'][0]
+    centre = lambda box: (box['top'] + box['bottom']) / 2
+    state_offset = max(abs(centre(state) - centre(item)) for item in geometry['logoBoxes'] + geometry['scoreBoxes'])
+    logo_offset = max((abs(centre(logo) - centre(score)) for logo, score in
+                       zip(geometry['logoBoxes'], geometry['scoreBoxes'])), default=0)
     return dict(height=box['height'], width=box['width'], ratio=box['width'] / box['height'],
+                tiers=sum(f'tier-{index}' in paint for index in range(3)), wide_detail=geometry['wideDetail'],
                 status_width=geometry['statusWidth'], detail_lines=detail['lines'],
                 abbreviation_lines=max(paint[f'banner-{side}-label']['lines'] for side in ('away', 'home')),
                 monospace=[name for name, ink in paint.items() if ink['mono']],
@@ -353,7 +378,8 @@ def banner_measurements(geometry):
                 tier_clearance=min(detail['top'] - paint['tier-0']['bottom'],
                                    paint['tier-2']['top'] - detail['bottom']) if 'tier-1' in paint and 'tier-2' in paint else None,
                 min_scale=min(ink['scale'] for name, ink in paint.items() if not name.endswith('-team')),
-                gutter=geometry['gutter'], score_gap=score_gap, stacked_status_gap=stacked_status_gap,
+                gutter=geometry['gutter'], score_gap=score_gap, status_gap=status_gap,
+                state_offset=state_offset, logo_offset=logo_offset,
                 stacked=geometry['stacked'])
 
 
@@ -402,7 +428,7 @@ def status_sources(event):
     return state, '' if detail == state else detail, audience
 
 
-def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False, audience_in_footer=False):
+def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False):
     visible = card.evaluate("""el => {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       const text = [];
@@ -429,15 +455,16 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     spoken = audience if compact == f'{viewers:,}' else f'{audience} ({viewers:,})'
     parts = [teams, state, '' if detail in ('vs', state) else detail, spoken]
     kickoff = datetime.fromtimestamp(event['starts_at'], timezone.utc).strftime('%a, %d %b %Y %H:%M:%S UTC')
-    expected = '. '.join(part for part in parts if part) + f'. Kickoff {kickoff}.'
+    expected = '. '.join(part for part in parts if part) + ('. 24/7.' if event.get('always_live') == 1 else f'. Kickoff {kickoff}.')
     expect(card).to_have_accessible_name(re.compile(f'^{re.escape(expected)}$'))
     # The progress bar is decoration here: it must neither be exposed nor leak its value into the name.
     assert card.get_by_role('progressbar').count() == 0
-    assert card.locator('[role=progressbar]').count() == 1
+    has_window = event.get('always_live') != 1 and 0 < event['starts_at'] < event['ends_at']
+    assert card.locator('[role=progressbar]').count() == int(has_window)
 
     banner = card.locator('.match-banner')
     assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
-    assert_rendered_segments(oracle, card, (state, detail) if audience_in_footer else (state, detail, audience), event['uri_name'])
+    assert_rendered_segments(oracle, card, (state, detail, audience), event['uri_name'])
     assert banner.locator('.banner-score').all_text_contents() == (
         [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
     # Never blank under a logo: an empty abbreviation falls back to the name's initials.
@@ -449,11 +476,12 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     geometry = banner_geometry(card)
     box, art, paint = (geometry[key] for key in ('card', 'banner', 'paint'))
     assert box == art and len(set(geometry['radii'])) == 1, geometry
-    ratio = box['width'] / box['height']
+    measurements = assert_scoreboard_layout(geometry, event['uri_name'], bool(detail))
     if listing_row:
         assert box['height'] >= 44, geometry
         if not allow_growth:
-            assert ratio >= 3.5, geometry
+            floor_ratio = RATIO_FLOOR[card.page.viewport_size['width']]
+            assert box['width'] / box['height'] >= floor_ratio, ('ratio below floor', event['uri_name'], floor_ratio, geometry)
     floor = geometry['floor']
     assert floor == .6, geometry
     for name, ink in paint.items():
@@ -469,30 +497,25 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         if name.endswith('-score'):
             assert 'Acumin Pro Extra Condensed' in ink['font'], ink
         assert box['left'] <= ink['left'] <= ink['right'] <= box['right'], (event['uri_name'], name, ink, geometry)
-        assert box['top'] <= ink['top'] <= ink['bottom'] <= geometry['progress']['top'], (event['uri_name'], name, ink, geometry)
+        assert box['top'] <= ink['top'] <= ink['bottom'] <= box['bottom'], (event['uri_name'], name, ink, geometry)
     # No tolerance: ink boxes of two items never overlap, in either direction.
     for index, (name, ink) in enumerate(paint.items()):
         for other, target in list(paint.items())[index + 1:]:
             assert (ink['right'] <= target['left'] or target['right'] <= ink['left']
                     or ink['bottom'] <= target['top'] or target['bottom'] <= ink['top']), (name, other, geometry)
-    top, bottom = paint['tier-0'], paint.get('tier-2', paint.get('tier-1', paint['tier-0']))
-    middle = paint.get('tier-1')
-    assert top['bottom'] <= bottom['top'], geometry
     if root_text:
-        # 27ba445's 320px Halftime row was 145px. Allow the stacked identity plus status tiers,
+        # 27ba445's 320px Halftime row was 145px. Allow the score row plus the detail and audience tiers,
         # including a multi-line detail, within a bounded number of metadata line heights.
         assert geometry['rootSize'] == 32 and geometry['fontSize'] == 26, geometry
-        lines = middle['lines'] if middle else 1
-        assert lines <= 3, geometry
+        lines = paint['tier-1']['lines'] if 'tier-1' in paint else 1
+        # Only the fixtures wider than the feed allows may wrap further; the height bound still holds.
+        assert lines <= 3 or allow_growth, geometry
         assert box['height'] <= 145.2 + (4 + (lines - 1) * 1.3) * geometry['fontSize'], (
             'disproportionate root-text row', geometry)
         if event['match']['detail'] == 'Halftime':
-            assert middle['lines'] == 1, geometry
+            assert paint['tier-1']['lines'] == 1, geometry
     if listing_row and card.page.viewport_size['width'] == 1024 and event['uri_name'].endswith('/matched-long-status'):
-        assert middle['lines'] == 1, ('1024px detail wraps', geometry)
-        assert top['bottom'] < middle['top'] and middle['bottom'] < bottom['top'], geometry
-    if middle and not audience_in_footer:
-        assert top['bottom'] <= middle['top'] and middle['bottom'] <= bottom['top'], geometry
+        assert paint['tier-1']['lines'] == 1, ('1024px detail wraps', geometry)
     scores = geometry['scores']
     if scored:
         # Both scores are fitted together, so 50/97 and 101/99 are drawn at the same scale, and the scale
@@ -503,42 +526,136 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         assert abs(drawn[0] - drawn[1]) < .001 and abs(drawn[0] - expected) < .01, (drawn, expected, scores)
         if all(score['room'] >= widest * geometry['compression'] for score in scores):
             assert abs(drawn[0] - geometry['compression']) < .001, ('squeezed with room to spare', drawn, scores)
-    for name in ('banner-away-score', 'banner-home-score'):
-        if name in paint and not geometry['stacked']:
-            score = paint[name]
-            center = (score['top'] + score['bottom']) / 2
-            if not audience_in_footer:
-                assert top['bottom'] < center < bottom['top'], geometry
-            if middle:
-                assert middle['top'] < center < middle['bottom'], geometry
-    for side in ('away', 'home'):
-        team = paint[f'banner-{side}-team']
-        abbrev = paint[f'banner-{side}-label']
-        assert team['bottom'] <= abbrev['top'], geometry
-        if not (geometry['stacked'] or bottom['wrap'] or audience_in_footer):  # a wrapped line is centred in a taller row
-            assert abs(abbrev['top'] - bottom['top']) <= .25, geometry
-        if scored:
-            score = paint[f'banner-{side}-score']
-            gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
-            assert gap >= 0, (side, gap, geometry)
-    measurements = banner_measurements(geometry)
-    # Keep the intended minimum even if a stylesheet regression removes the padding.
-    gutter = max(geometry['fontSize'] * .5, geometry['gutter'])
-    if geometry['stacked']:
-        gap = measurements['stacked_status_gap']
-        assert gap >= gutter - .02, ('stacked label-to-status gap below gutter', event['uri_name'], gap, gutter)
-        if scored:
-            gap = measurements['score_gap']
-            assert gap >= gutter - .02, ('stacked score-to-score gap below gutter', event['uri_name'], gap, gutter)
-    elif scored and middle:
-        gap = measurements['score_gap']
-        assert gap >= gutter - .02, ('measured score gap below gutter', event['uri_name'], gap, gutter)
     if scored and listing_row and not allow_growth and box['width'] >= 600:
         # Wide listing card: scores sit near the mockup's 38.5% and 57.6% of the width, not out at the edges.
         centres = [((paint[f'banner-{side}-score']['left'] + paint[f'banner-{side}-score']['right']) / 2 - box['left']) / box['width'] * 100
                    for side in ('away', 'home')]
         assert abs(centres[0] - 38.5) <= 3 and abs(centres[1] - 57.6) <= 4, ('score centres', event['uri_name'], centres)
-    return dict(**measurements, contrast=assert_banner_contrast(banner))
+    return dict(**measurements, **assert_banner_contrast(banner))
+
+
+
+def assert_scoreboard_layout(geometry, fixture, has_detail):
+    box, paint = geometry['card'], geometry['paint']
+    middle = geometry['middle']
+    state, detail, audience = geometry['tiers']
+    labels = geometry['labels']
+    measurements = banner_measurements(geometry)
+    # The logos, the scores and the state share one row and one centre line.
+    assert measurements['logo_offset'] <= 1, ('logo centre offset', fixture, measurements['logo_offset'])
+    assert measurements['state_offset'] <= 1, ('state centre offset', fixture, measurements['state_offset'])
+    score_row = max(item['bottom'] for item in (*geometry['logoBoxes'], *geometry['scoreBoxes'], state))
+    assert score_row <= detail['top'], ('detail below scores', fixture, geometry)
+    assert detail['bottom'] <= audience['top'] and audience['bottom'] <= min(label['top'] for label in labels), (
+        'audience between detail and bottom row', fixture, geometry)
+    # 0.02px: a wrapped tier is laid out at 100% / floor and drawn at the floor, which rounds.
+    assert box['left'] <= middle['left'] <= state['left'] + .02 and state['right'] <= middle['right'] + .02 <= box['right'] + .02, (
+        'state outside middle column', fixture, state, middle, box)
+    axis = (middle['left'] + middle['right']) / 2
+    for tier in (detail, audience):
+        if geometry['wideDetail']:
+            # Only a word too wide for the middle column takes the row, and it stays centred on that column.
+            assert geometry['stacked'], ('wide detail outside the compact layout', fixture, geometry)
+            assert box['left'] <= tier['left'] <= tier['right'] <= box['right'], ('tier outside card', fixture, tier, box)
+            assert tier['width'] == 0 or abs((tier['left'] + tier['right']) / 2 - axis) <= 1, (
+                'wide tier off the middle axis', fixture, tier, middle)
+        else:
+            assert middle['left'] <= tier['left'] + .02 and tier['right'] <= middle['right'] + .02, (
+                'tier outside middle column', fixture, tier, middle, box)
+    for tier in geometry['tiers']:
+        assert box['top'] <= tier['top'] <= tier['bottom'] <= box['bottom'], (fixture, tier, box)
+    for side, index in (('away', 0), ('home', 1)):
+        logo = geometry['logoBoxes'][index]
+        assert logo['bottom'] <= labels[index]['top'], ('logo above abbreviation', fixture, side, geometry)
+        if paint.get(f'banner-{side}-score'):
+            score = paint[f'banner-{side}-score']
+            team = paint[f'banner-{side}-team']
+            gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
+            assert gap >= 0, ('score touches logo', fixture, side, gap, geometry)
+    if progress := geometry['progress']:
+        # A visible track in the bottom row, between the abbreviations, above the card's edge.
+        assert progress['height'] >= 4 and progress['width'] >= progress['height'] * 4, (fixture, progress)
+        assert labels[0]['right'] < progress['left'] < progress['right'] < labels[1]['left'], (fixture, progress, labels)
+        for label in labels:
+            assert abs((label['top'] + label['bottom']) - (progress['top'] + progress['bottom'])) <= 2, (
+                'track off the bottom row centre', fixture, progress, label)
+        assert box['left'] < progress['left'] and progress['right'] < box['right'] and progress['bottom'] < box['bottom'], (
+            fixture, progress, box)
+        for name, ink in paint.items():
+            assert (ink['right'] <= progress['left'] or progress['right'] <= ink['left']
+                    or ink['bottom'] <= progress['top'] or progress['bottom'] <= ink['top']), (
+                'track overlaps text', fixture, name, ink, progress)
+    # Keep the intended minimum even if a stylesheet regression removes the padding.
+    gutter = max(geometry['fontSize'] * .5, geometry['gutter'])
+    if measurements['score_gap'] is not None:
+        assert measurements['score_gap'] >= gutter - .02, (
+            'score-to-middle gap below gutter', fixture, measurements['score_gap'], gutter)
+    if geometry['stacked'] and has_detail:
+        assert measurements['status_gap'] >= gutter - .02, (
+            'score-to-detail gap below gutter', fixture, measurements['status_gap'], gutter)
+    return measurements
+
+def check_next_up(browser, origin, assets, dest, listing, events, oracle):
+    """The single-column Next up row (1232px wide at 1280) takes the same scoreboard grid."""
+    hero = next(event for event in events if event['uri_name'].endswith('/matched-live'))
+    upcoming = next(event for event in events if event['uri_name'].endswith('/matched-pre'))
+    (assets / 'fixtures/streams.json').write_text(json.dumps(dict(listing, streams=[dict(listing['streams'][0], streams=[hero, upcoming])])))
+    results = []
+    for width in (320, 390, 1024, 1280):
+        with browser.new_context(viewport={'width': width, 'height': 850}, reduced_motion='reduce') as context:
+            page = context.new_page()
+            for mode in ('normal', 'root'):
+                assert page.goto(origin, wait_until='networkidle').ok
+                page.evaluate('document.fonts.ready')
+                if mode == 'root':
+                    page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                settle_fit(page)
+                section = page.get_by_role('region', name='Next up')
+                card = section.locator(f'a.event-card[href$="/{upcoming["uri_name"].rsplit("/", 1)[1]}"]')
+                expect(card).to_have_count(1)
+                card.scroll_into_view_if_needed()
+                geometry = assert_clean_banner(card, upcoming, oracle, listing_row=mode == 'normal', root_text=mode == 'root')
+                assert card.evaluate('el => el.scrollWidth === el.clientWidth && el.getBoundingClientRect().right <= innerWidth')
+                results.append(dict(viewport=width, mode=mode, **geometry))
+                if mode == 'normal':
+                    card.screenshot(path=str(dest / f'{width}-next-up-row.png'))
+    (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
+    (dest / 'next-up-report.json').write_text(json.dumps(results, indent=2))
+    print('Next up rows: ' + ', '.join(f"{x['viewport']}px {x['mode']} {x['width']:.0f}x{x['height']:.0f}" for x in results), flush=True)
+
+
+def check_stale_matches(browser, origin, assets, dest, listing, events, measure_only):
+    """A stale feed drops the audience and the timeline; the layout and order still hold."""
+    picks = [event for event in events if event['uri_name'].rsplit('/', 1)[1] in ('matched-live', 'matched-pre', 'matched-final')]
+    expected_tiers = {'matched-live': 2, 'matched-pre': 2, 'matched-final': 1}
+    stale_listing = dict(listing, timestamp=listing['timestamp'] - 7200, streams=[dict(listing['streams'][0], streams=picks)])
+    (assets / 'fixtures/streams.json').write_text(json.dumps(stale_listing))
+    results = []
+    for width in (320, 390, 1024, 1280):
+        with browser.new_context(viewport={'width': width, 'height': 850}, reduced_motion='reduce') as context:
+            page = context.new_page()
+            for mode in ('normal', 'root'):
+                assert page.goto(origin + '/c/basketball', wait_until='networkidle').ok
+                page.evaluate('document.fonts.ready')
+                if mode == 'root':
+                    page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                settle_fit(page)
+                for event in picks:
+                    slug = event['uri_name'].rsplit('/', 1)[1]
+                    card = page.locator(f'a.event-card[href$="/{slug}"]')
+                    geometry = banner_geometry(card)
+                    if measure_only:
+                        measurements = banner_measurements(geometry)
+                    else:
+                        assert card.locator('[role=progressbar]').count() == 0, ('stale timeline', width, mode, slug)
+                        measurements = assert_scoreboard_layout(geometry, (slug, 'stale', width, mode), slug != 'matched-final')
+                        assert measurements['tiers'] == expected_tiers[slug], (slug, measurements)
+                        if mode == 'normal':
+                            assert measurements['ratio'] >= RATIO_FLOOR[width], ('stale ratio below floor', width, slug, measurements)
+                    results.append(dict(viewport=width, fixture=slug, mode=mode, stale=True, **measurements))
+    (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
+    (dest / 'stale-match-report.json').write_text(json.dumps(results, indent=2))
+    print('Stale matched cards: no timeline, layout holds', flush=True)
 
 
 def collect_render_errors(page, errors):
@@ -614,13 +731,19 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
         ('matched-khmer', dict(match, detail='ក្រ')),
         ('matched-mixed', dict(match, detail='OT กำลัง 후반')),
         ('matched-emoji', dict(match, detail='延長👩🏽‍⚽🇹🇭')),
+        # No usable window: no timeline, and the card keeps the height of one that has it.
+        ('matched-always-live', match),
     ]
     growth_fixtures = {'matched-widest', 'matched-cjk'}
     events = [dict(template, id=9000+i, match=game, name='Colorado State Rams at Arizona Wildcats', uri_name=f'basketball/{slug}', viewers='62',
                    starts_at=now-3600, ends_at=now+3600, poster='/never-fetch-provider-thumbnail.jpg') for i, (slug, game) in enumerate(cases)]
     for event in events:
+        if event['uri_name'].endswith('matched-pre'):
+            event.update(starts_at=now+3600, ends_at=now+7200)
         if event['uri_name'].endswith('matched-final'):
             event['viewers'] = '123456789'
+        if event['uri_name'].endswith('matched-always-live'):
+            event['always_live'] = 1
     listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=events)])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     # Keep the oracle in a separate, unmodified Chromium page, including for SSR.
@@ -642,7 +765,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
         oracle_listing = dict(listing, streams=[dict(listing['streams'][0], streams=oracle_events)])
         (assets / 'fixtures/streams.json').write_text(json.dumps(oracle_listing))
         for render in ('SSR', 'fallback', 'hydrated'):
-            for width in (320, 390, 1280):
+            for width in (320, 390, 1024, 1280):
                 with browser.new_context(viewport={'width': width, 'height': 850},
                                          device_scale_factor=3, java_script_enabled=render != 'SSR') as context:
                     if render == 'fallback':
@@ -715,6 +838,8 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                                                allow_growth=slug in growth_fixtures, root_text=mode == 'root')
                                 mono = ['tier-1'] if slug == 'matched-widest' and width in (320, 390) and mode != 'normal' else []
                                 assert geometry['monospace'] == mono, ('unexpected monospace', prefix, mode, slug, geometry)
+                                wide = WIDE_DETAIL.get((width, mode), set())
+                                assert geometry['wide_detail'] == (slug in wide), ('unexpected wide detail', prefix, mode, slug, geometry)
                                 if slug == 'matched-cjk' and width == 320 and mode == 'root':
                                     assert geometry['detail_lines'] > 1, ('Han detail did not wrap', prefix, geometry)
                                 if width == 1024:
@@ -724,14 +849,23 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                         or (mode == 'normal' and width in (320, 390) and slug not in growth_fixtures)
                                         or (mode == 'root' and width == 390 and slug == 'matched-live')):
                                     assert not geometry['stacked'], ('unexpected stacking', prefix, mode, slug)
-                                if mode == 'normal' and slug == 'matched-live':
+                                if slug == 'matched-always-live':
+                                    assert card.locator('[role=progressbar]').count() == 0
+                                    live = page.locator('a.event-card[href$="/matched-live"]').bounding_box()['height']
+                                    assert abs(geometry['height'] - live) < .02, ('timeline absence changed height', prefix, mode, geometry['height'], live)
+                                if slug in ('matched-live', 'matched-pre', 'matched-final'):
                                     progress = card.locator('[role=progressbar]')
-                                    expected_progress = 100 * (time.time() - event['starts_at']) / (
-                                        event['ends_at'] - event['starts_at'])
-                                    actual_progress = int(progress.get_attribute('aria-valuenow'))
-                                    assert abs(actual_progress - expected_progress) <= 1, (
-                                        'live progress', prefix, actual_progress, expected_progress)
-                                    card.screenshot(path=str(dest / f'{prefix}-row.png'))
+                                    expected = max(0, 100 * (time.time() - event['starts_at']) / (
+                                        event['ends_at'] - event['starts_at']))
+                                    actual = progress.evaluate("""el => ({
+                                      value: Number(el.getAttribute('aria-valuenow')),
+                                      fill: 100 * el.firstElementChild.getBoundingClientRect().width /
+                                        el.getBoundingClientRect().width
+                                    })""")
+                                    assert all(abs(value - expected) <= 1 for value in actual.values()), (
+                                        'progress and fill width', prefix, actual, expected)
+                                    if mode == 'normal' and slug == 'matched-live':
+                                        card.screenshot(path=str(dest / f'{prefix}-row.png'))
                                 if slug in ('matched-bad-color', 'matched-no-color'):
                                     assert card.locator('.match-banner').evaluate("el => el.style.getPropertyValue('--banner-away')") == '#272624'
                             results.append(dict(viewport=width, theme=theme, density=density, fixture=slug, mode=mode, **geometry))
@@ -754,10 +888,12 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                         hero_results.append(dict(viewport=width, theme=theme, density=density, **geometry))
                         hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
                 print(prefix, '/'.join(text_modes), flush=True)
-    if oracle:
-        oracle.close()
     print(f'Hydration and uncaught page errors: {len(hydration_errors)}', flush=True)
     assert not hydration_errors, hydration_errors
+    check_stale_matches(browser, origin, assets, dest, listing, events, measure_only)
+    if oracle:
+        check_next_up(browser, origin, assets, dest, listing, events, oracle)
+        oracle.close()
     (dest / 'hero-status-report.json').write_text(json.dumps(hero_results, indent=2))
     (dest / 'match-report.json').write_text(json.dumps(results, indent=2))
 
@@ -788,7 +924,7 @@ def main():
                 fixtures(directory / f'{name}-assets', stale)
                 if not stale:
                     (args.screenshots / 'preview-url.txt').write_text(origin)
-                for width in (320, 390, 1280):
+                for width in (320, 390, 1024, 1280):
                     for theme in ('dark', 'light'):
                         for density in ('comfortable', 'compact'):
                             report.extend(check(browser, origin, width, theme, density, args.screenshots, stale))

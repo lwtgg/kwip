@@ -156,7 +156,7 @@ if (props.hero) {
         <template v-if="matchContent">
           <component :is="headingLevel" class="sr-only">{{ matchContent.label }}</component>
           <span class="sr-only">{{ matchFacts }}</span>
-          <MatchBanner :stream="stream" :now="now" :stale="stale" :scale="scale" :content="matchContent" :audience-in-footer="reservesPlayer" />
+          <MatchBanner :stream="stream" :now="now" :stale="stale" :scale="scale" :content="matchContent" />
         </template>
         <template v-else>
           <div
@@ -175,22 +175,16 @@ if (props.hero) {
               :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
             <div class="card-meta gap-x-3 text-metadata text-muted">
               <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
-              <span v-if="!stale && !reservesPlayer" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
+              <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
                 <span aria-hidden="true">{{ compact }} {{ metric }}</span>
               </span>
-              <span v-if="!stale && reservesPlayer" class="sr-only">{{ exact }} {{ metric }}</span>
               <span class="group-hover:underline">Watch</span>
             </div>
           </div>
         </template>
       </NuxtLink>
-      <div v-if="reservesPlayer && (!stale || zlive)" class="hero-footer">
-        <span v-if="!stale" aria-hidden="true"
-          class="listing-numeric wrap-anywhere text-metadata text-muted">
-          {{ matchContent?.tiers[2] ?? `${compact} ${metric}` }}
-        </span>
+      <div v-if="reservesPlayer && zlive" class="hero-footer">
         <button
-          v-if="zlive"
           type="button"
           class="hero-sound min-h-11 min-w-11 rounded-control bg-surface-2 px-3 text-metadata text-fg hover:bg-surface"
           :data-label="soundOnLabel"

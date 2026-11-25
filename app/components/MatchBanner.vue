@@ -5,7 +5,7 @@ import { bannerAbbreviation, teamInitials } from '~/composables/matchBanner'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import type { matchBannerContent } from '~/composables/matchBanner'
 
-const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; audienceInFooter?: boolean; content: ReturnType<typeof matchBannerContent> }>()
+const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; content: ReturnType<typeof matchBannerContent> }>()
 const hangul = /\p{Script=Hangul}/u
 const logoImages: HTMLImageElement[] = []
 const lineupElement = ref<HTMLElement | null>(null)
@@ -41,6 +41,7 @@ function fitText() {
   const labels = lines.filter(line => line.parentElement!.classList.contains('banner-abbreviation'))
   const status = lines.filter(line => line.classList.contains('banner-status-line'))
   delete lineup.dataset.stacked
+  delete lineup.dataset.wideDetail
   lineup.style.removeProperty('--banner-lineup-min')
   const preferredRoom = room(lineup)
   // Reserve the full width to read the minimum padding resolved by the CSS clamp.
@@ -75,7 +76,22 @@ function fitText() {
   const statusRoom = available - 2 * sideMin
   const statusMin = Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
   lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
-  lineup.toggleAttribute('data-stacked', statusRoom < wordMin)
+  const compact = statusRoom < wordMin
+  lineup.toggleAttribute('data-stacked', compact)
+  // The compact layout lets each abbreviation span its team and score tracks, and lets the logo
+  // shrink to the text size, so the middle column keeps the state between the scores.
+  const compactSide = Math.max(labelMin, scoreMin + gutter + Math.min(logo, parseFloat(style.fontSize)))
+  const compactMiddle = Math.max(0, available - 2 * compactSide)
+  const share = cssNumber(style, '--banner-status-width', 36) / 100
+  // Detail and audience have their rows to themselves. When a word in them cannot fit the middle
+  // column even at the floor, they take the full row instead of breaking the word.
+  const stateLine = lineup.querySelector('.banner-status-tier:first-child .banner-status-line')
+  const lowerWords = status.flatMap((line, index) => line === stateLine ? [] : [statusWidths[index]!])
+  const stateWords = status.flatMap((line, index) => line === stateLine ? [statusWidths[index]!] : [])
+  const wideDetail = compact && Math.ceil(Math.max(0, ...lowerWords) * floor) + 1 > compactMiddle
+  const middleMin = wideDetail ? Math.ceil(Math.max(0, ...stateWords) * floor) + 1 : statusMin
+  lineup.toggleAttribute('data-wide-detail', wideDetail)
+  lineup.style.setProperty('--banner-compact-middle', `${Math.min(compactMiddle, Math.max(middleMin, available * share))}px`)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
   lineup.style.setProperty('--banner-status-min', `${statusMin}px`)
@@ -108,7 +124,7 @@ onBeforeUnmount(() => observer?.disconnect())
 </script>
 
 <template>
-  <div class="match-banner" :data-audience-in-footer="audienceInFooter ? '' : undefined" :style="art" :data-scale="scale">
+  <div class="match-banner" :style="art" :data-scale="scale">
     <div ref="lineupElement" class="banner-lineup" aria-hidden="true">
       <template v-for="(side, index) in [match.away, match.home]" :key="index">
         <div class="banner-team" :class="index === 0 ? 'banner-away-team' : 'banner-home-team'">
@@ -122,14 +138,14 @@ onBeforeUnmount(() => observer?.disconnect())
         </span>
       </template>
       <div class="banner-status">
-        <div v-for="(line, index) in (audienceInFooter ? content.tiers.slice(0, 2) : content.tiers)" :key="index" class="banner-status-tier">
+        <div v-for="(line, index) in content.tiers" :key="index" class="banner-status-tier">
           <span v-if="line" class="banner-fit-text banner-status-line" :class="{ 'banner-versus': line === 'vs' }"
             :data-hangul="hangul.test(line) ? '' : undefined" :style="{ '--banner-chars': line.length }">{{ line }}</span>
         </div>
+        <div v-if="!stale" class="banner-progress">
+          <LiveProgress :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live" :now="now ?? initialNow" />
+        </div>
       </div>
-    </div>
-    <div v-if="!stale" class="banner-progress" aria-hidden="true">
-      <LiveProgress :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live" :now="now ?? initialNow" />
     </div>
   </div>
 </template>
