@@ -477,7 +477,7 @@
   --banner-status-leading: 1.3;
   /* The score opens the first row, so its line box holds the whole content area of the font. */
   --banner-score-leading: 1.16;
-  --banner-hero-score-leading: 0.9;
+  --banner-hero-score-leading: 0.87;
   /* The timeline track: translucent white over the team field, so it reads on any team colour. */
   --banner-track: color-mix(in srgb, var(--banner-white) 36%, transparent);
   --banner-pad-inline: var(--spacing-2);
@@ -679,6 +679,13 @@
   height: auto;
   min-height: var(--banner-hero-height);
   align-items: center;
+}
+
+/* On wide heroes the logo must not hold the score row open past the score line box. */
+@media (width >= 64rem) {
+  .match-banner[data-scale="hero"] {
+    --banner-logo: min(var(--banner-logo-hero), calc(var(--banner-score-size) * var(--banner-score-leading)));
+  }
 }
 
 .hero-plate-link:focus-visible {

@@ -23,7 +23,7 @@ Every matched banner (listing row, `Next up` row, hero) uses one four-row grid:
   whitespace-only rows. The offset does not change the grid rows. When there are no scores, the
   state box aligns with the logo boxes.
 - The score row's height is set by the tallest of the logo, the score and the state. Listings use
-  `--banner-score-leading` (1.16), and the hero uses `--banner-hero-score-leading` (0.9).
+  `--banner-score-leading` (1.16), and the hero uses `--banner-hero-score-leading` (0.87 as of round five).
   At normal text the 40 px listing logo still sets the score row's height.
 - The grid has equal block padding at both edges. Listings use 8 px at comfortable density and
   2 px at compact density. Heroes use 16 px at both densities. The hero minimum height can add
@@ -255,7 +255,8 @@ confirms the two digit glyphs come from the custom Acumin face.
 
 ### Row position and score-to-detail spacing
 
-Dark, comfortable density, normal text, 50–97 fixture on the local Chromium build. The ratio floors
+Round four used the 50–97 fixture in dark theme, comfortable density and normal text on
+the local Chromium build. The ratio floors
 at 320 and 390 now use the measured category row heights after restoring symmetry. Both wide floors
 remain 3.50. The listing score row still measures 40 px at normal text. Across the full matrix
 the largest padding difference was 0.016 px, the minimum hero digit fill was 74.0%, and the
@@ -323,6 +324,60 @@ reports are in `/tmp/kw60-r4-final`.
   all four widths and the generation-first payload decoder for null-prototype objects. Click-under
   used the existing baseline build, generation-first used a locally packed generation, and source
   health used a separate build with the task 55 seed.
+
+## Round five. Hero leading and cross-engine coverage
+
+WebKit painted a 19.00 px hero gap at 1280 px against an 11.75 px category listing gap at DPR 4,
+a ratio of 1.6170×. The 1.6× dead-band assertion previously ran only in the Chromium layout matrix.
+The dual-engine screenshots measured state and score ink, leaving the detail unmeasured.
+
+The first 1280 px sweep tried 0.90, 0.88, and each hundredth from 0.86 to 0.80. The wide hero
+logo held the first row open and WebKit's painted ratio stayed at 1.6170× at DPR 4 and 1.6383×
+at DPR 8. At 64rem and up, the hero now caps the logo at the score line-box height. The second
+sweep used the same 50–97 Halftime fixture with a timeline in dark, comfortable, normal text.
+Each result is the painted hero gap divided by the painted listing gap on local macOS.
+
+| Score leading with wide logo cap | WebKit DPR 4 | WebKit DPR 8 |
+|---|---:|---:|
+| 0.90 | 1.6170× | 1.6383× |
+| 0.89 | 1.5745× | 1.5851× |
+| 0.88 | 1.5106× | 1.5319× |
+| 0.87 | 1.4681× | 1.4787× |
+| 0.86 | 1.4043× | 1.4255× |
+| 0.85 | 1.3404× | 1.3723× |
+| 0.84 | 1.2979× | 1.3191× |
+
+0.87 was the largest hundredth to clear 5% headroom at both scales (target ≤ 1.52×).
+The cap resolves to about 111.36 px at 1280 px, down from 115.2 px.
+
+The pixel report now records the painted state, away score, home score and detail in that order.
+At 320, 390, 1024 and 1280 px, each engine compares the painted gap in the hero with the
+matching category row and checks the hero's 60% painted digit-fill floor. The wrapped-state
+pixel row at 320 px and 200% root size also records the detail. Running the new assertions on
+the previous build reproduced the WebKit failure at 1280 px.
+
+| Width | Chromium painted ratio | WebKit painted ratio |
+|---|---:|---:|
+| 320 | 0.7500× | 0.8298× |
+| 390 | 0.7500× | 0.8298× |
+| 1024 | 1.1250× | 1.1489× |
+| 1280 | 1.4375× | 1.4681× |
+
+The built CSS gave WebKit 17.25 / 11.75 px at DPR 4 and 17.375 / 11.75 px at DPR 8
+at 1280 px, about 8.2% and 7.6% below the limit. Both densities gave the same ratios with
+and without a timeline. The eight DPR 4 hero rows painted at least 76.3% digit fill.
+
+The full cards run covered 1,200 matched listings, 64 heroes, 24 stale matched listings,
+eight Next up cases and 18 screenshot rows. It reported zero hydration or uncaught page errors.
+The padding, loose leading, zero offset and separate state row controls failed their intended
+assertions. Substituting Times in the canvas model failed pixel parity in both engines.
+The preliminary review traced the WebKit Play pointer-focus and sound-control hit-test failures
+to the `52c30fc` baseline.
+
+The local gate passed all 199 unit tests, the default and node-server builds, the build-key
+Worker check, the final default rebuild, Wrangler dry run, and the four-width browser and
+contrast suites. The browser runs used the same scratch drivers, click-under baseline, source
+health seed and packed generation as round four. Logs are in `/tmp/kw60-r5-final`.
 
 ## Review follow-ups
 

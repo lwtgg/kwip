@@ -1031,14 +1031,21 @@ def measure_pixel_card(card, cell, dpr):
     settle_fit(card.page)
     geometry = banner_geometry(card, snap_paint_baseline=cell['engine'] == 'chromium')
     state = card.locator('.banner-status-tier:first-child .banner-status-line')
-    lines = [state, *card.locator('.banner-score').all()]
-    model = [geometry['stateInk'], *geometry['scoreInk']]
-    pixels = [screenshot_ink(line, dpr) for line in lines]
+    scores = card.locator('.banner-score').all()
+    detail = card.locator('.banner-status-tier:nth-child(2) .banner-status-line')
+    model = [geometry['stateInk'], *geometry['scoreInk'], geometry['detailInk']]
+    pixels = [screenshot_ink(line, dpr) for line in (state, *scores, detail)]
+    state_ink, away_ink, home_ink, detail_ink = pixels
+    score_ink = (away_ink, home_ink)
+    detail_gap = detail_ink[0] - max(bottom for _, bottom in score_ink)
+    digit_fill = min((bottom - top) / box['height']
+                     for (top, bottom), box in zip(score_ink, geometry['scoreBoxes']))
     errors = [[prediction - observed for prediction, observed in zip(model_edges, pixel_edges)]
               for model_edges, pixel_edges in zip(model, pixels)]
-    offsets = [(sum(pixels[0]) - sum(score)) / 2 for score in pixels[1:]]
+    offsets = [(sum(state_ink) - sum(score)) / 2 for score in score_ink]
     result = dict(**cell, dpr=dpr, os=f'macOS {platform.mac_ver()[0]}' if platform.mac_ver()[0] else platform.platform(),
-                  pixels=pixels, model=model, edge_errors=errors, state_minus_score=offsets)
+                  pixels=pixels, model=model, edge_errors=errors, state_minus_score=offsets,
+                  detail_ink_gap=detail_gap, digit_fill=digit_fill)
     print(json.dumps(result), flush=True)
     assert all(abs(edge) <= .5 for pair in errors for edge in pair), ('pixel/model ink parity', result)
     assert all(abs(offset) <= 1.25 for offset in offsets), ('pixel state ink centre offset', result)
@@ -1076,10 +1083,11 @@ def check_pixel_ink(pw, origin, assets, dest):
     results = []
     for engine in ('chromium', 'webkit'):
         browser = getattr(pw, engine).launch()
-        for width in (390, 1280, 320):
+        for width in (320, 390, 1024, 1280):
             page = browser.new_page(viewport={'width': width, 'height': 900}, device_scale_factor=4)
-            listing_scale = 'wrapped' if width == 320 else 'listing'
-            variants = ((listing_scale, '/c/basketball'), ('hero', '/'))
+            variants = [('listing', '/c/basketball'), ('hero', '/')]
+            if width == 320:
+                variants.append(('wrapped', '/c/basketball'))
             for scale, path in variants:
                 assert page.goto(origin + path, wait_until='networkidle').ok
                 card = page.locator('a.event-card:has(.banner-score)').first
@@ -1099,8 +1107,14 @@ def check_pixel_ink(pw, origin, assets, dest):
                     assert banner_geometry(card)['paint']['tier-0']['lines'] >= 2
                     offset = state.evaluate("el => parseFloat(el.style.getPropertyValue('--banner-state-offset'))")
                     assert abs(offset) < 20, ('wrapped state displaced', engine, offset)
-                results.append(measure_pixel_card(card, dict(engine=engine, version=browser.version,
-                                                            width=width, scale=scale), 4))
+                row = measure_pixel_card(card, dict(engine=engine, version=browser.version,
+                                                    width=width, scale=scale), 4)
+                if scale == 'listing':
+                    listing_row = row
+                if scale == 'hero':
+                    assert_hero_dead_band(row, listing_row, (engine, width, 'paint'))
+                    row['detail_gap_ratio'] = row['detail_ink_gap'] / listing_row['detail_ink_gap']
+                results.append(row)
             page.close()
         browser.close()
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
