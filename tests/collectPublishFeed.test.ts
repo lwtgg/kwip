@@ -274,6 +274,11 @@ const mock = String.raw`
             assert.equal(item.match.home.name, 'Home FC')
             assert.equal(item.match.detail, 'Halftime')
             assert.equal(item.match.home.score, 2)
+          } else if (path === 'streams' && mode !== 'baseline') {
+            const expected = structuredClone(fixture.streams)
+            expected.streams[0].streams[0].hero_embed = zliveAvailable ? zliveUrl('sky-fhd') : primary.data
+            if (mode === 'capacity') expected.streams[0].streams[1].hero_embed = acceptedAlternate
+            assert.deepEqual(JSON.parse(bytes), expected)
           } else if (mode === 'scores-shrink' && path === 'streams/foo.json/bar') {
             assert.equal(JSON.parse(bytes).data.match, undefined)
           } else if (path === 'health.json') {

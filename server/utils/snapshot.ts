@@ -1,3 +1,4 @@
+import { resolveHeroEmbed, type EventSources } from '../../app/utils/topEvent.ts'
 import { feedDetailPath, isSnapshotPath, type FeedCollection } from './feed-path.ts'
 
 import { isFreshSnapshotHealth, type SnapshotHealth, type SnapshotSourceHealth } from '../../app/utils/snapshotHealth.ts'
@@ -66,6 +67,7 @@ function sourceUrl(value: unknown) {
 
 function validateItemSources(item: Record<string, unknown>) {
   if (item.iframe) sourceUrl(item.iframe)
+  if (item.hero_embed !== undefined) sourceUrl(item.hero_embed)
   if (item.source != null) sourceUrl(record(item.source).data)
   if (item.sources !== undefined) {
     if (!Array.isArray(item.sources)) invalid()
@@ -208,7 +210,9 @@ export function compactSnapshotPayload(path: string, payload: SnapshotPayload): 
       const cards = path === 'vods' ? items.map(compactVod).filter(Boolean) : items.map((entry) => {
         const item = record(entry)
         const route = itemPath('streams', item)
-        return { ...pick(item, fields), uri_name: route?.slice('streams/'.length) }
+        const heroEmbed = resolveHeroEmbed(item as EventSources)
+        return { ...pick(item, fields), uri_name: route?.slice('streams/'.length),
+          ...(heroEmbed ? { hero_embed: heroEmbed } : {}) }
       })
       return { ...pick(category, ['category', 'id', 'always_live']), [path]: cards }
     })

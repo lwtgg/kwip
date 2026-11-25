@@ -1,4 +1,6 @@
-function parseSourceUrl(url: string): URL | null {
+export const playerShieldSandbox = 'allow-scripts allow-same-origin allow-presentation'
+
+export function parseSourceUrl(url: string): URL | null {
   try {
     return new URL(url.startsWith('//') ? `https:${url}` : url)
   } catch {

@@ -1,3 +1,4 @@
+import { isZliveEmbed, resolveHeroEmbed } from '../app/utils/topEvent.ts'
 import { enrichScoreboards, scoreboardEligible } from './scoreboard.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -378,6 +379,32 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     }
     const healthBytes = json(health)
     if (size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)
+  }
+  // Use remaining pack space after publishing scores and health. A detail-only
+  // embed is optional on the listing when the generation is at its byte limit.
+  const detailsByPath = new Map(scoreRecords.map(record => [record.entry.endpoint.path, record.payload.data]))
+  const { entry, payload } = streamListing
+  const projections = payload.streams.flatMap(category => category.streams.flatMap(item => {
+    const embed = resolveHeroEmbed(item, detailsByPath.get(feedDetailPath('streams', item.uri_name)))
+    return embed && embed !== resolveHeroEmbed(item) ? [{ item, embed }] : []
+  })).sort((a, b) => Number(isZliveEmbed(b.embed)) - Number(isZliveEmbed(a.embed)))
+  if (projections.length) {
+    let listingSize = json(payload).length
+    const limit = Math.min(fileLimit, snapshotLimit - size + entry.endpoint.length - 1)
+    let changed = false
+    for (const { item, embed } of projections) {
+      const delta = json({ ...item, hero_embed: embed }).length - json(item).length
+      if (listingSize + delta > limit) continue
+      listingSize += delta
+      item.hero_embed = embed
+      changed = true
+    }
+    if (changed) {
+      const bytes = json(payload)
+      size += bytes.length - entry.endpoint.length
+      entry.endpoint.length = bytes.length
+      entry.stored = bytes
+    }
   }
   const bytes = Buffer.alloc(size)
   let offset = 0

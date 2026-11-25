@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { watch } from 'vue'
 import { matchBannerContent } from '~/composables/matchBanner'
 import { cardTintStyle } from '~/composables/useCardTint'
 import type { FeedStreamItem } from '~/composables/useFeed'
+import { playerShieldSandbox } from '~/utils/sourceIdentity'
+import { canMountHeroFrame, heroFrameUrl, isZliveEmbed } from '~/utils/topEvent'
 import { formatViewersCompact, formatViewersExact } from '~/utils/viewers'
 
 const props = withDefaults(
@@ -16,6 +19,8 @@ const props = withDefaults(
     headingLevel?: 'h1' | 'h2' | 'h3'
     scale?: 'listing' | 'hero'
     hero?: boolean
+    heroEmbed?: string
+    heroLive?: boolean
   }>(),
   {
     stream: undefined,
@@ -55,6 +60,52 @@ const matchFacts = computed(() => {
       : 'Time unavailable'
   return props.stale ? `Unconfirmed. ${time}.` : `${time}.`
 })
+
+const reservesPlayer = computed(() => props.hero && (!!props.heroEmbed || !!props.stream?.match))
+const playerBox = ref<HTMLElement | null>(null)
+const inViewport = ref(false)
+const visible = ref(false)
+const saveData = ref(false)
+const sound = ref(false)
+const frameKey = ref(0)
+const zlive = computed(() => !!props.heroEmbed && isZliveEmbed(props.heroEmbed))
+const frameMounted = computed(() => !!props.heroEmbed &&
+  canMountHeroFrame(inViewport.value, visible.value, zlive.value && !!props.heroLive, saveData.value))
+const frameSrc = computed(() => props.heroEmbed && heroFrameUrl(props.heroEmbed, !!props.heroLive, sound.value))
+
+function toggleSound() {
+  if (!frameMounted.value) return
+  sound.value = !sound.value
+  frameKey.value++
+}
+
+if (props.hero) {
+  // Returning to the slot always starts muted. The only unmuting path is a tap.
+  watch([frameMounted, () => props.heroEmbed, () => props.stream?.uri_name, () => props.heroLive], () => {
+    sound.value = false
+  }, { flush: 'sync' })
+
+  watch([playerBox, () => !!props.heroEmbed], ([box, hasEmbed], _, onCleanup) => {
+    if (!box || !hasEmbed) return
+    const connection = (navigator as Navigator & { connection?: EventTarget & { saveData?: boolean } }).connection
+    const syncConnection = () => { saveData.value = connection?.saveData === true }
+    const syncVisibility = () => { visible.value = document.visibilityState === 'visible' }
+    syncConnection()
+    syncVisibility()
+    connection?.addEventListener('change', syncConnection)
+    document.addEventListener('visibilitychange', syncVisibility)
+    const observer = new IntersectionObserver(([entry]) => {
+      inViewport.value = !!entry?.isIntersecting
+    })
+    observer.observe(box)
+    onCleanup(() => {
+      observer.disconnect()
+      connection?.removeEventListener('change', syncConnection)
+      document.removeEventListener('visibilitychange', syncVisibility)
+      inViewport.value = false
+    })
+  }, { flush: 'post' })
+}
 </script>
 
 <template>
@@ -72,42 +123,66 @@ const matchFacts = computed(() => {
     </div>
   </div>
 
-  <NuxtLink
-    v-else
-    :to="targetHref"
-    :data-variant="variant"
-    :style="stream.match ? undefined : tint"
-    class="event-card group h-full min-h-target rounded-row"
-    :class="[hero ? 'card-hero' : 'card-row', { 'card-matched': stream.match }]"
-  >
-    <template v-if="matchContent">
-      <component :is="headingLevel" class="sr-only">{{ matchContent.label }}</component>
-      <span class="sr-only">{{ matchFacts }}</span>
-      <MatchBanner :stream="stream" :now="now" :stale="stale" :scale="scale" :content="matchContent" />
-    </template>
-    <template v-else>
-      <div
-        class="card-art relative w-full overflow-hidden bg-surface-2"
-        :class="{ 'rounded-row': hero }"
+  <div v-else :class="reservesPlayer ? 'hero-card overflow-hidden rounded-row bg-surface' : 'contents'">
+    <div :class="reservesPlayer ? 'hero-plate relative rounded-row' : 'contents'">
+      <NuxtLink
+        :to="targetHref"
+        :data-variant="variant"
+        :style="stream.match ? undefined : tint"
+        class="event-card group h-full min-h-target rounded-row"
+        :class="[hero ? 'card-hero' : 'card-row', { 'card-matched': stream.match, 'hero-plate-link': reservesPlayer }]"
       >
-        <PosterFallback :name="stream.name" :colors="stream.colors" />
-      </div>
+        <template v-if="matchContent">
+          <component :is="headingLevel" class="sr-only">{{ matchContent.label }}</component>
+          <span class="sr-only">{{ matchFacts }}</span>
+          <MatchBanner :stream="stream" :now="now" :stale="stale" :scale="scale" :content="matchContent" />
+        </template>
+        <template v-else>
+          <div
+            class="card-art relative w-full overflow-hidden bg-surface-2"
+            :class="{ 'rounded-row': hero }"
+          >
+            <PosterFallback :name="stream.name" :colors="stream.colors" />
+          </div>
 
-      <div class="card-info">
-        <span class="card-category text-metadata text-muted"><span>{{ stream.category_name }}</span><span v-if="stream.tag"> · {{ stream.tag }}</span></span>
-        <component :is="headingLevel" class="card-name wrap-anywhere leading-snug text-fg group-hover:underline">
-          {{ stream.name }}
-        </component>
-        <CardTiming :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
-          :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
-        <div class="card-meta gap-x-3 text-metadata text-muted">
-          <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
-          <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
-            <span aria-hidden="true">{{ compact }} {{ metric }}</span>
-          </span>
-          <span class="group-hover:underline">Watch</span>
-        </div>
-      </div>
-    </template>
-  </NuxtLink>
+          <div class="card-info">
+            <span class="card-category text-metadata text-muted"><span>{{ stream.category_name }}</span><span v-if="stream.tag"> · {{ stream.tag }}</span></span>
+            <component :is="headingLevel" class="card-name wrap-anywhere leading-snug text-fg group-hover:underline">
+              {{ stream.name }}
+            </component>
+            <CardTiming :starts-at="stream.starts_at" :ends-at="stream.ends_at" :always-live="stream.always_live"
+              :now="now" :stale="stale" :replay="metricLabel === 'views'" :event-date="countdown" />
+            <div class="card-meta gap-x-3 text-metadata text-muted">
+              <!-- Stale rows are qualified in the lane (Unconfirmed, Last listed) and by the page notice. -->
+              <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
+                <span aria-hidden="true">{{ compact }} {{ metric }}</span>
+              </span>
+              <span class="group-hover:underline">Watch</span>
+            </div>
+          </div>
+        </template>
+      </NuxtLink>
+      <button
+        v-if="zlive"
+        type="button"
+        class="hero-sound min-h-11 rounded-control bg-surface-2 px-3 text-metadata text-fg hover:bg-surface"
+        :disabled="!frameMounted"
+        @click="toggleSound"
+      >
+        {{ sound ? 'Muted' : 'Sound on' }}
+      </button>
+    </div>
+    <div v-if="reservesPlayer" ref="playerBox" class="hero-player aspect-video w-full bg-surface-2">
+      <iframe
+        v-if="frameMounted"
+        :key="frameKey"
+        :src="frameSrc"
+        :title="stream.name"
+        :sandbox="playerShieldSandbox"
+        allow="autoplay; fullscreen; picture-in-picture"
+        allowfullscreen
+        class="block h-full w-full border-0"
+      />
+    </div>
+  </div>
 </template>

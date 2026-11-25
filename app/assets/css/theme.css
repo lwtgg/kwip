@@ -667,3 +667,35 @@
   height: auto;
   min-height: var(--banner-hero-height);
 }
+
+.hero-plate {
+  --hero-controls-height: var(--spacing-target);
+  --hero-controls-inset: var(--spacing-2);
+}
+.hero-plate-link:focus-visible {
+  outline-offset: var(--focus-ring-inset);
+}
+.hero-plate-link:not(.card-matched) {
+  padding-block-end: calc(var(--hero-controls-height) + var(--hero-controls-inset));
+}
+.hero-plate-link .banner-lineup {
+  --banner-pad-bottom: calc(var(--hero-controls-height) + 2 * var(--hero-controls-inset));
+}
+.hero-plate-link .banner-lineup[data-stacked] {
+  padding-block-end: var(--banner-pad-bottom);
+}
+.hero-plate-link .banner-status-tier:last-child {
+  position: absolute;
+  inset-inline-start: var(--hero-controls-inset);
+  inset-block-end: var(--hero-controls-inset);
+  display: grid;
+  align-items: center;
+  inline-size: calc(50% - var(--hero-controls-inset));
+  min-block-size: var(--hero-controls-height);
+}
+.hero-sound {
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-end: var(--hero-controls-inset);
+  max-inline-size: calc(50% - var(--hero-controls-inset));
+}

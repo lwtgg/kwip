@@ -5,7 +5,7 @@ import { validFeedPath } from '~~/server/utils/feed-path'
 import { isSnapshotUnavailable, isSupplementSource, useStream, useVods, type FeedStreamItem } from '~/composables/useFeed'
 import { usePlayerSources, type SourceOption } from '~/composables/usePlayerSources'
 import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
-import { sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
+import { playerShieldSandbox, sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
 import { slugifyCategory } from '~/utils/supplementMatch'
@@ -880,7 +880,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :poster="detail.poster"
             :lazy="currentSource.origin === 'zlive'"
             :title="`${detail.name} — ${currentSource.label}`"
-            :sandbox="shieldEnabled ? 'allow-scripts allow-same-origin allow-presentation' : undefined"
+            :sandbox="shieldEnabled ? playerShieldSandbox : undefined"
             @error="handleFrameError"
           />
           <noscript v-once data-allow-mismatch="children">

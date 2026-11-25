@@ -402,7 +402,7 @@ def status_sources(event):
     return state, '' if detail == state else detail, audience
 
 
-def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False):
+def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False, player=False):
     visible = card.evaluate("""el => {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       const text = [];
@@ -514,7 +514,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         team = paint[f'banner-{side}-team']
         abbrev = paint[f'banner-{side}-label']
         assert team['bottom'] <= abbrev['top'], geometry
-        if not (geometry['stacked'] or bottom['wrap']):  # a wrapped line is centred in a taller row
+        if not (geometry['stacked'] or bottom['wrap'] or player):  # a wrapped line is centred in a taller row
             assert abs(abbrev['top'] - bottom['top']) <= .25, geometry
         if scored:
             score = paint[f'banner-{side}-score']
@@ -746,7 +746,12 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                         expect(hero.locator('.banner-score')).to_have_count(2)
                         page.evaluate('document.fonts.ready')
                         assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
-                        geometry = assert_clean_banner(hero, events[0], oracle, listing_row=False)
+                        geometry = assert_clean_banner(hero, events[0], oracle, listing_row=False, player=True)
+                        player = page.locator('.hero-card .hero-player')
+                        reserved = player.bounding_box()
+                        assert reserved['width'] == hero.bounding_box()['width']
+                        assert abs(reserved['height'] - reserved['width'] * 9 / 16) < .02
+                        expect(player.locator('iframe')).to_have_count(0)
                         hero_results.append(dict(viewport=width, theme=theme, density=density, **geometry))
                         hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
                 print(prefix, '/'.join(text_modes), flush=True)
