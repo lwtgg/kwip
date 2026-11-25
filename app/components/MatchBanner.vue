@@ -6,6 +6,7 @@ import type { FeedStreamItem } from '~/composables/useFeed'
 import type { matchBannerContent } from '~/composables/matchBanner'
 
 const props = defineProps<{ stream: FeedStreamItem; now?: number; stale?: boolean; scale?: 'listing' | 'hero'; content: ReturnType<typeof matchBannerContent> }>()
+const hangul = /\p{Script=Hangul}/u
 const logoImages: HTMLImageElement[] = []
 const lineupElement = ref<HTMLElement | null>(null)
 const failed = ref<Record<string, boolean>>({})
@@ -53,10 +54,13 @@ function fitText() {
   }
   const statusWidths = status.map(line => {
     const width = unbreakableWidth(line)
-    // A single exceptionally wide unit can exceed even the full stacked row.
+    // Try monospace when a unit exceeds the full row at the fit floor.
     if (Math.ceil(width * floor) + 1 <= available) return width
     line.dataset.mono = ''
-    return unbreakableWidth(line)
+    const monoWidth = unbreakableWidth(line)
+    if (monoWidth < width) return monoWidth
+    delete line.dataset.mono
+    return width
   })
 
   const natural = new Map(lines.map(line => [line, line.offsetWidth + 1]))
@@ -120,7 +124,7 @@ onBeforeUnmount(() => observer?.disconnect())
       <div class="banner-status">
         <div v-for="(line, index) in content.tiers" :key="index" class="banner-status-tier">
           <span v-if="line" class="banner-fit-text banner-status-line" :class="{ 'banner-versus': line === 'vs' }"
-            :style="{ '--banner-chars': line.length }">{{ line }}</span>
+            :data-hangul="hangul.test(line) ? '' : undefined" :style="{ '--banner-chars': line.length }">{{ line }}</span>
         </div>
       </div>
     </div>

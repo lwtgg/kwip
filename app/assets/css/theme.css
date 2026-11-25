@@ -581,8 +581,10 @@
 }
 .banner-status-tier { align-self: center; min-width: 0; }
 .banner-status-line {
+  overflow-wrap: break-word;
   --banner-size-fit: min(1, calc(var(--banner-status-fit-width) / (var(--banner-status-size) * var(--banner-chars))));
 }
+.banner-status-line[data-hangul] { word-break: keep-all; }
 .banner-fit-text {
   position: relative;
   left: 50%;

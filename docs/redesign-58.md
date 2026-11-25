@@ -415,3 +415,60 @@ once in each theme and density.
   `NITRO_PRESET=node-server pnpm build`, default rebuild,
   `pnpm exec wrangler deploy --dry-run` and `git diff --check` passed.
   Logs and screenshots are under `/tmp/kw58-fix6`.
+
+## Seventh review pass
+
+Status tiers still use native wrapping. A tier containing a Hangul code point
+carries `data-hangul` in SSR and hydrated markup. That tier uses
+`word-break: keep-all`. A Han-only tier keeps the browser's per-character
+breaks, and Thai and Khmer retain their dictionary breaks.
+
+All status tiers use `overflow-wrap: break-word` for text that exceeds even
+the stacked row. This preserves the word's `min-content` width for the fit
+pass. The pass keeps monospace when it reduces that measured width.
+
+The Chromium oracle checks one DOM Range per word in the Hangul details,
+including decomposed jamo, trailing jamo, mixed Latin/Thai/Hangul, the original
+`후반전 연장전 훅` regression, and `후반전연장전승부차기진행중`. It also
+checks Thai and Khmer word boundaries. The matrix runs at 3× on 320, 390 and
+1280 px viewports, with normal and doubled root text, in SSR, fallback, and
+hydrated renders. The grapheme check still runs on every tier.
+
+A built-copy control renamed the emitted `data-hangul` attribute in the server
+and client bundles, leaving the CSS selector intact. The word assertion failed
+on `matched-hangul-spaced` at 390 px with 200% root text and
+`Intl.Segmenter` removed from the page. Each of the words `후반전`
+(`[0,3)`) and `연장전` (`[4,7)`) returned two rectangles. The offsets
+are relative to the detail tier and measured in UTF-16 code units.
+
+At 320 px with 200% root text, the longest word in `후반전 연장전 훅`
+measured 67 px at `min-content`, matching the whole word's width. A single
+syllable measured 23 px. The 20-syllable stress case measured 450 px at both
+`min-content` and `max-content`. It stacked and used the emergency wrap to
+stay within the card across two lines, with its original font. Han ×24
+measured 25 px at `min-content`, matching one character, and wrapped across
+two lines with `word-break: normal`.
+
+The live progress assertion now computes the expected percentage from the
+fixture's event window and the observation time. This keeps the assertion
+valid when the browser matrix takes more than a minute to reach the last
+fixtures.
+
+The separate 32-cell probe reproduced the eight monospace cells, all in
+`matched-widest` at 320 or 390 px with doubled element or root text, in fallback
+and hydrated renders. It observed 30 Thai and Khmer wraps at dictionary word
+boundaries and zero split graphemes or horizontal overflow.
+
+### Verification gate
+
+- The fresh and stale card sweeps passed. All 1,152 matched listing
+  observations and 16 heroes had zero horizontal overflow, hydration errors
+  or uncaught page errors. Minimum rendered contrast was 4.55:1.
+- Banner, density, not-live, click-under, generation-first and source-health
+  browser suites passed. Click-under used the `1942ccb` baseline,
+  generation-first used a local packed generation, and source health used
+  a locally seeded build.
+- All 189 unit tests passed. Both build presets, the default rebuild,
+  `pnpm exec wrangler deploy --dry-run`, the Worker build-key check, the
+  contrast sweep and `git diff --check` passed. Logs and screenshots are
+  under `/tmp/kw58-fix7/final`.
