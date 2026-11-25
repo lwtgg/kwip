@@ -1,6 +1,5 @@
 <script setup lang="ts">
 const props = defineProps<{
-  banner?: boolean
   startsAt: number
   endsAt: number
   alwaysLive?: number
@@ -65,7 +64,7 @@ const schedule = computed(() => !props.stale && !props.replay && scheduled.value
     <span v-if="!stale && !replay && start && !scheduled && !channel" class="card-lane-note text-metadata text-muted" aria-label="Availability unconfirmed">Unconfirmed</span>
     <span v-if="stale" :aria-label="`Last listed: ${listedTime}`" class="card-lane-note text-metadata text-muted">{{ kickoff || channel || replay ? `Last listed: ${listedTime}` : 'No time listed' }}</span>
     <!-- The bar is placed on the row's bottom edge, out of the lane's flow (theme.css). -->
-    <div v-if="schedule && !banner" class="card-lane-bar h-1">
+    <div v-if="schedule" class="card-lane-bar h-1">
       <LiveProgress v-if="started && now !== undefined"
         :starts-at="startsAt" :ends-at="endsAt" :always-live="alwaysLive" :now="now" />
     </div>

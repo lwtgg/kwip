@@ -9,7 +9,7 @@ import re
 def assert_banner_contrast(banner):
     rendered = banner.evaluate('''el => ({
       background: getComputedStyle(el).backgroundImage,
-      colors: [...el.querySelectorAll('.banner-score, .banner-status > span, .banner-initials, .banner-abbreviation')]
+      colors: [...el.querySelectorAll('.banner-score, .banner-status-line, .banner-initials, .banner-abbreviation')]
         .map(n => getComputedStyle(n).color)
     })''')
     layers = re.split(r', (?=linear-gradient)', rendered['background'])

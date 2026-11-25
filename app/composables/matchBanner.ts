@@ -1,4 +1,38 @@
 import { hexRGB } from './cardTint.ts'
+import type { FeedStreamItem } from './useFeed.ts'
+import { formatViewersCompact, formatViewersExact } from '../utils/viewers.ts'
+
+const stateLabels = { pre: 'Upcoming', in: 'Live', post: 'Final' } as const
+
+type Match = NonNullable<FeedStreamItem['match']>
+
+/** Up to `count` capital initials, one per word. */
+export function teamInitials(name: string, count = 2): string {
+  return name.trim().split(/\s+/).slice(0, count).map(word => Array.from(word)[0] ?? '').join('').toUpperCase()
+}
+
+/** The feed's abbreviation, or initials when it is empty, so nothing under a logo is ever blank. */
+export function bannerAbbreviation(side: Match['away']): string {
+  return side.abbreviation.trim() || teamInitials(side.name, 3)
+}
+
+export function matchBannerContent(match: Match, viewers: string | number, metric: 'viewers' | 'views', stale: boolean) {
+  const state = stateLabels[match.state]
+  const hasScores = match.away.score !== null && match.home.score !== null
+  const detail = match.state === 'pre' && !hasScores ? 'vs' : match.detail === state ? '' : match.detail
+  const exact = formatViewersExact(viewers)
+  const unit = exact === '1' ? metric.slice(0, -1) : metric
+  const compact = formatViewersCompact(viewers)
+  const audience = stale ? '' : `${compact} ${unit[0]!.toUpperCase()}${unit.slice(1)}`
+  // The name says what the banner shows, in its words and order: matchup, state, detail, audience.
+  // The exact count follows the compact one only when they differ.
+  const teams = hasScores
+    ? `${match.away.name} ${match.away.score}, ${match.home.name} ${match.home.score}`
+    : `${match.away.name} vs ${match.home.name}`
+  const spoken = audience && (exact === compact ? audience : `${audience} (${exact})`)
+  const label = [teams, state, detail === 'vs' ? '' : detail, spoken].filter(Boolean).join('. ') + '.'
+  return { hasScores, tiers: [state, detail, audience], label }
+}
 
 /** sRGB source-over, with invalid/missing colours degrading independently. */
 export function mixBannerColor(color: string | null | undefined, base: string, opacity: number): string {
