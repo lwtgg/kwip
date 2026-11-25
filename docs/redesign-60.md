@@ -17,13 +17,17 @@ Every matched banner (listing row, `Next up` row, hero) uses one four-row grid:
 
 - `.banner-status` is a subgrid on both axes, spanning the score tracks and all four rows. The text
   tiers sit in the middle track. Logos and score boxes share a vertical centre. After wrapping and
-  horizontal fitting, the fit pass uses canvas glyph bounds and the rendered line positions to
-  align the state's ink with the scores' ink. The offset leaves the grid rows at their original
-  sizes. When there are no scores, the state box aligns with the logo boxes.
-- The score row's height is set by the tallest of the logo, the score and the state. The score's
-  line height is `--banner-score-leading` (1.16, the old stacked-only token). This keeps the font's
-  whole content area inside its line box now that the score always opens the card. At normal text
-  the 40 px logo is still the tallest item, so normal cards did not grow from this.
+  horizontal fitting, the fit pass aligns the state's ink with the scores' ink. A zero-size inline
+  block gives the first line's layout baseline, and range positions give the offset to subsequent
+  lines. Canvas supplies glyph ascent and descent. The fit drops collapsed whitespace rects and
+  whitespace-only rows. The offset does not change the grid rows. When there are no scores, the
+  state box aligns with the logo boxes.
+- The score row's height is set by the tallest of the logo, the score and the state. Listings use
+  `--banner-score-leading` (1.16), and the hero uses `--banner-hero-score-leading` (0.9).
+  At normal text the 40 px listing logo still sets the score row's height.
+- The grid has equal block padding at both edges. Listings use 8 px at comfortable density and
+  2 px at compact density. Heroes use 16 px at both densities. The hero minimum height can add
+  space equally at both ends.
 - Empty tiers collapse. A final with `detail == state` is two tiers, and a stale final is one.
 - Compact layout (`data-stacked`, chosen by the fit pass when five columns cannot hold the longest
   word at the floor): each abbreviation spans its team and score tracks, and the logo may shrink to
@@ -86,7 +90,7 @@ audience line box and each of its client rects, and must sit below the link. The
 with `plate.bottom <= button.top`. That can never hold, because the footer is inside `.hero-plate`, and
 the draft never ran it.
 
-## Measurements
+## Original measurements
 
 Chromium, `cards_browser.py` matched matrix: 25 fixtures, 4 widths, 2 themes, 2 densities, 3 text modes
 (1,200 listing observations), 32 matched hero observations (including root 200 %), a stale pass and
@@ -94,18 +98,13 @@ the `Next up` row. A card's ratio is width ÷ height.
 
 ### Centre offsets
 
-The largest offsets across all widths, text modes, themes and densities. Ink offsets in this
-table come from canvas font metrics. In review-two's own 4x DPR screenshots, which this round
-reproduced, the worst ink offset was 1.0 px with the correction and 4.62 px with it disabled.
+The original Chromium matrix compared the canvas model with itself. Its maxima were 0.017 px in
+listings and 0.009 px in the hero. These figures report internal agreement. Box geometry independently
+put logo and score box centres within 0.008 px in both layouts. The production pixel audit found
+a worst listing state-to-score offset of 1.125 px at 2× DPR. The round-four screenshot check allows
+1.25 px to account for pixel-grid snapping.
 
-| Measure | Required | Worst from font metrics or box geometry |
-|---|---|---|
-| Listing state ink vs either score's ink (box centres when unscored) | ≤ 1 px | 0.017 px |
-| Listing logo box vs score box | ≤ 1 px | 0.008 px |
-| Hero state ink vs either score's ink | ≤ 1 px | 0.009 px |
-| Hero logo box vs score box | ≤ 1 px | 0.008 px |
-
-### Ratio, listing rows at normal text
+### Original ratios, category rows at normal text
 
 These are the minimum across both themes and densities and every non-growth fixture. One tier is a
 stale final, two tiers is a final or a stale live/upcoming card, three tiers is live or upcoming.
@@ -136,8 +135,8 @@ rounded down to two places.
 | 1024 | 3.50 | kept; measured 4.68 |
 | 1280 | 3.50 | kept; measured 5.92 |
 
-The floor applies to every non-growth listing row, fresh and stale. No padding was shaved to reach 3.5
-at 390.
+The original floor applied to every non-growth category row, fresh and stale. The round-four floors
+are below.
 
 ### Text at 200 %
 
@@ -167,7 +166,7 @@ Each is restored or replaced with a stricter equivalent:
 | `status_gap` negative when no detail | `None` when there is no detail tier |
 | Hero footer disjointness replaced by an impossible check | disjointness restored (see Hero) |
 
-Coverage includes ink and box centre offsets, tier order and containment, fill width and contrast,
+The original suite covered model-relative ink centres, box centres, tier order and containment, fill width and contrast,
 an always-live fixture, a stale pass, and the expected wide-detail cells. The timeline test checks
 both endpoints against the score-slot edges in the five-column layout and the middle-column edges
 in the stacked layout. It allows 1 px of rounding after applying the gutter, and still checks
@@ -194,6 +193,7 @@ Hangul, Khmer and mixed fixtures. It did, in every run.
 
 ## Original verification gate
 
+All checks in this gate used local builds. The gate included no production pixel check.
 No Worker was serving during any build. Logs are under `/tmp/kw60-gate/final`, red-control logs under
 `/tmp/kw60-red`.
 
@@ -224,7 +224,7 @@ No Worker was serving during any build. Logs are under `/tmp/kw60-gate/final`, r
 
 ## Round two verification
 
-The score fixture (`Live`, 50–97) was also measured from screenshot pixels at 3× device scale.
+The score fixture (`Live`, 50–97) was also measured from local Chromium screenshot pixels at 3× device scale on macOS.
 Across 320, 390, 1024 and 1280 px at normal and root 200 % text, the state ink was within 1.0 px
 of either score in listings and within 0.67 px in the hero.
 
@@ -244,8 +244,96 @@ The contrast sweep passed. The browser gate used the same four-width scratch dri
 generation, with a build of the same click-under baseline as the original gate. Source health passed
 at all four widths after rebuilding a separate copy with the task 55 seed files present at build time.
 
+## Round four
+
+Acumin's `unicode-range: U+0030-0039` includes the score digits and excludes U+0020. The old model
+depended on canvas and layout choosing the same primary font for the line, typically Arial Narrow on
+the audit Mac, while Acumin draws the digits. The first-family-only font string can also lose the
+glyph fallback for the state text when an engine cannot resolve that family on its own. The fit
+retains the full computed stack and gets its baseline from layout. Chromium's platform font report
+confirms the two digit glyphs come from the custom Acumin face.
+
+### Row position and score-to-detail spacing
+
+Dark, comfortable density, normal text, 50–97 fixture on the local Chromium build. The ratio floors
+at 320 and 390 now use the measured category row heights after restoring symmetry. Both wide floors
+remain 3.50. The listing score row still measures 40 px at normal text. Across the full matrix
+the largest padding difference was 0.016 px, the minimum hero digit fill was 74.0%, and the
+largest hero-to-listing detail gap ratio was 1.5998.
+
+| Width | Listing above / below | Hero above / below | Hero digit fill | Listing / hero digit-to-detail gap | Category three-tier ratio (floor) |
+|---|---:|---:|---:|---:|---:|
+| 320 | 8 / 8 px | 16 / 16 px | 74.0% | 11.62 / 10.01 px | 2.700 (2.69) |
+| 390 | 8 / 8 px | 16 / 16 px | 74.0% | 11.62 / 10.01 px | 3.356 (3.35) |
+| 1024 | 8 / 8 px | 36.98 / 37.00 px | 74.0% | 11.62 / 14.69 px | 4.500 (3.50) |
+| 1280 | 8 / 8 px | 46.27 / 46.28 px | 74.0% | 11.62 / 18.59 px | 5.700 (3.50) |
+
+At 1280 px the hero's score line box fell from 148.47 px to 115.19 px. The fixture draws
+85.25 px of digit ink in the Chromium screenshot. The hero retains its 320 px minimum height for
+the plate proportions. Its content with the 16 px edge padding measures about 259.45 px, so the
+minimum adds about 30.27 px of space at each edge.
+
+### Screenshot ink oracle
+
+Local Playwright on macOS 27.3, DPR 4. The table shows the largest absolute state offset against
+either score and the largest absolute top or bottom error across the state and both scores. The
+decoder reads element clip screenshots with white text on black. On Chromium the model projects the
+layout baseline to the paint baseline by snapping in document coordinates before applying the
+transform. WebKit uses the fractional baseline directly. The limits are 1.25 px for centres and
+0.5 px for each edge.
+
+| Engine | Width / fixture | Max centre offset | Max edge error |
+|---|---|---:|---:|
+| Chromium 159.0.8154.6 | 390 listing | 0.875 px | 0.337 px |
+| Chromium 159.0.8154.6 | 390 hero | 0.500 px | 0.298 px |
+| Chromium 159.0.8154.6 | 1280 listing | 0.875 px | 0.337 px |
+| Chromium 159.0.8154.6 | 1280 hero | 0.000 px | 0.231 px |
+| Chromium 159.0.8154.6 | 320 wrapped state, root 200% | 0.250 px | 0.159 px |
+| Chromium 159.0.8154.6 | 320 hero | 0.500 px | 0.298 px |
+| WebKit 27.2 | 390 listing | 0.375 px | 0.251 px |
+| WebKit 27.2 | 390 hero | 0.125 px | 0.127 px |
+| WebKit 27.2 | 1280 listing | 0.375 px | 0.258 px |
+| WebKit 27.2 | 1280 hero | 0.000 px | 0.158 px |
+| WebKit 27.2 | 320 wrapped state, root 200% | 0.125 px | 0.133 px |
+| WebKit 27.2 | 320 hero | 0.125 px | 0.127 px |
+
+### Regression controls
+
+Restoring the 4 px top padding gave 4 px above and 8 px below the listing row, which failed the
+symmetry assertion. Restoring hero leading to 1.16 brought digit fill down to 57.4%, which failed
+the 60% floor. Removing the state offset displaced its modelled centre by 4.53 px, and moving it
+to its own row displaced it by 28.44 px. Both failed their centre assertion.
+
+With Times substituted only in the canvas model in both the component and test on a separate
+build, the 390 listing still aligned within 0.125 px by pixels. The screenshot parity check
+failed with a 1.107 px state top error and 0.75 px on each score top against the 0.5 px bound.
+
+### Verification gate
+
+All checks used local builds. This round has no production pixel check or deployment. Logs and
+reports are in `/tmp/kw60-r4-final`.
+
+- `pnpm test` passed all 199 tests. The default build, node-server build, default rebuild and
+  Wrangler dry run passed. The build-key Worker check missed after the second build and hit
+  the new CSS on the third request. A final default rebuild and dry run followed it.
+- The cards, top-event, banner, density, not-live, click-under, source-health and generation-first
+  browser suites passed at 320, 390, 1024 and 1280 px. The card sweep reported zero hydration or
+  uncaught page errors. The contrast sweep passed.
+- As in the earlier gate, the four-width scratch drivers used the banner slot expectations for
+  all four widths and the generation-first payload decoder for null-prototype objects. Click-under
+  used the existing baseline build, generation-first used a locally packed generation, and source
+  health used a separate build with the task 55 seed.
+
 ## Review follow-ups
 
+- F3/F11. The production listing correction overshot by 0.875–1.0 px at 4× DPR in the audit,
+  and by up to 1.125 px at 2×. With the correction disabled, the reviewed listings sat 0.25–0.375 px
+  above the digits. The local Chromium listing still sits 0.875 px below them at 4×.
+- F5. At root 200%, the existing header controls can overflow the document at 320 and 390 px.
+  The review measured document scroll width of 400 px at both widths. The card matrix checks each
+  banner's containment in this mode.
+- F6. The original ratio table measured category rows. Production rail rows measured 480 × 116 px
+  at 1024 and 1280 px, for a ratio of 4.138. Rails need their own measurements.
 - Measure the fill against the translucent track on bright team fields. The review estimated about
   2.4:1 at the lightest allowed field. The existing sweep measures fill against the field.
 - Revisit the stacking threshold for `matched-live` at 390 px with root text at 200 %. The unstacked

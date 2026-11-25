@@ -1,8 +1,11 @@
 """50a card matrix. Run after pnpm build: python tests/cards_browser.py .output --screenshots /tmp/kwip50a-shots"""
 from banner_rendered_contrast import assert_banner_contrast
 import argparse
+from base64 import b64encode
 from datetime import datetime, timezone
 import json
+from math import ceil, floor
+import platform
 import re
 from pathlib import Path
 import tempfile
@@ -282,8 +285,8 @@ def check_known_hero(browser, origin, assets, dest):
 
 # Smallest width-to-height ratio of a listing row, measured per viewport for task 60 (docs/redesign-60.md).
 # The measured three-tier rows fall below 3.5 at 320px and 390px.
-# Measured three-tier minimum: 2.8051 at 320px and 3.4868 at 390px.
-RATIO_FLOOR = {320: 2.8, 390: 3.48, 1024: 3.5, 1280: 3.5}
+# After restoring symmetric padding, the three-tier ratios are 2.6999 at 320px and 3.3561 at 390px.
+RATIO_FLOOR = {320: 2.69, 390: 3.35, 1024: 3.5, 1280: 3.5}
 # Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
 WIDE_DETAIL = {
     (320, 'element'): {'matched-widest', 'matched-hangul-long-word'},
@@ -294,33 +297,44 @@ WIDE_DETAIL = {
 }
 
 
-def banner_geometry(card):
-    return card.evaluate(r"""el => {
+def banner_geometry(card, snap_paint_baseline=False):
+    return card.evaluate(r"""(el, snapPaintBaseline) => {
       const rect = r => ({left:r.left, right:r.right, top:r.top, bottom:r.bottom,
         width:r.width, height:r.height});
       const banner = el.querySelector('.match-banner');
       const lineup = banner.querySelector('.banner-lineup');
       const canvas = document.createElement('canvas').getContext('2d');
-      const inkCentre = n => {
+      const inkBounds = n => {
+        if (!n) return null;
         const style = getComputedStyle(n);
         canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-        canvas.fontStretch = style.fontStretch;
         const text = n.firstChild;
         const range = document.createRange();
+        range.selectNodeContents(text);
+        const probe = document.createElement('span');
+        probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+        n.prepend(probe);
+        const baseline = probe.getBoundingClientRect().top;
+        probe.remove();
+        const firstRow = [...range.getClientRects()].find(r => r.height > 0)?.top;
         const rows = new Map();
         let offset = 0;
         for (const character of text.data) {
           range.setStart(text, offset);
           range.setEnd(text, offset += character.length);
-          const {top} = range.getBoundingClientRect();
+          const {top, height} = range.getBoundingClientRect();
+          if (!height) continue;
           rows.set(top, (rows.get(top) || '') + character);
         }
-        const ink = [...rows].map(([top, content]) => {
+        const translateY = new DOMMatrix(style.transform).f;
+        const ink = [...rows].filter(([, content]) => content.trim()).map(([top, content]) => {
           const m = canvas.measureText(content.trim());
-          return [top + m.fontBoundingBoxAscent - m.actualBoundingBoxAscent,
-                  top + m.fontBoundingBoxAscent + m.actualBoundingBoxDescent];
+          let rowBaseline = baseline + top - firstRow;
+          // Chromium snaps the text baseline in layout coordinates, before the CSS transform.
+          if (snapPaintBaseline) rowBaseline = Math.round(rowBaseline + scrollY - translateY) - scrollY + translateY;
+          return [rowBaseline - m.actualBoundingBoxAscent, rowBaseline + m.actualBoundingBoxDescent];
         });
-        return (Math.min(...ink.map(row => row[0])) + Math.max(...ink.map(row => row[1]))) / 2;
+        return [Math.min(...ink.map(row => row[0])), Math.max(...ink.map(row => row[1]))];
       };
       const nodes = [...banner.querySelectorAll('.banner-fit-text, .banner-team img')];
       const track = banner.querySelector('[role=progressbar]');
@@ -358,8 +372,10 @@ def banner_geometry(card):
         wideDetail:lineup.hasAttribute('data-wide-detail'),
         logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
         labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
-        stateInk:inkCentre(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
-        scoreInk:[...banner.querySelectorAll('.banner-score')].map(inkCentre),
+        stateInk:inkBounds(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
+        scoreInk:[...banner.querySelectorAll('.banner-score')].map(inkBounds),
+        detailInk:inkBounds(banner.querySelector('.banner-status-tier:nth-child(2) .banner-status-line')),
+        minHeight:parseFloat(getComputedStyle(banner).minHeight),
         scoreSlots:[...banner.querySelectorAll('.banner-score-slot')].map(n => rect(n.getBoundingClientRect())),
         scoreBoxes:[...banner.querySelectorAll('.banner-score')].map(n => rect(n.getBoundingClientRect())),
         tiers:[...banner.querySelectorAll('.banner-status-tier')].map(n => rect((n.firstElementChild || n).getBoundingClientRect())),
@@ -377,7 +393,7 @@ def banner_geometry(card):
           return {natural:n.offsetWidth + 1, room:n.parentElement.getBoundingClientRect().width - parseFloat(slot.paddingLeft) - parseFloat(slot.paddingRight)};
         })
       };
-    }""")
+    }""", snap_paint_baseline)
 
 
 def banner_measurements(geometry):
@@ -391,11 +407,19 @@ def banner_measurements(geometry):
         *geometry['logoBoxes'], *geometry['scoreBoxes'], geometry['tiers'][0])) if 'tier-1' in paint else None
     state = geometry['tiers'][0]
     centre = lambda box: (box['top'] + box['bottom']) / 2
-    state_offset = (max(abs(geometry['stateInk'] - score) for score in geometry['scoreInk'])
+    ink_centre = lambda edges: sum(edges) / 2
+    state_offset = (max(abs(ink_centre(geometry['stateInk']) - ink_centre(score)) for score in geometry['scoreInk'])
                     if geometry['scoreInk'] else max(abs(centre(state) - centre(logo)) for logo in geometry['logoBoxes']))
     logo_offset = max((abs(centre(logo) - centre(score)) for logo, score in
                        zip(geometry['logoBoxes'], geometry['scoreBoxes'])), default=0)
-    return dict(height=box['height'], width=box['width'], ratio=box['width'] / box['height'],
+    top_gap = min(item['top'] for item in (*geometry['logoBoxes'], *geometry['scoreBoxes'], geometry['middle'])) - box['top']
+    bottom_gap = box['bottom'] - max(item['bottom'] for item in (*geometry['labels'], geometry['progress'] or geometry['labels'][0]))
+    detail_gap = (geometry['detailInk'][0] - max(edges[1] for edges in geometry['scoreInk'])
+                  if geometry['detailInk'] and geometry['scoreInk'] else None)
+    return dict(top_gap=top_gap, bottom_gap=bottom_gap, detail_ink_gap=detail_gap,
+                digit_fill=min(((bottom - top) / score['height'] for (top, bottom), score in
+                                zip(geometry['scoreInk'], geometry['scoreBoxes'])), default=None),
+                min_height=geometry['minHeight'], height=box['height'], width=box['width'], ratio=box['width'] / box['height'],
                 tiers=sum(f'tier-{index}' in paint for index in range(3)), wide_detail=geometry['wideDetail'],
                 status_width=geometry['statusWidth'], detail_lines=detail['lines'],
                 abbreviation_lines=max(paint[f'banner-{side}-label']['lines'] for side in ('away', 'home')),
@@ -409,6 +433,13 @@ def banner_measurements(geometry):
                 gutter=geometry['gutter'], score_gap=score_gap, status_gap=status_gap,
                 state_offset=state_offset, logo_offset=logo_offset,
                 stacked=geometry['stacked'])
+
+
+def assert_hero_dead_band(hero, listing, fixture):
+    assert hero['digit_fill'] >= .6, ('hero digit fill below 60%', fixture, hero['digit_fill'])
+    if listing:
+        assert hero['detail_ink_gap'] <= 1.6 * listing['detail_ink_gap'], (
+            'hero digit-to-detail dead band', fixture, hero['detail_ink_gap'], listing['detail_ink_gap'])
 
 
 def assert_rendered_segments(oracle, card, sources, fixture, granularity='grapheme'):
@@ -569,6 +600,8 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
     state, detail, audience = geometry['tiers']
     labels = geometry['labels']
     measurements = banner_measurements(geometry)
+    assert abs(measurements['top_gap'] - measurements['bottom_gap']) <= 2, (
+        'score row padding symmetry', fixture, measurements['top_gap'], measurements['bottom_gap'])
     # Logos share the score box centre. The state aligns with the visible score glyphs.
     assert measurements['logo_offset'] <= 1, ('logo centre offset', fixture, measurements['logo_offset'])
     assert measurements['state_offset'] <= 1, ('state ink centre offset', fixture, measurements['state_offset'])
@@ -839,6 +872,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
     for width in (320, 390, 1024, 1280):
         for theme in ('dark', 'light'):
             for density in ('comfortable', 'compact'):
+                listing_rows = {}
                 with browser.new_context(viewport={'width': width, 'height': 850}, reduced_motion='reduce') as context:
                     context.add_cookies([dict(name='theme', value=theme, url=origin), dict(name='density', value=density, url=origin)])
                     context.route('**/fixtures/missing-logo.png', lambda route: route.fulfill(status=404, body=''))
@@ -906,31 +940,35 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                         card.screenshot(path=str(dest / f'{prefix}-row.png'))
                                 if slug in ('matched-bad-color', 'matched-no-color'):
                                     assert card.locator('.match-banner').evaluate("el => el.style.getPropertyValue('--banner-away')") == '#272624'
+                            if slug == 'matched-live':
+                                listing_rows[mode] = geometry
                             results.append(dict(viewport=width, theme=theme, density=density, fixture=slug, mode=mode, **geometry))
                         if not measure_only:
                             page.screenshot(path=str(dest / f'{prefix}-{mode}-matches.png'), full_page=True)
                     if not measure_only and 'normal' in text_modes:
                         assert not any('never-fetch-provider' in url for url in requests), requests
-                        hero_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[events[0]])])
-                        (assets / 'fixtures/streams.json').write_text(json.dumps(hero_listing))
-                        assert page.goto(origin, wait_until='networkidle').ok
-                        (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
-                        hero = page.locator('a.card-hero.card-matched')
-                        expect(hero.locator('.banner-score')).to_have_count(2)
-                        page.evaluate('document.fonts.ready')
-                        assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
-                        featured = page.get_by_role('region', name='Featured event')
-                        expect(featured.locator('.hero-player')).to_have_count(0)
-                        for mode in ('normal', 'root'):
-                            if mode == 'root':
-                                page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
-                            settle_fit(page)
-                            geometry = assert_clean_banner(hero, events[0], oracle, listing_row=False)
-                            assert hero.evaluate('el => el.getBoundingClientRect().right <= innerWidth')
-                            assert featured.bounding_box()['height'] == hero.bounding_box()['height']
-                            hero_results.append(dict(viewport=width, theme=theme, density=density, mode=mode, **geometry))
-                            if mode == 'normal':
-                                hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
+                        for event in (events[0], events[-1]):
+                            hero_listing = dict(listing, streams=[dict(listing['streams'][0], streams=[event])])
+                            (assets / 'fixtures/streams.json').write_text(json.dumps(hero_listing))
+                            assert page.goto(origin, wait_until='networkidle').ok
+                            (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
+                            hero = page.locator('a.card-hero.card-matched')
+                            expect(hero.locator('.banner-score')).to_have_count(2)
+                            page.evaluate('document.fonts.ready')
+                            featured = page.get_by_role('region', name='Featured event')
+                            expect(featured.locator('.hero-player')).to_have_count(0)
+                            for mode in ('normal', 'root'):
+                                if mode == 'root':
+                                    page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                                settle_fit(page)
+                                geometry = assert_clean_banner(hero, event, oracle, listing_row=False)
+                                assert_hero_dead_band(geometry, listing_rows.get(mode), (prefix, mode, event['uri_name']))
+                                assert hero.evaluate('el => el.getBoundingClientRect().right <= innerWidth')
+                                assert featured.bounding_box()['height'] == hero.bounding_box()['height']
+                                hero_results.append(dict(viewport=width, theme=theme, density=density,
+                                                         mode=mode, fixture=event['uri_name'], **geometry))
+                                if mode == 'normal' and event is events[0]:
+                                    hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
                 print(prefix, '/'.join(text_modes), flush=True)
     print(f'Hydration and uncaught page errors: {len(hydration_errors)}', flush=True)
     assert not hydration_errors, hydration_errors
@@ -942,11 +980,138 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
     (dest / 'match-report.json').write_text(json.dumps(results, indent=2))
 
 
+def screenshot_ink(line, dpr):
+    """Decode the element's painted pixels on the device grid, including ink outside its line box."""
+    page = line.page
+    line.evaluate("el => el.setAttribute('data-ink-target', '')")
+    try:
+        box = line.bounding_box()
+        left = max(0, floor(box['x']) - 2)
+        top = max(0, floor(box['y']) - 8)
+        right = ceil(box['x'] + box['width']) + 2
+        bottom = ceil(box['y'] + box['height']) + 8
+        image = page.screenshot(
+            clip=dict(x=left, y=top, width=right - left, height=bottom - top),
+            style="""
+              .match-banner { background: black !important }
+              .match-banner * { visibility: hidden !important }
+              .match-banner [data-ink-target] { visibility: visible !important; color: white !important }
+            """,
+        )
+    finally:
+        line.evaluate("el => el.removeAttribute('data-ink-target')")
+    bounds = page.evaluate("""async png => {
+      const bytes = Uint8Array.from(atob(png), value => value.charCodeAt(0));
+      const image = await createImageBitmap(new Blob([bytes], {type: 'image/png'}));
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, 0, 0);
+      image.close();
+      const {data} = context.getImageData(0, 0, canvas.width, canvas.height);
+      const rows = [];
+      for (let y = 0; y < canvas.height; y++) {
+        const end = (y + 1) * canvas.width * 4;
+        for (let i = y * canvas.width * 4; i < end; i += 4) {
+          if (Math.min(data[i], data[i + 1], data[i + 2]) >= 128) {
+            rows.push(y);
+            break;
+          }
+        }
+      }
+      return rows.length ? [rows[0], rows.at(-1) + 1] : null;
+    }""", b64encode(image).decode('ascii'))
+    assert bounds, ('no screenshot ink', line.inner_text(), box)
+    return [top + edge / dpr for edge in bounds]
+
+
+def measure_pixel_card(card, cell, dpr):
+    card.scroll_into_view_if_needed()
+    settle_fit(card.page)
+    geometry = banner_geometry(card, snap_paint_baseline=cell['engine'] == 'chromium')
+    state = card.locator('.banner-status-tier:first-child .banner-status-line')
+    lines = [state, *card.locator('.banner-score').all()]
+    model = [geometry['stateInk'], *geometry['scoreInk']]
+    pixels = [screenshot_ink(line, dpr) for line in lines]
+    errors = [[prediction - observed for prediction, observed in zip(model_edges, pixel_edges)]
+              for model_edges, pixel_edges in zip(model, pixels)]
+    offsets = [(sum(pixels[0]) - sum(score)) / 2 for score in pixels[1:]]
+    result = dict(**cell, dpr=dpr, os=f'macOS {platform.mac_ver()[0]}' if platform.mac_ver()[0] else platform.platform(),
+                  pixels=pixels, model=model, edge_errors=errors, state_minus_score=offsets)
+    print(json.dumps(result), flush=True)
+    assert all(abs(edge) <= .5 for pair in errors for edge in pair), ('pixel/model ink parity', result)
+    assert all(abs(offset) <= 1.25 for offset in offsets), ('pixel state ink centre offset', result)
+    return result
+
+
+def assert_acumin_used(card):
+    session = card.page.context.new_cdp_session(card.page)
+    try:
+        session.send('DOM.enable')
+        session.send('CSS.enable')
+        root = session.send('DOM.getDocument')['root']['nodeId']
+        node = session.send('DOM.querySelector', dict(nodeId=root, selector='.match-banner .banner-score'))['nodeId']
+        fonts = session.send('CSS.getPlatformFontsForNode', dict(nodeId=node))['fonts']
+        assert any(font['isCustomFont'] and 'Acumin' in font['familyName'] and font['glyphCount'] == 2
+                   for font in fonts), fonts
+    finally:
+        session.detach()
+
+
+def check_pixel_ink(pw, origin, assets, dest):
+    asset = assets / 'fixtures/streams.json'
+    listing = json.loads(asset.read_text())
+    group = listing['streams'][0]
+    now = int(time.time())
+    event = dict(group['streams'][0], id=9000, uri_name='basketball/matched-live',
+                 name='Colorado State Rams at Arizona Wildcats', viewers='62', always_live=0,
+                 starts_at=now - 3600, ends_at=now + 3600,
+                 match=dict(state='in', detail='Halftime',
+                            away=dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b',
+                                      logo='/icon-32.png', score=50),
+                            home=dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033',
+                                      logo='/icon-48.png', score=97)))
+    asset.write_text(json.dumps(dict(listing, timestamp=now, streams=[dict(group, streams=[event])])))
+    results = []
+    for engine in ('chromium', 'webkit'):
+        browser = getattr(pw, engine).launch()
+        for width in (390, 1280, 320):
+            page = browser.new_page(viewport={'width': width, 'height': 900}, device_scale_factor=4)
+            listing_scale = 'wrapped' if width == 320 else 'listing'
+            variants = ((listing_scale, '/c/basketball'), ('hero', '/'))
+            for scale, path in variants:
+                assert page.goto(origin + path, wait_until='networkidle').ok
+                card = page.locator('a.event-card:has(.banner-score)').first
+                expect(card.locator('.banner-score')).to_have_count(2)
+                page.evaluate('document.fonts.ready')
+                assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
+                if engine == 'chromium':
+                    assert_acumin_used(card)
+                if scale == 'wrapped':
+                    # Feed states are single words. Replace the rendered fixture state and resize
+                    # so the real component fit pass sees two lines and collapsed whitespace.
+                    state = card.locator('.banner-status-tier:first-child .banner-status-line')
+                    state.evaluate("el => { el.firstChild.data = 'Additional  Time'; }")
+                    page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                    settle_fit(page)
+                    expect(state).to_have_attribute('data-wrap', '')
+                    assert banner_geometry(card)['paint']['tier-0']['lines'] >= 2
+                    offset = state.evaluate("el => parseFloat(el.style.getPropertyValue('--banner-state-offset'))")
+                    assert abs(offset) < 20, ('wrapped state displaced', engine, offset)
+                results.append(measure_pixel_card(card, dict(engine=engine, version=browser.version,
+                                                            width=width, scale=scale), 4))
+            page.close()
+        browser.close()
+    (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
     parser.add_argument('--screenshots', type=Path, required=True)
     parser.add_argument('--matches-only', action='store_true')
+    parser.add_argument('--pixels-only', action='store_true')
     parser.add_argument('--text-mode', choices=('normal', 'element', 'root'), action='append',
                         help='Matched card modes to run (default: all three)')
     parser.add_argument('--measure-only', action='store_true', help='Record geometry from a baseline build')
@@ -956,6 +1121,10 @@ def main():
     report = []
     with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
         directory = Path(tmp)
+        if args.pixels_only:
+            with worker(directory, 'pixels', args.output.resolve(), '', False) as origin:
+                check_pixel_ink(pw, origin, directory / 'pixels-assets', args.screenshots)
+            return
         browser = pw.chromium.launch()
         if args.matches_only or args.measure_only:
             with worker(directory, 'matches', args.output.resolve(), '', False) as origin:
@@ -978,6 +1147,8 @@ def main():
                     check_known_hero(browser, origin, directory / f'{name}-assets', args.screenshots)
                     check_matches(browser, origin, directory / f'{name}-assets', args.screenshots, text_modes)
         browser.close()
+        with worker(directory, 'pixels', args.output.resolve(), '', False) as origin:
+            check_pixel_ink(pw, origin, directory / 'pixels-assets', args.screenshots)
     (args.screenshots / 'report.json').write_text(json.dumps(report, indent=2))
 
 
