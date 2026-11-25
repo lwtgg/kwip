@@ -208,6 +208,29 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
 
         taifood = variant.startswith('taifood')
         held = variant.endswith('save-data') and not taifood
+        change_save_data = '''enabled => {
+          navigator.connection.saveData = enabled;
+          navigator.connection.dispatchEvent(new Event('change'));
+        }'''
+
+        def refresh_listing():
+            request_count = len(feed_requests)
+            refresh_feed(page)
+            assert feed_requests[request_count:] == [feed + '/streams']
+
+        def assert_frame_kept(label):
+            expect(frame.content_frame.get_by_role('heading', name='Third-party fixture')).to_be_visible()
+            mounted = frame.element_handle()
+            src = frame.get_attribute('src')
+            requests = player_requests.copy()
+            refresh_listing()
+            expect(frame).to_have_count(1)
+            expect(frame).to_have_attribute('src', src)
+            expect(button).to_have_accessible_name(label)
+            expect(button).to_be_focused()
+            assert mounted.evaluate('el => el.isConnected')
+            assert player_requests == requests
+
         if below_fold:
             if variant == 'stale':
                 expect(hero.locator('.hero-footer').locator('[aria-hidden=true]')).to_have_count(0)
@@ -240,6 +263,22 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         if variant.startswith('upcoming'):
             expected += '&autoplay=0'
         expect(frame).to_have_attribute('src', expected, timeout=4000)
+        if variant == 'save-data' and not root_text:
+            original_listing = listing
+            category = listing['streams'][0]
+            updated_viewers = dict(event, viewers='63')
+            for updated, visible_text in (
+                (event, '62'),
+                (updated_viewers, '63'),
+                (dict(updated_viewers, match=dict(event['match'], state='post', detail='Final')), 'Final'),
+            ):
+                listing = dict(original_listing, streams=[dict(category, streams=[
+                    updated if stream['uri_name'] == EVENT else stream for stream in category['streams']
+                ])])
+                assert_frame_kept('Sound on')
+                expect(link).to_have_accessible_name(re.compile(rf'\b{visible_text}\b'))
+            listing = original_listing
+            assert_frame_kept('Sound on')
         if taifood:
             assert frame.get_attribute('sandbox') is None
         else:
@@ -346,13 +385,11 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         assert not errors, errors
         if variant == 'zlive' and not root_text:
             mounted_frame = frame.element_handle()
-            change_save_data = '''enabled => {
-              navigator.connection.saveData = enabled;
-              navigator.connection.dispatchEvent(new Event('change'));
-            }'''
+            button.focus()
             page.evaluate(change_save_data, True)
             expect(button).to_have_accessible_name('Sound on')
             assert mounted_frame.evaluate('el => el.isConnected')
+            assert_frame_kept('Sound on')
             page.evaluate('window.heroHidden = true; document.dispatchEvent(new Event("visibilitychange"))')
             expect(frame).to_have_count(0)
             page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
@@ -388,6 +425,20 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             expect(link).to_have_attribute('href', f'/live/{EVENT}')
             expect(button).to_have_accessible_name('Play')
             expect(frame).to_have_count(0)
+
+            # A Play tap while hidden survives a refresh before the tab returns.
+            page.evaluate('window.heroHidden = true; document.dispatchEvent(new Event("visibilitychange"))')
+            requests = player_requests.copy()
+            button.click()
+            expect(button).to_have_accessible_name('Play')
+            refresh_listing()
+            expect(frame).to_have_count(0)
+            expect(button).to_be_focused()
+            assert player_requests == requests
+            page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
+            expect(frame).to_have_attribute('src', expected)
+            expect(button).to_have_accessible_name('Sound on')
+            expect(button).to_be_focused()
         if variant in ('taifood-save-data', 'save-data') and not root_text:
             upgraded_embed = ZLIVE if taifood else ZLIVE.replace('/TSN4', '/TSN5')
             category = listing['streams'][0]
@@ -413,6 +464,10 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         if variant == 'zlive' and not root_text:
             assert page.goto(origin + '/?natural=1', wait_until='domcontentloaded').ok
             expect(frame).to_have_attribute('src', expected)
+        if https_page:
+            # Let the test's HTTP-backed HTTPS routes finish before closing the context.
+            page.wait_for_load_state('networkidle')
+        assert not errors, errors
         print(f"{width}px {variant} at {200 if root_text else 100}%: {plate_before['width']:.2f} × {plate_before['height']:.2f} plate, "
               f"{before['width']:.2f} × {before['height']:.2f} player, CLS 0"
               + (f", footer wraps: {geometry['wraps']}" if not taifood else ''), flush=True)
