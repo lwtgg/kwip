@@ -30,6 +30,44 @@ function unbreakableWidth(line: HTMLElement) {
   return width
 }
 
+let inkContext: CanvasRenderingContext2D | null | undefined
+
+/** Measure the visible text relative to its own box, so the fit never changes the grid alignment. */
+function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
+  const text = line.firstChild
+  if (!(text instanceof Text)) return NaN
+  const style = getComputedStyle(line)
+  context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+  context.fontStretch = style.fontStretch as CanvasFontStretch
+  const range = document.createRange()
+  range.selectNodeContents(text)
+  const rects = range.getClientRects()
+  const rows = new Map<number, string>()
+  if (rects.length === 1) {
+    rows.set(rects[0]!.top, text.data)
+  } else {
+    // Read the text on each visual line after wrapping and horizontal fitting.
+    let index = 0
+    for (const character of text.data) {
+      range.setStart(text, index)
+      index += character.length
+      range.setEnd(text, index)
+      const { top } = range.getBoundingClientRect()
+      rows.set(top, (rows.get(top) ?? '') + character)
+    }
+  }
+  let top = Infinity
+  let bottom = -Infinity
+  for (const [rowTop, content] of rows) {
+    const metrics = context.measureText(content.trim())
+    const baseline = rowTop + metrics.fontBoundingBoxAscent
+    top = Math.min(top, baseline - metrics.actualBoundingBoxAscent)
+    bottom = Math.max(bottom, baseline + metrics.actualBoundingBoxDescent)
+  }
+  const box = line.getBoundingClientRect()
+  return (top + bottom - box.top - box.bottom) / 2
+}
+
 function fitText() {
   const lineup = lineupElement.value
   if (!lineup) return
@@ -82,10 +120,10 @@ function fitText() {
   // shrink to the text size, so the middle column keeps the state between the scores.
   const compactSide = Math.max(labelMin, scoreMin + gutter + Math.min(logo, parseFloat(style.fontSize)))
   const compactMiddle = Math.max(0, available - 2 * compactSide)
-  const share = cssNumber(style, '--banner-status-width', 36) / 100
+  const share = Number.parseFloat(style.getPropertyValue('--banner-status-width')) / 100
   // Detail and audience have their rows to themselves. When a word in them cannot fit the middle
   // column even at the floor, they take the full row instead of breaking the word.
-  const stateLine = lineup.querySelector('.banner-status-tier:first-child .banner-status-line')
+  const stateLine = lineup.querySelector<HTMLElement>('.banner-status-tier:first-child .banner-status-line')
   const lowerWords = status.flatMap((line, index) => line === stateLine ? [] : [statusWidths[index]!])
   const stateWords = status.flatMap((line, index) => line === stateLine ? [statusWidths[index]!] : [])
   const wideDetail = compact && Math.ceil(Math.max(0, ...lowerWords) * floor) + 1 > compactMiddle
@@ -106,6 +144,17 @@ function fitText() {
     if (fit < floor && status.includes(line)) line.dataset.wrap = ''
     const minimum = line.parentElement!.classList.contains('banner-initials') ? 0 : floor
     line.style.setProperty('--banner-line-fit', String(Math.max(minimum, Math.min(1, fit))))
+  }
+  if (stateLine && scores.length) {
+    if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
+    if (inkContext) {
+      const context = inkContext
+      const scoreCentre = scores.reduce((sum, score) => sum + inkOffset(score, context), 0) / scores.length
+      const offset = scoreCentre - inkOffset(stateLine, context)
+      if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset.toFixed(3)}px`)
+    }
+  } else {
+    stateLine?.style.removeProperty('--banner-state-offset')
   }
 }
 let observer: ResizeObserver | undefined

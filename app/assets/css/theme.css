@@ -600,7 +600,7 @@
   display: block;
   width: max-content;
   white-space: nowrap;
-  transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
+  transform: translate(-50%, var(--banner-state-offset, 0px)) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
 }
 /* Below the floor the line wraps at the width the floor allows, then is drawn at the floor. */
 .banner-fit-text[data-wrap] {

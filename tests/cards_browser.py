@@ -281,7 +281,7 @@ def check_known_hero(browser, origin, assets, dest):
 
 
 # Smallest width-to-height ratio of a listing row, measured per viewport for task 60 (docs/redesign-60.md).
-# Three tiers under the score row cannot reach 3.5 below 1024px; the floor there is the measurement.
+# The measured three-tier rows fall below 3.5 at 320px and 390px.
 # Measured three-tier minimum: 2.8051 at 320px and 3.4868 at 390px.
 RATIO_FLOOR = {320: 2.8, 390: 3.48, 1024: 3.5, 1280: 3.5}
 # Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
@@ -300,6 +300,28 @@ def banner_geometry(card):
         width:r.width, height:r.height});
       const banner = el.querySelector('.match-banner');
       const lineup = banner.querySelector('.banner-lineup');
+      const canvas = document.createElement('canvas').getContext('2d');
+      const inkCentre = n => {
+        const style = getComputedStyle(n);
+        canvas.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        canvas.fontStretch = style.fontStretch;
+        const text = n.firstChild;
+        const range = document.createRange();
+        const rows = new Map();
+        let offset = 0;
+        for (const character of text.data) {
+          range.setStart(text, offset);
+          range.setEnd(text, offset += character.length);
+          const {top} = range.getBoundingClientRect();
+          rows.set(top, (rows.get(top) || '') + character);
+        }
+        const ink = [...rows].map(([top, content]) => {
+          const m = canvas.measureText(content.trim());
+          return [top + m.fontBoundingBoxAscent - m.actualBoundingBoxAscent,
+                  top + m.fontBoundingBoxAscent + m.actualBoundingBoxDescent];
+        });
+        return (Math.min(...ink.map(row => row[0])) + Math.max(...ink.map(row => row[1]))) / 2;
+      };
       const nodes = [...banner.querySelectorAll('.banner-fit-text, .banner-team img')];
       const track = banner.querySelector('[role=progressbar]');
       const bounds = selector => rect(banner.querySelector(selector).getBoundingClientRect());
@@ -329,11 +351,16 @@ def banner_geometry(card):
         })),
         progress:track && rect(track.getBoundingClientRect()),
         progressFill:track && track.firstElementChild.getBoundingClientRect().width,
+        trackGutter:parseFloat(getComputedStyle(lineup).getPropertyValue('--banner-gutter'))
+          * parseFloat(getComputedStyle(lineup).fontSize),
         // The first tier always sits in the middle column, also when detail and audience take a full row.
         middle:bounds('.banner-status-tier:first-child'),
         wideDetail:lineup.hasAttribute('data-wide-detail'),
         logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
         labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
+        stateInk:inkCentre(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
+        scoreInk:[...banner.querySelectorAll('.banner-score')].map(inkCentre),
+        scoreSlots:[...banner.querySelectorAll('.banner-score-slot')].map(n => rect(n.getBoundingClientRect())),
         scoreBoxes:[...banner.querySelectorAll('.banner-score')].map(n => rect(n.getBoundingClientRect())),
         tiers:[...banner.querySelectorAll('.banner-status-tier')].map(n => rect((n.firstElementChild || n).getBoundingClientRect())),
         floor:parseFloat(lineup.style.getPropertyValue('--banner-fit-floor') || getComputedStyle(lineup).getPropertyValue('--banner-fit-floor')),
@@ -364,7 +391,8 @@ def banner_measurements(geometry):
         *geometry['logoBoxes'], *geometry['scoreBoxes'], geometry['tiers'][0])) if 'tier-1' in paint else None
     state = geometry['tiers'][0]
     centre = lambda box: (box['top'] + box['bottom']) / 2
-    state_offset = max(abs(centre(state) - centre(item)) for item in geometry['logoBoxes'] + geometry['scoreBoxes'])
+    state_offset = (max(abs(geometry['stateInk'] - score) for score in geometry['scoreInk'])
+                    if geometry['scoreInk'] else max(abs(centre(state) - centre(logo)) for logo in geometry['logoBoxes']))
     logo_offset = max((abs(centre(logo) - centre(score)) for logo, score in
                        zip(geometry['logoBoxes'], geometry['scoreBoxes'])), default=0)
     return dict(height=box['height'], width=box['width'], ratio=box['width'] / box['height'],
@@ -541,9 +569,9 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
     state, detail, audience = geometry['tiers']
     labels = geometry['labels']
     measurements = banner_measurements(geometry)
-    # The logos, the scores and the state share one row and one centre line.
+    # Logos share the score box centre. The state aligns with the visible score glyphs.
     assert measurements['logo_offset'] <= 1, ('logo centre offset', fixture, measurements['logo_offset'])
-    assert measurements['state_offset'] <= 1, ('state centre offset', fixture, measurements['state_offset'])
+    assert measurements['state_offset'] <= 1, ('state ink centre offset', fixture, measurements['state_offset'])
     score_row = max(item['bottom'] for item in (*geometry['logoBoxes'], *geometry['scoreBoxes'], state))
     assert score_row <= detail['top'], ('detail below scores', fixture, geometry)
     assert detail['bottom'] <= audience['top'] and audience['bottom'] <= min(label['top'] for label in labels), (
@@ -576,6 +604,16 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
         # A visible track in the bottom row, between the abbreviations, above the card's edge.
         assert progress['height'] >= 4 and progress['width'] >= progress['height'] * 4, (fixture, progress)
         assert labels[0]['right'] < progress['left'] < progress['right'] < labels[1]['left'], (fixture, progress, labels)
+        if geometry['stacked']:
+            left, right = middle['left'], middle['right']
+        elif slots := geometry['scoreSlots']:
+            left, right = slots[0]['left'], slots[1]['right']
+        else:
+            # Without scores, the unstacked abbreviation slots still border the score tracks.
+            left, right = labels[0]['right'], labels[1]['left']
+        inset = geometry['trackGutter']
+        assert abs(progress['left'] - (left + inset)) <= 1 and abs(progress['right'] - (right - inset)) <= 1, (
+            'track span', fixture, progress, left, right, inset)
         for label in labels:
             assert abs((label['top'] + label['bottom']) - (progress['top'] + progress['bottom'])) <= 2, (
                 'track off the bottom row centre', fixture, progress, label)
@@ -881,12 +919,18 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                         expect(hero.locator('.banner-score')).to_have_count(2)
                         page.evaluate('document.fonts.ready')
                         assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
-                        geometry = assert_clean_banner(hero, events[0], oracle, listing_row=False)
                         featured = page.get_by_role('region', name='Featured event')
                         expect(featured.locator('.hero-player')).to_have_count(0)
-                        assert featured.bounding_box()['height'] == hero.bounding_box()['height']
-                        hero_results.append(dict(viewport=width, theme=theme, density=density, **geometry))
-                        hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
+                        for mode in ('normal', 'root'):
+                            if mode == 'root':
+                                page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                            settle_fit(page)
+                            geometry = assert_clean_banner(hero, events[0], oracle, listing_row=False)
+                            assert hero.evaluate('el => el.getBoundingClientRect().right <= innerWidth')
+                            assert featured.bounding_box()['height'] == hero.bounding_box()['height']
+                            hero_results.append(dict(viewport=width, theme=theme, density=density, mode=mode, **geometry))
+                            if mode == 'normal':
+                                hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
                 print(prefix, '/'.join(text_modes), flush=True)
     print(f'Hydration and uncaught page errors: {len(hydration_errors)}', flush=True)
     assert not hydration_errors, hydration_errors
