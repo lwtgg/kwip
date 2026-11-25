@@ -67,7 +67,10 @@ under it at a reserved 16:9 box, full-bleed, a sibling of the link and never ins
 a real control in the plate, outside the link and the frame, so it never lands on the provider's own
 controls; no provider control is ever overlaid. The card's height may grow by the reserved box when the
 hero mounts, but nothing moves after that: the box is reserved whether or not a frame is present, so the
-plate and the player never resize against each other. Everything else in rule 26 stands.
+plate and the player never resize against each other. The box exists only when the event carries some embed; a
+matched hero with none is banner-only like any other card, not a grey hole. Under `saveData` a zlive hero does
+not mount by itself, because 16 MB of buffer is the user's choice to make: the plate button says "Play" and the
+first tap mounts the frame, muted. Everything else in rule 26 stands.
 
 
 ## Deferred (do not build, just note)
