@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useStreams, type FeedStreamItem } from '~/composables/useFeed'
+import { resolveHeroEmbed, selectTopEvent, viewerCount } from '~/utils/topEvent'
 
 const route = useRoute()
 const { siteName } = useRuntimeConfig().public
@@ -50,11 +51,6 @@ const allStreams = computed<FeedStreamItem[]>(() =>
   normalizedCategories.value.flatMap(cat => cat.streams),
 )
 
-function viewerCount(stream: FeedStreamItem): number {
-  const n = Number.parseInt(String(stream.viewers), 10)
-  return Number.isFinite(n) ? n : 0
-}
-
 function slugifyCategory(name: string): string {
   return name
     .trim()
@@ -89,27 +85,11 @@ const upcomingStreams = computed(() =>
     .sort((a, b) => a.starts_at - b.starts_at),
 )
 
-// Review #1: scheduled live first -> always_live === 1 when no scheduled is live -> highest-viewed upcoming labelled "Upcoming".
-const heroEntry = computed<{
-  stream: FeedStreamItem
-  mode: 'live' | 'upcoming' | 'archive'
-} | null>(() => {
-  if (activeFilter.value !== 'upcoming' && liveNowStreams.value.length > 0) {
-    return { stream: liveNowStreams.value[0]!, mode: 'live' }
-  }
-  if (activeFilter.value !== 'upcoming' && alwaysLiveStreams.value.length > 0) {
-    return { stream: alwaysLiveStreams.value[0]!, mode: 'live' }
-  }
-  if (activeFilter.value !== 'live' && upcomingStreams.value.length > 0) {
-    const highestViewedUpcoming = [...upcomingStreams.value].sort(
-      (a, b) => viewerCount(b) - viewerCount(a),
-    )[0]!
-    return { stream: highestViewedUpcoming, mode: 'upcoming' }
-  }
-  if (activeFilter.value !== 'all') return null
-  const fallback = [...allStreams.value].sort((a, b) => viewerCount(b) - viewerCount(a))[0]
-  return fallback ? { stream: fallback, mode: 'archive' } : null
-})
+const heroEntry = computed(() => selectTopEvent(
+  liveNowStreams.value, alwaysLiveStreams.value, upcomingStreams.value, allStreams.value, activeFilter.value,
+))
+const heroEmbed = computed(() => heroEntry.value && resolveHeroEmbed(heroEntry.value.stream))
+const heroLive = computed(() => heroEntry.value?.mode === 'live')
 
 const hasVisibleStreams = computed(() =>
   activeFilter.value === 'all' ? allStreams.value.length > 0 : heroEntry.value !== null,
@@ -225,7 +205,8 @@ useSeoMeta({
       <template v-else>
         <!-- Hero -->
         <section v-if="heroStream" aria-label="Featured event">
-          <StreamCard :stream="heroStream" :now="nowSeconds" :stale="isStale" hero scale="hero" heading-level="h1" />
+          <StreamCard :stream="heroStream" :now="nowSeconds" :stale="isStale" :hero-embed="heroEmbed || undefined"
+            :hero-live="heroLive" hero scale="hero" heading-level="h1" />
         </section>
 
         <AdSlot v-if="heroStream" format="leaderboard" placement="home-banner" />

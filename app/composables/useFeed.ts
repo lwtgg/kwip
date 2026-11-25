@@ -57,6 +57,7 @@ export interface FeedStreamItem {
   locale: string
   category_name: string
   iframe?: string
+  hero_embed?: string
   substreams?: FeedSubstream[]
   viewers: string
 }

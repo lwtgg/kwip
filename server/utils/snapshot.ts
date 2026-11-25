@@ -1,3 +1,4 @@
+import { resolveHeroEmbed, type EventSources } from '../../app/utils/topEvent.ts'
 import { feedDetailPath, isSnapshotPath, type FeedCollection } from './feed-path.ts'
 
 import { isFreshSnapshotHealth, type SnapshotHealth, type SnapshotSourceHealth } from '../../app/utils/snapshotHealth.ts'
@@ -59,13 +60,18 @@ function parseManifest(value: unknown) {
 
 type SnapshotPayload = Record<string, unknown> & { success: true }
 
-function sourceUrl(value: unknown) {
+function isSourceUrl(value: unknown) {
   const url = typeof value === 'string' ? URL.parse(value) : null
-  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) invalid()
+  return url?.protocol === 'https:' || url?.protocol === 'http:'
+}
+
+function sourceUrl(value: unknown) {
+  if (!isSourceUrl(value)) invalid()
 }
 
 function validateItemSources(item: Record<string, unknown>) {
   if (item.iframe) sourceUrl(item.iframe)
+  if (!isSourceUrl(item.hero_embed)) delete item.hero_embed
   if (item.source != null) sourceUrl(record(item.source).data)
   if (item.sources !== undefined) {
     if (!Array.isArray(item.sources)) invalid()
@@ -208,7 +214,9 @@ export function compactSnapshotPayload(path: string, payload: SnapshotPayload): 
       const cards = path === 'vods' ? items.map(compactVod).filter(Boolean) : items.map((entry) => {
         const item = record(entry)
         const route = itemPath('streams', item)
-        return { ...pick(item, fields), uri_name: route?.slice('streams/'.length) }
+        const heroEmbed = resolveHeroEmbed(item as EventSources)
+        return { ...pick(item, fields), uri_name: route?.slice('streams/'.length),
+          ...(heroEmbed ? { hero_embed: heroEmbed } : {}) }
       })
       return { ...pick(category, ['category', 'id', 'always_live']), [path]: cards }
     })

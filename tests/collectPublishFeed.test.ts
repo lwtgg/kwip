@@ -86,6 +86,11 @@ const mock = String.raw`
     for (let i = 1; i < count; i++) primarySources.push({ ...primary, data: primary.data.replace('?primary', '-' + i) })
     fixture['streams/foo'].data.sources = primarySources
   }
+  if (mode === 'provider-hero') {
+    fixture.streams.streams[0].streams[0].hero_embed = 'javascript:alert(1)'
+    fixture.streams.streams[0].streams[1].hero_embed = 'https://zlive.st/embed/untrusted'
+    fixture['streams/foo'].data.hero_embed = 'javascript:alert(2)'
+  }
   const wire = payload => ['capacity', 'scores-capacity', 'scores-shrink'].includes(mode) ? JSON.stringify(payload) : JSON.stringify(payload, null, 2) + '\n'
   if (['capacity', 'scores-capacity', 'scores-shrink'].includes(mode)) {
     Object.assign(fixture['streams/foo.json/bar'].data, { name: 'East vs. West', starts_at: start })
@@ -258,6 +263,11 @@ const mock = String.raw`
       if (split || nearbyPitSport || zliveAvailable || mode === 'capacity') paths.push('health.json')
       assert.deepEqual(manifest.endpoints.map(({ path }) => path), paths)
       if (packed) {
+        if (mode === 'provider-hero') {
+          assert.equal(packed.includes('javascript:'), false)
+          assert.equal(packed.includes('/embed/untrusted'), false)
+          assert.equal(packed.toString().match(/"hero_embed"/g)?.length, 1)
+        }
         let end = 0
         for (const { path, offset, length } of manifest.endpoints) {
           assert.equal(offset, end)
@@ -274,6 +284,12 @@ const mock = String.raw`
             assert.equal(item.match.home.name, 'Home FC')
             assert.equal(item.match.detail, 'Halftime')
             assert.equal(item.match.home.score, 2)
+          } else if (path === 'streams' && mode !== 'baseline') {
+            const expected = structuredClone(fixture.streams)
+            expected.streams[0].streams[0].hero_embed = zliveAvailable ? zliveUrl('sky-fhd') : primary.data
+            if (mode === 'provider-hero') delete expected.streams[0].streams[1].hero_embed
+            if (mode === 'capacity') expected.streams[0].streams[1].hero_embed = acceptedAlternate
+            assert.deepEqual(JSON.parse(bytes), expected)
           } else if (mode === 'scores-shrink' && path === 'streams/foo.json/bar') {
             assert.equal(JSON.parse(bytes).data.match, undefined)
           } else if (path === 'health.json') {
@@ -325,6 +341,10 @@ const mock = String.raw`
             assert.deepEqual(sources[0], primary)
             assert.equal(sources[1].data, alternate)
             assert.equal(sources[1].origin, 'supplement')
+          } else if (mode === 'provider-hero' && path === 'streams/foo') {
+            const expected = structuredClone(fixture[path])
+            delete expected.data.hero_embed
+            assert.deepEqual(JSON.parse(bytes), expected)
           } else {
             assert.deepEqual(bytes, Buffer.from(wire(fixture[path])))
           }
@@ -511,4 +531,8 @@ test('publisher measures final size before applying growth followed by stale-mat
   const result = await publish([], null, 'scores-shrink')
   assert.equal(result.outcome, 'published')
   assert.equal(result.scores.shed, 0)
+})
+
+test('publisher discards provider-supplied hero embeds and writes only its own projection', async () => {
+  assert.equal((await publish([], null, 'provider-hero')).outcome, 'published')
 })

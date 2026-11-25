@@ -667,3 +667,30 @@
   height: auto;
   min-height: var(--banner-hero-height);
 }
+
+.hero-plate-link:focus-visible {
+  outline-offset: var(--focus-ring-inset);
+}
+.match-banner[data-audience-in-footer] .banner-lineup[data-stacked] {
+  grid-template-rows: auto auto repeat(2, auto);
+}
+.hero-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+}
+.hero-sound {
+  display: grid;
+  align-items: center;
+  margin-inline-start: auto;
+  text-align: center;
+}
+.hero-sound > span,
+.hero-sound::before { grid-area: 1 / 1; }
+.hero-sound::before {
+  /* Keep the footer height stable as playback changes the label. */
+  content: attr(data-label);
+  visibility: hidden;
+}

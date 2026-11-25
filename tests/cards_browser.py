@@ -351,7 +351,7 @@ def banner_measurements(geometry):
                 overflow=max(0, *(max(box['left'] - ink['left'], ink['right'] - box['right'])
                                   for ink in paint.values())),
                 tier_clearance=min(detail['top'] - paint['tier-0']['bottom'],
-                                   paint['tier-2']['top'] - detail['bottom']) if 'tier-1' in paint else None,
+                                   paint['tier-2']['top'] - detail['bottom']) if 'tier-1' in paint and 'tier-2' in paint else None,
                 min_scale=min(ink['scale'] for name, ink in paint.items() if not name.endswith('-team')),
                 gutter=geometry['gutter'], score_gap=score_gap, stacked_status_gap=stacked_status_gap,
                 stacked=geometry['stacked'])
@@ -402,7 +402,7 @@ def status_sources(event):
     return state, '' if detail == state else detail, audience
 
 
-def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False):
+def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, root_text=False, audience_in_footer=False):
     visible = card.evaluate("""el => {
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
       const text = [];
@@ -437,7 +437,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
 
     banner = card.locator('.match-banner')
     assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
-    assert_rendered_segments(oracle, card, (state, detail, audience), event['uri_name'])
+    assert_rendered_segments(oracle, card, (state, detail) if audience_in_footer else (state, detail, audience), event['uri_name'])
     assert banner.locator('.banner-score').all_text_contents() == (
         [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
     # Never blank under a logo: an empty abbreviation falls back to the name's initials.
@@ -475,7 +475,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         for other, target in list(paint.items())[index + 1:]:
             assert (ink['right'] <= target['left'] or target['right'] <= ink['left']
                     or ink['bottom'] <= target['top'] or target['bottom'] <= ink['top']), (name, other, geometry)
-    top, bottom = paint['tier-0'], paint['tier-2']
+    top, bottom = paint['tier-0'], paint.get('tier-2', paint.get('tier-1', paint['tier-0']))
     middle = paint.get('tier-1')
     assert top['bottom'] <= bottom['top'], geometry
     if root_text:
@@ -491,7 +491,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     if listing_row and card.page.viewport_size['width'] == 1024 and event['uri_name'].endswith('/matched-long-status'):
         assert middle['lines'] == 1, ('1024px detail wraps', geometry)
         assert top['bottom'] < middle['top'] and middle['bottom'] < bottom['top'], geometry
-    if middle:
+    if middle and not audience_in_footer:
         assert top['bottom'] <= middle['top'] and middle['bottom'] <= bottom['top'], geometry
     scores = geometry['scores']
     if scored:
@@ -507,14 +507,15 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         if name in paint and not geometry['stacked']:
             score = paint[name]
             center = (score['top'] + score['bottom']) / 2
-            assert top['bottom'] < center < bottom['top'], geometry
+            if not audience_in_footer:
+                assert top['bottom'] < center < bottom['top'], geometry
             if middle:
                 assert middle['top'] < center < middle['bottom'], geometry
     for side in ('away', 'home'):
         team = paint[f'banner-{side}-team']
         abbrev = paint[f'banner-{side}-label']
         assert team['bottom'] <= abbrev['top'], geometry
-        if not (geometry['stacked'] or bottom['wrap']):  # a wrapped line is centred in a taller row
+        if not (geometry['stacked'] or bottom['wrap'] or audience_in_footer):  # a wrapped line is centred in a taller row
             assert abs(abbrev['top'] - bottom['top']) <= .25, geometry
         if scored:
             score = paint[f'banner-{side}-score']
@@ -747,6 +748,9 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                         page.evaluate('document.fonts.ready')
                         assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
                         geometry = assert_clean_banner(hero, events[0], oracle, listing_row=False)
+                        featured = page.get_by_role('region', name='Featured event')
+                        expect(featured.locator('.hero-player')).to_have_count(0)
+                        assert featured.bounding_box()['height'] == hero.bounding_box()['height']
                         hero_results.append(dict(viewport=width, theme=theme, density=density, **geometry))
                         hero.screenshot(path=str(dest / f'{prefix}-matched-hero.png'))
                 print(prefix, '/'.join(text_modes), flush=True)

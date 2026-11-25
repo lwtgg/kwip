@@ -58,9 +58,11 @@ Categories with their streams. Poll no more than every 60s.
 
 `uri_name` is the route key. `starts_at`/`ends_at` are unix seconds, `0` for always-live channels. `viewers` is a numeric string. `blurhash` and `colors[0]` drive the poster placeholder.
 
+`hero_embed` is an optional, validated HTTP(S) URL on Kwip’s `/api/feed/streams` listings only. The snapshot publisher projects it from the listing and event detail, including admitted supplemental sources. The snapshot reader also resolves embeds already carried by the listing. The value is the homepage hero's resolved embed, with zlive preferred and the first valid iframe used otherwise. The reader drops invalid projections. When a generation has no projection or usable listing iframe, live selection falls back to viewer rank and the hero renders its banner alone.
+
 ## GET /streams/{uri_name}
 
-Single stream. Same object as above plus:
+Single stream with the common fields and playback details.
 
 ```json
 {

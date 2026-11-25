@@ -1,3 +1,4 @@
+import { isZliveEmbed, resolveHeroEmbed } from '../app/utils/topEvent.ts'
 import { enrichScoreboards, scoreboardEligible } from './scoreboard.mjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -43,14 +44,20 @@ function canonical(value) {
 }
 
 function validateSources(value) {
-  if (!value || typeof value !== 'object') return
+  if (!value || typeof value !== 'object') return false
+  // Only the collector writes the listing projection, after source admission.
+  let strippedProjection = Object.hasOwn(value, 'hero_embed')
+  if (strippedProjection) delete value.hero_embed
   if ('sources' in value) {
     if (!Array.isArray(value.sources)) throw new Error('Invalid sources')
     for (const source of value.sources) validateSource(source)
   }
   if (value.source != null) validateSource(value.source)
   if (value.iframe) validateSource({ data: value.iframe })
-  for (const child of Object.values(value)) validateSources(child)
+  for (const child of Object.values(value)) {
+    if (validateSources(child)) strippedProjection = true
+  }
+  return strippedProjection
 }
 
 function validateSource(source) {
@@ -141,9 +148,10 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     const bytes = await fetchProvider(base, path, run, deadline, snapshotLimit - size)
     const payload = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
     if (payload?.success !== true) throw new Error(`Unsuccessful payload for ${path}`)
-    validateSources(payload)
-    await append(path, bytes)
-    return { payload, bytes }
+    const stored = validateSources(payload) ? json(payload) : bytes
+    if (stored.length > fileLimit) throw new Error(`Sanitized payload exceeded file limit for ${path}`)
+    await append(path, stored)
+    return { payload, bytes: stored }
   }
 
   for (const collection of ['streams', 'vods']) {
@@ -378,6 +386,32 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
     }
     const healthBytes = json(health)
     if (size + healthBytes.length < snapshotLimit) await append('health.json', healthBytes)
+  }
+  // Use remaining pack space after publishing scores and health. A detail-only
+  // embed is optional on the listing when the generation is at its byte limit.
+  const detailsByPath = new Map(scoreRecords.map(record => [record.entry.endpoint.path, record.payload.data]))
+  const { entry, payload } = streamListing
+  const projections = payload.streams.flatMap(category => category.streams.flatMap(item => {
+    const embed = resolveHeroEmbed(item, detailsByPath.get(feedDetailPath('streams', item.uri_name)))
+    return embed && embed !== resolveHeroEmbed(item) ? [{ item, embed }] : []
+  })).sort((a, b) => Number(isZliveEmbed(b.embed)) - Number(isZliveEmbed(a.embed)))
+  if (projections.length) {
+    let listingSize = json(payload).length
+    const limit = Math.min(fileLimit, snapshotLimit - size + entry.endpoint.length - 1)
+    let changed = false
+    for (const { item, embed } of projections) {
+      const delta = json({ ...item, hero_embed: embed }).length - json(item).length
+      if (listingSize + delta > limit) continue
+      listingSize += delta
+      item.hero_embed = embed
+      changed = true
+    }
+    if (changed) {
+      const bytes = json(payload)
+      size += bytes.length - entry.endpoint.length
+      entry.endpoint.length = bytes.length
+      entry.stored = bytes
+    }
   }
   const bytes = Buffer.alloc(size)
   let offset = 0

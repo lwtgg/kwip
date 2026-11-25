@@ -112,11 +112,24 @@ test('request consumers share the whole batch and keep origin and cache provenan
   assert.equal(generation.get({ kind: 'vods' }), undefined)
   assert.equal(calls.length, 3)
   assert.deepEqual(generation.get(endpoints[0]).streams[0].streams[0], {
-    id: 1, uri_name: 'sport/example', name: 'Example',
+    id: 1, uri_name: 'sport/example', name: 'Example', hero_embed: 'https://example.com/player',
   })
   assert.equal(generation.get(endpoints[1]).fromCache, true)
   assert.equal(generation.get(endpoints[1]).data.sources[0].data, 'https://example.com/?host=kwip.fyi')
   assert.equal(calls.filter(key => key === 'current.json').length, 1)
+})
+
+test('an invalid optional hero embed leaves the generation readable', async () => {
+  const streams = structuredClone(channels)
+  Object.assign(streams.streams[0].streams[0], { hero_embed: 'javascript:alert(1)' })
+  Object.assign(streams.streams[0].streams[1], { hero_embed: 42 })
+  const { bucket } = fixture(true, detail, false, 'sport/example', true, streams)
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
+  assert.equal(generation.readable, true)
+  const items = generation.get(endpoints[0])?.streams[0].streams
+  assert.equal(items[0].hero_embed, 'https://example.com/player')
+  assert.equal(Object.hasOwn(items[1], 'hero_embed'), false)
+  assert.equal(generation.get(endpoints[1])?.data.name, 'Example')
 })
 
 const unreachable = async () => { throw new Error('Unexpected network access') }
