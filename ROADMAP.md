@@ -129,7 +129,8 @@ two-team banner with logos, score and status. Provider posters stop being fetche
 score banner replaces them on the row and the hero, with `PosterFallback` still covering the no-match case.
 Live scores are best-effort enrichment from ESPN's public scoreboard, matched server-side per league in the
 collector (rules 24 and 25). The first home slot becomes the top event and mounts its player, muted, with
-sound opt-in (rule 26). Queue: 52 data and contract, 54 autoplay probe, 53 banner rendering, 55 top event.
+sound opt-in (rule 26). Queue: 52 data and contract, 54 autoplay probe, 53 banner rendering, 55 top event,
+60 the scoreboard grid, 61 a banner for every event, 50b dated listings.
 
 **Shipped 2026-11-24. Tasks 53 and 58 — the banner is the whole card.** Version `b4cba298`, branch merged
 `4737a5e`. A matched card is now only the banner, per the owner's mockup: state, scores either side of the
@@ -144,6 +145,20 @@ at 320/1280: banner width equals card width, no overflow, zero hydration errors,
 absolute, `/vods` 200, unknown path 404, `/go/event-banner` 302 to the house campaign. Full record in
 `docs/redesign-58.md`. Known trade: `keep-all` covers a tier, so Han sharing one with Hangul stops breaking
 per character and that card stacks.
+
+**Shipped 2026-11-24. Task 55 — the top event plays itself.** Version `7a71be9c`, branch merged `2c96e33`,
+rules 26 and 27. The first home slot is the highest-viewed live event carrying a resolved embed, zlive first,
+and only that slot mounts a player: a reserved 16:9 box under the banner plate, the plate staying the link.
+Mount only while the box is in the viewport and the tab is visible, always muted, sound opt-in on a tap.
+Five review rounds; the failures they caught were a label that described neither action nor state, a visible
+button with the player below the fold, consent keyed on object identity so any refresh killed a playing frame,
+and a taifood→zlive upgrade autoplaying under Save-Data. All fixed: the unmounted button is always `Play` and
+scrolls the box into view, consent is keyed per `uri_name` + embed and survives same-hero refreshes, the hero
+sandboxes zlive only. `hero_embed` is a documented, validated listing field that the publisher projects and
+the reader strips if invalid. Production at 320/1280: 164 matched banners with zero width mismatch, hero box
+16:9 at 288×162 and 1232×693, no overflow, zero hydration errors, canonical and `og:url` absolute, `/vods`
+200, unknown path 404, `/go/event-banner` 302 with the creative key. Open: the desktop hero box is 693 px in
+an 850 px viewport, and taifood's own playback is dead provider-side, so most heroes have no working picture.
 
 **Defect found and fixed 2026-11-24 — a deploy leaves cached HTML pointing at dead assets.** Task 57
 adds the runtime build identity to the HTML cache key alongside the feed generation and host. Previous-build
