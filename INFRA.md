@@ -14,6 +14,7 @@ Escape hatch kept working: `nitro.preset = "node-server"` on a Hetzner CX22 behi
 - Cache headers come from `nuxt.config.ts` `routeRules`, not dashboard rules: HTML 30s + `stale-while-revalidate=300`, immutable hashed assets, `no-store` on `/api/*`
 - `/api/domains` returns our mirror list from the committed `public/domains.json`, sanitised against `NUXT_PUBLIC_CANONICAL_HOST` when set
 - `pnpm build` must pass with both presets
+- `pnpm-workspace.yaml` sets `nodeLinker: hoisted`. pnpm's isolated layout left `@nuxt/schema` without the `scule` it imports and `vue-router` without `vue-devtools-stub`, failing the build two ways; hoisting resolves both. Expect `pnpm approve-builds` for `workerd` after a fresh install — it is ignored, not fatal
 
 ## Domains
 

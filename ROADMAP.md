@@ -131,6 +131,20 @@ Live scores are best-effort enrichment from ESPN's public scoreboard, matched se
 collector (rules 24 and 25). The first home slot becomes the top event and mounts its player, muted, with
 sound opt-in (rule 26). Queue: 52 data and contract, 54 autoplay probe, 53 banner rendering, 55 top event.
 
+**Shipped 2026-11-24. Tasks 53 and 58 — the banner is the whole card.** Version `b4cba298`, branch merged
+`4737a5e`. A matched card is now only the banner, per the owner's mockup: state, scores either side of the
+provider detail, abbreviations and viewers on the outer edges, no category line, fixture sentence, UTC or
+"Watch". The full accessible label moved to `sr-only`. Provider posters are gone; the plate is our gradient,
+logos and score, and the card is full-bleed over the row radius at 3.5:1 or taller where tiers stack. Status
+text wraps natively — no spans, no segmenter — with `white-space: normal; width: min-content` measuring the
+widest unbreakable unit, `keep-all` on tiers containing Hangul so Korean words stay whole, and a monospace
+fallback only where one unit genuinely beats the row. The test asserts one client rect per grapheme and per
+Hangul word in SSR, Segmenter-deleted and hydrated renders; seven review rounds, all findings fixed. Production
+at 320/1280: banner width equals card width, no overflow, zero hydration errors, canonical and `og:url`
+absolute, `/vods` 200, unknown path 404, `/go/event-banner` 302 to the house campaign. Full record in
+`docs/redesign-58.md`. Known trade: `keep-all` covers a tier, so Han sharing one with Hangul stops breaking
+per character and that card stacks.
+
 **Defect found and fixed 2026-11-24 — a deploy leaves cached HTML pointing at dead assets.** Task 57
 adds the runtime build identity to the HTML cache key alongside the feed generation and host. Previous-build
 entries become unreachable and expire under the existing TTL rules. A real two-build Wrangler cache proof

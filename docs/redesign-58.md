@@ -472,3 +472,21 @@ boundaries and zero split graphemes or horizontal overflow.
   `pnpm exec wrangler deploy --dry-run`, the Worker build-key check, the
   contrast sweep and `git diff --check` passed. Logs and screenshots are
   under `/tmp/kw58-fix7/final`.
+
+### Merge, deploy and production check
+
+Merged as `4737a5e`. The merge build failed on the isolated pnpm layout (`@nuxt/schema` could not
+import `scule`, then `vue-router` could not resolve `vue-devtools-stub`), fixed by
+`nodeLinker: hoisted` in `pnpm-workspace.yaml` (`3230bfc`). With that, the whole gate re-ran green on
+`main`: 189 unit tests, both presets, default rebuild, dry run, the card matrix, banner, density,
+not-live, click-under, source-health against a seeded build, and generation-first.
+
+Deployed with `/tmp/kwip-flip.toml` (ads on, event-banner house creative, absolute `main`/`assets`),
+version `b4cba298`. Five binding checks on the served config. Production: `/` 200 with 135 matched
+banners, banner width equals card width at 320 (288 px) and 1280 (1232 px), no horizontal overflow,
+zero hydration errors, canonical and `og:url` absolute on the home and event page, `/vods` 200,
+unknown path 404, live CSS 200, `/go/event-banner` with the creative key 302s to
+`https://kwip.fyi/about#ads`. The 320 hero measures 2.87:1 because its three status tiers stack;
+height grows with tiers by design, and the suite's 3.5 floor covers the single-tier fixture.
+The home `AdSlot` renders nothing because the `home-banner` creative is empty; only
+`event-banner` carries the house campaign, so the event page is the one with the reserved box.
