@@ -94,9 +94,11 @@ the `Next up` row. A card's ratio is width ÷ height.
 
 ### Centre offsets
 
-The largest offset across all widths, text modes, themes and densities:
+The largest offsets across all widths, text modes, themes and densities. Ink offsets in this
+table come from canvas font metrics. In the round-two screenshot measurements, the worst ink
+offset was 1.0 px with the correction and 4.62 px with the correction disabled.
 
-| Measure | Required | Worst measured |
+| Measure | Required | Worst from font metrics or box geometry |
 |---|---|---|
 | Listing state ink vs either score's ink (box centres when unscored) | ≤ 1 px | 0.017 px |
 | Listing logo box vs score box | ≤ 1 px | 0.008 px |

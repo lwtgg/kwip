@@ -38,7 +38,6 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
   if (!(text instanceof Text)) return NaN
   const style = getComputedStyle(line)
   context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
-  context.fontStretch = style.fontStretch as CanvasFontStretch
   const range = document.createRange()
   range.selectNodeContents(text)
   const rects = range.getClientRects()
@@ -128,8 +127,9 @@ function fitText() {
   const stateWords = status.flatMap((line, index) => line === stateLine ? [statusWidths[index]!] : [])
   const wideDetail = compact && Math.ceil(Math.max(0, ...lowerWords) * floor) + 1 > compactMiddle
   const middleMin = wideDetail ? Math.ceil(Math.max(0, ...stateWords) * floor) + 1 : statusMin
+  const middleWidth = Number.isFinite(share) ? Math.max(middleMin, available * share) : middleMin
   lineup.toggleAttribute('data-wide-detail', wideDetail)
-  lineup.style.setProperty('--banner-compact-middle', `${Math.min(compactMiddle, Math.max(middleMin, available * share))}px`)
+  lineup.style.setProperty('--banner-compact-middle', `${Math.min(compactMiddle, middleWidth)}px`)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
   lineup.style.setProperty('--banner-status-min', `${statusMin}px`)
@@ -152,6 +152,7 @@ function fitText() {
       const scoreCentre = scores.reduce((sum, score) => sum + inkOffset(score, context), 0) / scores.length
       const offset = scoreCentre - inkOffset(stateLine, context)
       if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset.toFixed(3)}px`)
+      else stateLine.style.removeProperty('--banner-state-offset')
     }
   } else {
     stateLine?.style.removeProperty('--banner-state-offset')
