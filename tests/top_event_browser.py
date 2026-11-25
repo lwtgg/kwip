@@ -69,12 +69,16 @@ def fixtures(output, variant):
                  away=dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b', logo=None, score=50),
                  home=dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033', logo=None, score=97))
     top = dict(template, name='Featured fixture', uri_name=EVENT, id=8000, match=match, viewers='62',
-               starts_at=now-60, ends_at=now+7200, iframe=TAIFOOD, always_live=0, poster='')
+               starts_at=now-60, ends_at=now+7200, iframe=TAIFOOD.replace('https:', 'http:'), always_live=0, poster='')
     popular = dict(top, name='Popular fixture', uri_name='basketball/popular', id=8001, viewers='1000')
     if variant.startswith('taifood') or variant.startswith('no-embed'):
         popular['viewers'] = '50'
     else:
         top['hero_embed'] = ZLIVE
+        if variant == 'zlive-http':
+            top['hero_embed'] = ZLIVE.replace('https:', 'http:')
+        elif variant == 'zlive-443':
+            top['hero_embed'] = ZLIVE.replace('https://zlive.st/embed/TSN4', 'http://user:secret@zlive.st:443/embed/TSN4/')
     if variant.startswith('no-embed'):
         top['iframe'] = ''
         if variant == 'no-embed-unmatched':
@@ -85,13 +89,46 @@ def fixtures(output, variant):
         popular['starts_at'] = now+120
     fillers = [dict(popular, uri_name=f'basketball/filler-{i}', id=9000+i, starts_at=now+3600)
                for i in range(18)]
-    return dict(listing, timestamp=now, streams=[
+    return dict(listing, timestamp=now - 1800 if variant == 'stale' else now, streams=[
         dict(listing['streams'][0], always_live=0, streams=[popular, top, *fillers])
     ]), top
 
 
-def check(browser, oracle, origin, feed, listing, event, width, variant, root_text=False):
-    with browser.new_context(viewport={'width': width, 'height': 1300 if root_text else 850}, reduced_motion='reduce') as context:
+def refresh_feed(page):
+    page.evaluate('''async () => {
+      const app = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$nuxt;
+      await app.callHook('app:data:refresh');
+    }''')
+
+
+def check_below_fold(page, box, frame, button, expected):
+    # Expose just the control while keeping the player below the viewport.
+    button.evaluate('''button => {
+      const bottom = button.getBoundingClientRect().bottom;
+      window.scrollBy(0, Math.max(0, bottom - innerHeight));
+    }''')
+    expect(button).to_be_in_viewport(ratio=0.99)
+    assert box.evaluate('box => box.getBoundingClientRect().top >= innerHeight')
+    expect(frame).to_have_count(0)
+    expect(button).to_have_accessible_name('Play')
+    button.click()
+    expect(frame).to_have_attribute('src', expected, timeout=4000)
+    expect(box).to_be_in_viewport()
+    expect(button).to_be_focused()
+    expect(button).to_have_accessible_name('Sound on')
+    # A second user activation opts in to sound even if the first scroll moved the control away.
+    page.keyboard.press('Enter')
+    expect(button).to_have_accessible_name('Mute')
+    expect(frame).to_have_attribute('src', ZLIVE)
+
+
+def check(browser, oracle, origin, feed, listing, event, width, variant, root_text=False,
+          height=850, below_fold=False):
+    https_page = variant in ('taifood', 'zlive-http', 'zlive-443')
+    worker_origin = origin
+    if https_page:
+        origin = origin.replace('http:', 'https:')
+    with browser.new_context(viewport={'width': width, 'height': height}, reduced_motion='reduce') as context:
         context.add_init_script(CLS_OBSERVER)
         context.add_init_script('''(() => {
           window.heroHidden = !location.search.includes('natural=1');
@@ -115,7 +152,10 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             elif url.startswith((origin + '/', feed + '/')):
                 if parts.path.startswith('/go/'):
                     ad_requests.append(parts.path)
-                route.continue_()
+                if https_page and url.startswith(origin + '/'):
+                    route.fulfill(response=route.fetch(url=worker_origin + url[len(origin):]))
+                else:
+                    route.continue_()
             else:
                 route.abort()
 
@@ -125,10 +165,7 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         collect_render_errors(page, errors)
         assert page.goto(origin, wait_until='networkidle').ok
         # Exercise the browser's provider path with the same payload as the SSR provider.
-        page.evaluate('''async () => {
-          const app = document.querySelector('#__nuxt').__vue_app__.config.globalProperties.$nuxt;
-          await app.callHook('app:data:refresh');
-        }''')
+        refresh_feed(page)
         assert feed_requests == [feed + '/streams'], feed_requests
         if root_text:
             page.add_style_tag(content='html { font-size: 200%; }')
@@ -167,6 +204,14 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
 
         taifood = variant.startswith('taifood')
         held = variant.endswith('save-data') and not taifood
+        if below_fold:
+            if variant == 'stale':
+                expect(hero.locator('.hero-footer').locator('[aria-hidden=true]')).to_have_count(0)
+            check_below_fold(page, box, frame, button, ZLIVE + '&muted=1')
+            assert not errors, errors
+            print(f"{width}×{height} {variant} at {200 if root_text else 100}%: Play scrolled into view and mounted muted",
+                  flush=True)
+            return
         if held:
             page.wait_for_timeout(100)
             expect(frame).to_have_count(0)
@@ -179,9 +224,12 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
             expect(button).to_be_focused()
             held_target = button.bounding_box()
+            scroll = page.evaluate("({ left: scrollX, top: scrollY })")
             button.click()
             expect(button).to_be_focused()
             expect(button).to_have_accessible_name('Sound on')
+            # Play may scroll a partially visible box. Compare layout at the same scroll position.
+            page.evaluate('scroll => window.scrollTo(scroll)', scroll)
             assert button.bounding_box() == held_target
 
         expected = TAIFOOD if taifood else ZLIVE + '&muted=1'
@@ -195,6 +243,9 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         expect(frame).to_have_attribute('allow', 'autoplay; fullscreen; picture-in-picture')
         expect(frame.content_frame.get_by_role('heading', name='Third-party fixture')).to_be_visible()
         assert player_requests[0] == expected
+        if https_page:
+            assert urlsplit(page.url).scheme == 'https'
+            assert urlsplit(frame.get_attribute('src')).scheme == 'https'
         assert box.bounding_box() == before
         assert plate.bounding_box() == plate_before
         assert before['y'] == plate_before['y'] + plate_before['height']
@@ -216,7 +267,10 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
 
         expect(link.locator('.banner-status-tier')).to_have_count(2)
         footer = hero.locator('.hero-footer')
-        expect(footer.get_by_role('img', name='62 viewers')).to_be_visible()
+        audience = footer.get_by_text('62 Viewers', exact=True)
+        expect(audience).to_be_visible()
+        expect(audience).to_have_attribute('aria-hidden', 'true')
+        expect(link).to_have_accessible_name(re.compile(r'62 Viewers'))
         if taifood:
             expect(button).to_have_count(0)
         else:
@@ -261,6 +315,7 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         if not taifood:
             expect(button).to_be_focused()
             expect(button).to_be_enabled()
+            expect(button).to_have_accessible_name('Play')
         assert box.bounding_box() == before and plate.bounding_box() == plate_before
         page.evaluate('window.heroHidden = false; document.dispatchEvent(new Event("visibilitychange"))')
         expect(frame).to_have_attribute('src', expected)
@@ -285,6 +340,37 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         assert box.bounding_box() == before
         assert page.evaluate(CLS_SCORE) == 0
         assert not errors, errors
+        if variant == 'zlive' and not root_text:
+            button.click()
+            expect(button).to_have_accessible_name('Mute')
+            started_frame = frame.element_handle()
+            page.evaluate('''() => {
+              navigator.connection.saveData = true;
+              navigator.connection.dispatchEvent(new Event('change'));
+            }''')
+            expect(frame).to_have_attribute('src', ZLIVE)
+            expect(button).to_have_accessible_name('Mute')
+            assert started_frame.evaluate('el => el.isConnected')
+
+            # Keep the same source so the URI change alone must reset playback permission.
+            original_listing = listing
+            category = listing['streams'][0]
+            replacement = dict(event, uri_name='basketball/replacement')
+            listing = dict(listing, streams=[dict(category, streams=[
+                replacement if stream['uri_name'] == EVENT else stream for stream in category['streams']
+            ])])
+            refresh_feed(page)
+            expect(link).to_have_attribute('href', '/live/basketball/replacement')
+            expect(button).to_have_accessible_name('Play')
+            expect(frame).to_have_count(0)
+            button.click()
+            expect(frame).to_have_attribute('src', expected)
+            expect(button).to_have_accessible_name('Sound on')
+            listing = original_listing
+            refresh_feed(page)
+            expect(link).to_have_attribute('href', f'/live/{EVENT}')
+            expect(button).to_have_accessible_name('Play')
+            expect(frame).to_have_count(0)
         link.click()
         page.wait_for_url(re.compile(f'/live/{EVENT}$'))
         assert not ad_requests
@@ -299,13 +385,17 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--below-fold-only', action='store_true', help='Run only the Play regression cases')
     args = parser.parse_args()
     output = args.output.resolve()
     with tempfile.TemporaryDirectory() as temp, sync_playwright() as pw:
         with pw.chromium.launch() as browser:
             oracle = browser.new_page()
-            for variant in ('zlive', 'taifood', 'upcoming', 'save-data', 'upcoming-save-data', 'taifood-save-data',
-                            'no-embed-matched', 'no-embed-unmatched'):
+            variants = ('zlive', 'taifood', 'upcoming', 'save-data', 'upcoming-save-data', 'taifood-save-data',
+                        'no-embed-matched', 'no-embed-unmatched', 'zlive-http', 'zlive-443', 'stale')
+            if args.below_fold_only:
+                variants = ('zlive', 'save-data', 'stale')
+            for variant in variants:
                 listing, event = fixtures(output, variant)
                 creative = {'home-banner': {'image': '/banners/house.jpg', 'alt': 'House banner',
                                             'destination': 'https://advertiser.example'}}
@@ -313,10 +403,20 @@ def main():
                         True, variables=lambda _: {'NUXT_PUBLIC_FEED_BASE': feed,
                             'NUXT_PUBLIC_BANNER_CREATIVES': json.dumps(creative) if variant == 'zlive' else '{}'},
                         banner_fixture=output / 'public/og-default.jpg' if variant == 'zlive' else None) as origin:
-                    for width in (320, 390, 1024, 1280):
-                        check(browser, oracle, origin, feed, listing, event, width, variant)
-                        if variant in ('zlive', 'save-data') and width in (320, 390):
-                            check(browser, oracle, origin, feed, listing, event, width, variant, root_text=True)
+                    if not args.below_fold_only and variant != 'stale':
+                        for width in (320, 390, 1024, 1280):
+                            check(browser, oracle, origin, feed, listing, event, width, variant)
+                        if variant in ('zlive', 'save-data'):
+                            for width in (320, 390):
+                                check(browser, oracle, origin, feed, listing, event, width, variant,
+                                      root_text=True, height=1300)
+                    if variant in ('zlive', 'save-data', 'stale'):
+                        widths = (1024, 1280) if variant == 'stale' else (320, 390)
+                        for width in widths:
+                            check(browser, oracle, origin, feed, listing, event, width, variant,
+                                  root_text=True, below_fold=True)
+                    if variant == 'zlive':
+                        check(browser, oracle, origin, feed, listing, event, 844, variant, height=390, below_fold=True)
 
 
 if __name__ == '__main__':

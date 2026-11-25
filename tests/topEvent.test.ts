@@ -75,6 +75,16 @@ test('normalizes zlive URLs before ranking and framing', () => {
   assert.equal(resolveHeroEmbed({ iframe: 'javascript://zlive.st/embed/TSN4' }), undefined)
 })
 
+test('upgrades HTTP for fallback embeds and normalizes zlive on the HTTPS default port', () => {
+  const fallback = taifood.replace('https:', 'http:')
+  assert.equal(resolveHeroEmbed({ iframe: fallback }), taifood)
+  assert.equal(heroFrameUrl(fallback, true, false), taifood)
+  const explicitPort = 'http://user:secret@zlive.st:443/embed/TSN4/'
+  const normalized = 'https://zlive.st/embed/TSN4'
+  assert.equal(resolveHeroEmbed({ iframe: fallback, sources: [{ type: 'iframe', data: explicitPort }] }), normalized)
+  assert.equal(heroFrameUrl(explicitPort, true, false), normalized + '?muted=1')
+})
+
 test('preserves host placeholders through projection and hero query updates', () => {
   const source = 'https://zlive.st/embed/{host}?parent={host}'
   assert.equal(resolveHeroEmbed({ iframe: source }), source)

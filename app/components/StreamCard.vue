@@ -66,29 +66,35 @@ const playerBox = ref<HTMLElement | null>(null)
 const inViewport = ref(false)
 const visible = ref(false)
 const saveData = ref(false)
-const playRequested = ref(false)
+const playbackStarted = ref(false)
 const sound = ref(false)
 const soundOnLabel = 'Sound on'
 const frameKey = ref(0)
 const zlive = computed(() => !!props.heroEmbed && isZliveEmbed(props.heroEmbed))
-const held = computed(() => zlive.value && saveData.value && !playRequested.value)
+const held = computed(() => zlive.value && saveData.value && !playbackStarted.value)
 const frameMounted = computed(() => !!props.heroEmbed &&
   canMountHeroFrame(inViewport.value, visible.value, held.value))
 const frameSrc = computed(() => props.heroEmbed && heroFrameUrl(props.heroEmbed, !!props.heroLive, sound.value))
 
 function handlePlayback() {
-  if (held.value) {
-    playRequested.value = true
+  if (!frameMounted.value) {
+    playbackStarted.value = true
+    playerBox.value?.scrollIntoView({ block: 'nearest' })
     return
   }
-  if (!frameMounted.value) return
   sound.value = !sound.value
   frameKey.value++
 }
 
 if (props.hero) {
+  const heroUri = () => props.stream?.uri_name
+  watch(heroUri, () => { playbackStarted.value = false }, { flush: 'sync' })
+  watch([frameMounted, heroUri], ([mounted]) => {
+    if (mounted) playbackStarted.value = true
+  }, { flush: 'post' })
+
   // Returning to the slot always starts muted. The only unmuting path is a tap.
-  watch([frameMounted, () => props.heroEmbed, () => props.stream?.uri_name, () => props.heroLive], () => {
+  watch([frameMounted, () => props.heroEmbed, heroUri, () => props.heroLive], () => {
     sound.value = false
   }, { flush: 'sync' })
 
@@ -164,15 +170,16 @@ if (props.hero) {
               <span v-if="!stale && !reservesPlayer" role="img" :aria-label="`${exact} ${metric}`" class="listing-numeric">
                 <span aria-hidden="true">{{ compact }} {{ metric }}</span>
               </span>
+              <span v-if="!stale && reservesPlayer" class="sr-only">{{ exact }} {{ metric }}</span>
               <span class="group-hover:underline">Watch</span>
             </div>
           </div>
         </template>
       </NuxtLink>
       <div v-if="reservesPlayer && (!stale || zlive)" class="hero-footer">
-        <span v-if="!stale" role="img" :aria-label="`${exact} ${metric}`"
+        <span v-if="!stale" aria-hidden="true"
           class="listing-numeric wrap-anywhere text-metadata text-muted">
-          <span aria-hidden="true">{{ matchContent?.tiers[2] ?? `${compact} ${metric}` }}</span>
+          {{ matchContent?.tiers[2] ?? `${compact} ${metric}` }}
         </span>
         <button
           v-if="zlive"
@@ -181,7 +188,7 @@ if (props.hero) {
           :data-label="soundOnLabel"
           @click="handlePlayback"
         >
-          <span>{{ held ? 'Play' : sound ? 'Mute' : soundOnLabel }}</span>
+          <span>{{ !frameMounted ? 'Play' : sound ? 'Mute' : soundOnLabel }}</span>
         </button>
       </div>
     </div>

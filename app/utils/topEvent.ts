@@ -16,7 +16,6 @@ export function isZliveEmbed(source: string): boolean {
 }
 
 function normalizeZlive(url: URL) {
-  url.protocol = 'https:'
   url.username = ''
   url.password = ''
   url.pathname = url.pathname.replace(/\/+$/, '')
@@ -42,6 +41,7 @@ export function resolveHeroEmbed(item: EventSources, detail?: EventSources): str
       if (typeof value !== 'string' || !value) return []
       const url = parseSourceUrl(value)
       if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) return []
+      url.protocol = 'https:'
       if (isZliveUrl(url)) normalizeZlive(url)
       return [serializeEmbed(url, value)]
     })
@@ -77,7 +77,9 @@ export function selectTopEvent<T extends Event>(
 
 export function heroFrameUrl(source: string, live: boolean, sound: boolean): string {
   const url = parseSourceUrl(source)
-  if (!url || !isZliveUrl(url)) return source
+  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) return source
+  url.protocol = 'https:'
+  if (!isZliveUrl(url)) return serializeEmbed(url, source)
   normalizeZlive(url)
   if (sound) url.searchParams.delete('muted')
   else url.searchParams.set('muted', '1')
