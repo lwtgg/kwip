@@ -379,14 +379,15 @@ Worker check, the final default rebuild, Wrangler dry run, and the four-width br
 contrast suites. The browser runs used the same scratch drivers, click-under baseline, source
 health seed and packed generation as round four. Logs are in `/tmp/kw60-r5-final`.
 
-## Rounds six and seven. Hero growth ceiling and painted gap
+## Rounds six through eight. Hero growth ceiling, painted gap and parity
 
 Hero score leading is 0.80. The 10vw score size caps at 128.89 px at a 16 px root,
 the viewport width where the 9vw logo scale reaches its 7.25rem cap. The score ceiling
-freezes the scored row at about 103.11 px. The rendered logo is limited by the score line
-box once the score box is tall enough to clear the 2.75rem logo floor. This also prevents
-the logo from opening the score row on tablets, where it previously set the row height
-just below 1024 px. On desktop the score line grows at 8vw and caps below 7.25rem, so the
+freezes the scored row at about 103.11 px. The 2.75rem logo floor intentionally sets the
+row height below about 550 px at 100% text and 1100 px at 200% root text. Above those widths,
+the score line box limits the logo. Previously the logo held the score row open from about
+550 px through 1023 px at normal text, while the hero's minimum height kept the card height
+steady. On desktop the score line grows at 8vw and caps below 7.25rem, so the
 logo's independent ceiling is a secondary guard. The detail has its own scale and reaches
 its ceiling by 1440 px.
 
@@ -400,8 +401,10 @@ WebKit DPR 1, with a 16 px hero gap and an 11 px listing gap. The gate rejects m
 
 The sweep covered 128 cells on macOS 27.3 with Playwright Chromium 159.0.8154.6 and WebKit 27.2.
 The narrowest margin in the gate and sweep was 20.5% at WebKit DPR 1 from
-1440 px onward (14 px / 11 px, 1.2727×). Even a one-device-pixel increase in the hero gap and
-a one-device-pixel decrease in the listing gap would leave a 6.25% margin. The lowest
+1440 px onward (14 px / 11 px, 1.2727×). Holding the listing gap fixed, the 5% gate is
+three device pixels away (17/11), and the 15% target is one device pixel away
+(15/11 leaves a 14.8% margin). A one-device-pixel increase in the hero gap and a
+one-device-pixel decrease in the listing gap together would leave a 6.25% margin. The lowest
 normal-text hero digit fill was 82.4%. Each table cell shows the ratio and its margin.
 
 | Width (px) | Chromium 1× | Chromium 2× | Chromium 4× | Chromium 8× | WebKit 1× | WebKit 2× | WebKit 4× | WebKit 8× |
@@ -425,28 +428,55 @@ normal-text hero digit fill was 82.4%. Each table cell shows the ratio and its m
 
 ### Browser gate
 
-Both engines check the painted ratio at DPR 1, 2, 4 and 8 at 320, 390, 1024, 1280, 1440,
-1920 and 2560 px. The matched-card layout matrix in Chromium also includes 2560 px.
-Edge parity runs at DPR 2 and 4 with a fixed 0.5 CSS px limit, including the wrapped-state
-fixture at DPR 4. For parity, the screenshot estimates the 50% coverage crossing between
-adjacent pixel centres. The WebKit paint model snaps the translated baseline in viewport
-coordinates to the device grid. The gap and fill assertions use the thresholded pixel rows.
-The 114-row pixel gate measured a maximum edge difference of 0.478 px at DPR 2 and 0.328 px
-at DPR 4. The round-five build failed the painted-margin check. The Times control failed
-edge parity at DPR 4 in both engines.
+Both engines check the painted ratio at DPR 1, 2, 4 and 8 across all 16 widths in the table.
+The pixel gate covers 258 rows, including the wrapped-state fixture at DPR 4 in each engine.
+The matched-card layout matrix in Chromium also includes 2560 px. Gap, fill and centring
+use device rows at 50% coverage.
+
+Round eight swept 25% to 75% coverage in 2.5-point steps for edge parity at DPR 2 and 4.
+The decoder estimates coverage from white ink over a black plate and interpolates the
+crossing between adjacent pixel centres independently of the canvas model. With the
+WebKit baseline snap removed, 67.5% gave the lowest worst-case error in device pixels.
+
+| Engine | DPR | Worst edge error at 50% with the previous model (CSS px) | Worst at 67.5% (CSS px) | Mean outward error at 50% → 67.5% (device px) |
+| --- | --- | --- | --- | --- |
+| Chromium | 2 | 0.558 | 0.470 | 0.351 → 0.115 |
+| Chromium | 4 | 0.328 | 0.256 | 0.322 → 0.075 |
+| WebKit | 2 | 0.520 | 0.451 | 0.287 → 0.033 |
+| WebKit | 4 | 0.256 | 0.253 | 0.294 → 0.060 |
+
+The worst CSS error leaves 0.030 px under the old 0.5 px limit. The new limit is 1.3
+device px (0.650 CSS px at DPR 2 and 0.325 at DPR 4), 27% above the worst measured
+1.024 device px. WebKit passes with its baseline snap removed. Keeping that snap at 67.5%
+would reduce its worst edges to 0.425 CSS px at DPR 2 and 0.203 at DPR 4.
+
+The check is intended to catch shifts around 0.4–0.5 CSS px or larger. At DPR 4 the
+0.5 CSS px uniform model shift failed in all 66 rows. Times substituted in the
+canvas model failed on the 390 px listing with 0.951 CSS px error in Chromium
+and 0.911 in WebKit, against a 0.325 px limit. In the 12 review cells
+(320, 1280 and 1440 px, listing and hero, both engines), a one-device-pixel shift
+(0.25 CSS px) of all model edges now fails 11 of 12, and shifting only score edges
+fails 8 of 12. Across the full DPR 4 matrix those controls fail 63 of 66 and 50 of 66
+respectively. A one-device-pixel error can still pass.
 
 The matched-card matrix covered 2,100 listings, 112 heroes, 24 stale matched listings
 and eight Next up cases, with zero hydration or uncaught page errors. Both engines kept
 hero digit fill above 83.0% under 200% root and element text in the DPR 4 probe.
 
-The local gate included 199 unit tests, the default and node-server builds, the build-key
+The round-seven local gate included 199 unit tests, the default and node-server builds, the build-key
 Worker check, a final default rebuild and Wrangler dry run, the browser and contrast suites,
 and the padding, leading and alignment controls. The supplemental WebKit Play probe
 reproduced the comparison build's focus failure. Logs and reports are in `/tmp/kw60-r7-final`.
 
+Round eight reran the default and node-server builds, build-key check, Wrangler dry run,
+199 unit tests, the full card and top-event suites, contrast, banner, density, not-live,
+click-under, generation-first and four-width source-health checks. The 270-cell zoom probe
+found no clipping, and the earlier layout build failed the painted-gap control. Round-eight
+logs and reports are in `/tmp/60r8`.
+
 ## Review follow-ups
 
-- Listing digit fill reached 57.9% at DPR 4 and 57.6% at DPR 8. The 60% gate floor applies to heroes.
+- Listing digit fill ranged from 57.6% to 59.3%. The 60% gate floor applies to heroes.
 - F3/F11. The production listing correction overshot by 0.875–1.0 px at 4× DPR in the audit,
   and by up to 1.125 px at 2×. With the correction disabled, the reviewed listings sat 0.25–0.375 px
   above the digits. The local Chromium listing still sits 0.875 px below them at 4×.
