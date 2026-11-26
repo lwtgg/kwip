@@ -284,7 +284,7 @@ def check_known_hero(browser, origin, assets, dest):
     (dest / 'hero-report.json').write_text(json.dumps(results, indent=2))
 
 
-DEAD_BAND_WIDTHS = (320, 390, 1024, 1280, 1440, 1920, 2560)
+DEAD_BAND_WIDTHS = (320, 390, 640, 768, 1024, 1280, 1440, 1920, 2560)
 PIXEL_WIDTHS = (320, 390, 640, 768, 1023, 1024, 1200, 1280, 1288, 1289, 1290, 1366, 1440, 1536, 1920, 2560)
 # Fixture calibration. See the coverage sweep and reference measurements in docs/redesign-60.md.
 PARITY_FIXTURES = {
@@ -320,10 +320,9 @@ PARITY_CONTROL_FAIL_PCT = 90
 HERO_GAP_LIMIT = 1.6
 PAINTED_GAP_MARGIN_PCT = 5
 
-# Smallest width-to-height ratio of a listing row, measured per viewport for task 60 (docs/redesign-60.md).
-# The measured three-tier rows fall below 3.5 at 320px and 390px.
-# After restoring symmetric padding, the three-tier ratios are 2.6999 at 320px and 3.3561 at 390px.
-RATIO_FLOOR = {320: 2.69, 390: 3.35, 1024: 3.5, 1280: 3.5, 1440: 3.5, 1920: 3.5, 2560: 3.5}
+# Preserve the round-ten ratio floors on the listing content and edge pads. The centring
+# checks separately bound the added mirror space to the height of the actual lower tiers.
+RATIO_FLOOR = {320: 2.69, 390: 3.35, 640: 3.5, 768: 3.5, 1024: 3.5, 1280: 3.5, 1440: 3.5, 1920: 3.5, 2560: 3.5}
 # Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
 WIDE_DETAIL = {
     (320, 'element'): {'matched-widest', 'matched-hangul-long-word'},
@@ -378,6 +377,8 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
       const bounds = selector => rect(banner.querySelector(selector).getBoundingClientRect());
       return {
         card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
+        bottomPad:parseFloat(getComputedStyle(lineup).paddingBlockEnd),
+        lowerHeight:getComputedStyle(lineup).gridTemplateRows.split(' ').slice(1).reduce((sum, track) => sum + parseFloat(track), 0),
         radii:[getComputedStyle(el).borderRadius, getComputedStyle(banner).borderRadius],
         paint:Object.fromEntries(nodes.map(n => {
           const range = document.createRange();
@@ -449,11 +450,13 @@ def banner_measurements(geometry):
                     if geometry['scoreInk'] else max(abs(centre(state) - centre(logo)) for logo in geometry['logoBoxes']))
     logo_offset = max((abs(centre(logo) - centre(score)) for logo, score in
                        zip(geometry['logoBoxes'], geometry['scoreBoxes'])), default=0)
-    top_gap = min(item['top'] for item in (*geometry['logoBoxes'], *geometry['scoreBoxes'], geometry['middle'])) - box['top']
+    row_offset = centre(geometry['logoBoxes'][0]) - centre(box)
     bottom_gap = box['bottom'] - max(item['bottom'] for item in (*geometry['labels'], geometry['progress'] or geometry['labels'][0]))
     detail_gap = (geometry['detailInk'][0] - max(edges[1] for edges in geometry['scoreInk'])
                   if geometry['detailInk'] and geometry['scoreInk'] else None)
-    return dict(top_gap=top_gap, bottom_gap=bottom_gap, detail_ink_gap=detail_gap,
+    return dict(row_offset=row_offset, bottom_gap=bottom_gap, bottom_pad=geometry['bottomPad'],
+                ratio_without_centring=box['width'] / (box['height'] - geometry['lowerHeight']),
+                audience_lines=paint.get('tier-2', {}).get('lines', 0), detail_ink_gap=detail_gap,
                 digit_fill=min(((bottom - top) / score['height'] for (top, bottom), score in
                                 zip(geometry['scoreInk'], geometry['scoreBoxes'])), default=None),
                 min_height=geometry['minHeight'], height=box['height'], width=box['width'], ratio=box['width'] / box['height'],
@@ -577,7 +580,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         assert box['height'] >= 44, geometry
         if not allow_growth:
             floor_ratio = RATIO_FLOOR[card.page.viewport_size['width']]
-            assert box['width'] / box['height'] >= floor_ratio, ('ratio below floor', event['uri_name'], floor_ratio, geometry)
+            assert measurements['ratio_without_centring'] >= floor_ratio, ('ratio below floor', event['uri_name'], floor_ratio, geometry)
     floor = geometry['floor']
     assert floor == .6, geometry
     for name, ink in paint.items():
@@ -606,7 +609,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         lines = paint['tier-1']['lines'] if 'tier-1' in paint else 1
         # Only the fixtures wider than the feed allows may wrap further; the height bound still holds.
         assert lines <= 3 or allow_growth, geometry
-        assert box['height'] <= 145.2 + (4 + (lines - 1) * 1.3) * geometry['fontSize'], (
+        assert box['height'] - geometry['lowerHeight'] <= 145.2 + (4 + (lines - 1) * 1.3) * geometry['fontSize'], (
             'disproportionate root-text row', geometry)
         if event['match']['detail'] == 'Halftime':
             assert paint['tier-1']['lines'] == 1, geometry
@@ -631,14 +634,19 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
 
 
 
+def assert_row_centre(measurements, fixture):
+    assert abs(measurements['row_offset']) <= 2, ('score row off card centre', fixture, measurements['row_offset'])
+
+
 def assert_scoreboard_layout(geometry, fixture, has_detail):
     box, paint = geometry['card'], geometry['paint']
     middle = geometry['middle']
     state, detail, audience = geometry['tiers']
     labels = geometry['labels']
     measurements = banner_measurements(geometry)
-    assert abs(measurements['top_gap'] - measurements['bottom_gap']) <= 2, (
-        'score row padding symmetry', fixture, measurements['top_gap'], measurements['bottom_gap'])
+    assert_row_centre(measurements, fixture)
+    assert measurements['bottom_gap'] + .02 >= measurements['bottom_pad'], (
+        'bottom tier clearance', fixture, measurements['bottom_gap'], measurements['bottom_pad'])
     # Logos share the score box centre. The state aligns with the visible score glyphs.
     assert measurements['logo_offset'] <= 1, ('logo centre offset', fixture, measurements['logo_offset'])
     assert measurements['state_offset'] <= 1, ('state ink centre offset', fixture, measurements['state_offset'])
@@ -759,7 +767,7 @@ def check_stale_matches(browser, origin, assets, dest, listing, events, measure_
                         measurements = assert_scoreboard_layout(geometry, (slug, 'stale', width, mode), slug != 'matched-final')
                         assert measurements['tiers'] == expected_tiers[slug], (slug, measurements)
                         if mode == 'normal':
-                            assert measurements['ratio'] >= RATIO_FLOOR[width], ('stale ratio below floor', width, slug, measurements)
+                            assert measurements['ratio_without_centring'] >= RATIO_FLOOR[width], ('stale ratio below floor', width, slug, measurements)
                     results.append(dict(viewport=width, fixture=slug, mode=mode, stale=True, **measurements))
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     (dest / 'stale-match-report.json').write_text(json.dumps(results, indent=2))
@@ -1242,7 +1250,62 @@ def assert_acumin_used(card, digits):
         session.detach()
 
 
-def check_fixture_ink(pw, origin, assets, fixture):
+def check_row_centre_paint(browser, engine, origin, widths):
+    # Use symmetric ink with transparent margins so the paint oracle measures the artwork,
+    # independently of any asymmetry in a provider's logo asset.
+    logo = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="10" fill="white"/></svg>'
+    rows = []
+    for width, density in product(widths, ('comfortable', 'compact')):
+        with browser.new_context(viewport={'width': width, 'height': 900}, device_scale_factor=4) as context:
+            context.add_cookies([dict(name='density', value=density, url=origin)])
+            context.route(re.compile(r'/icon-(32|48)\.png$'),
+                          lambda route: route.fulfill(content_type='image/svg+xml', body=logo))
+            page = context.new_page()
+            for scale, path in (('listing', '/c/basketball'), ('hero', '/')):
+                assert page.goto(origin + path, wait_until='networkidle').ok
+                card = page.locator('a.event-card:has(.banner-score)').first
+                card.scroll_into_view_if_needed()
+                assert card.locator('.banner-team img').evaluate_all(
+                    'imgs => imgs.length === 2 && imgs.every(img => img.complete && img.naturalWidth)')
+                for mode in ('normal', 'root'):
+                    if mode == 'root':
+                        page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
+                    settle_fit(page)
+                    cell = (engine, width, density, scale, mode)
+                    geometry = banner_geometry(card)
+                    row = assert_scoreboard_layout(geometry, cell, True)
+                    box = geometry['card']
+                    centre = (box['top'] + box['bottom']) / 2
+                    offsets = [sum(screenshot_ink(img, 4)) / 2 - centre
+                               for img in card.locator('.banner-team img').all()]
+                    assert max(map(abs, offsets)) <= 2, ('painted logos off card centre', cell, offsets)
+                    row.update(engine=engine, viewport=width, density=density, scale=scale,
+                               mode=mode, logo_ink_offsets=offsets)
+                    if mode == 'normal' and width in (390, 1280):
+                        control = page.add_style_tag(content="""
+                          .banner-lineup { padding-block-start: var(--banner-pad-bottom) !important }
+                          .match-banner[data-scale='hero'] {
+                            min-height: clamp(6rem, 25vw, var(--spacing-feature-art));
+                            align-items: center;
+                          }
+                        """)
+                        settle_fit(page)
+                        red = banner_measurements(banner_geometry(card))
+                        try:
+                            assert_row_centre(red, cell)
+                        except AssertionError as error:
+                            assert error.args[0][0] == 'score row off card centre', error
+                            assert red['row_offset'] < -2, (cell, red)
+                        else:
+                            raise AssertionError(('equal padding passed the centre assertion', cell, red))
+                        row['equal_padding_offset'] = red['row_offset']
+                        control.evaluate('el => el.remove()')
+                    print('Row centre', json.dumps(row), flush=True)
+                    rows.append(row)
+    return rows
+
+
+def check_fixture_ink(pw, origin, assets, fixture, centre_rows):
     state, detail, away_score, home_score = PARITY_FIXTURES[fixture]
     asset = assets / 'fixtures/streams.json'
     listing = json.loads(asset.read_text())
@@ -1309,13 +1372,17 @@ def check_fixture_ink(pw, origin, assets, fixture):
                         row['model_detail_ink_gap'], listing_row['model_detail_ink_gap'])
                 results.append(row)
             page.close()
+        if reference:
+            centre_rows.extend(check_row_centre_paint(browser, engine, origin, DEAD_BAND_WIDTHS))
         browser.close()
     asset.write_text(json.dumps(listing))
     return results
 
 
 def check_pixel_ink(pw, origin, assets, dest):
-    results = [row for fixture in PARITY_FIXTURES for row in check_fixture_ink(pw, origin, assets, fixture)]
+    centre_rows = []
+    results = [row for fixture in PARITY_FIXTURES for row in check_fixture_ink(pw, origin, assets, fixture, centre_rows)]
+    (dest / 'row-centre-report.json').write_text(json.dumps(centre_rows, indent=2))
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
     summary = [summarize_parity(results, engine, dpr)
                for engine, dpr in product(('chromium', 'webkit'), PARITY_RESIDUAL_CSS_PX)]

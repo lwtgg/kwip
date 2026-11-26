@@ -485,7 +485,6 @@
   --banner-track: color-mix(in srgb, var(--banner-white) 36%, transparent);
   --banner-pad-inline: var(--spacing-2);
   --banner-pad-bottom: var(--spacing-2);
-  --banner-hero-height: clamp(6rem, 25vw, var(--spacing-feature-art));
   --banner-hero-pad: var(--spacing-4);
 }
 
@@ -524,13 +523,23 @@
     minmax(var(--banner-team-min), var(--banner-team-width));
   grid-template-rows: auto auto auto minmax(1lh, auto);
   align-items: center;
-  --banner-pad-top: var(--banner-pad-bottom);
-  padding-block: var(--banner-pad-top) var(--banner-pad-bottom);
+  /* Before fitting, each populated lower tier occupies one line. */
+  --banner-lower-block: 1lh;
+  padding-block: calc(var(--banner-pad-bottom) + var(--banner-lower-block)) var(--banner-pad-bottom);
   padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
   font-size: var(--banner-status-size);
   font-weight: var(--banner-label-weight);
   line-height: var(--banner-status-leading);
   text-align: center;
+}
+.banner-lineup:has(.banner-status-tier:nth-child(2) > span) {
+  --banner-lower-block: 2lh;
+}
+.banner-lineup:has(.banner-status-tier:nth-child(3) > span) {
+  --banner-lower-block: 3lh;
+}
+.banner-lineup:has(.banner-status-tier:nth-child(3) > span):not(:has(.banner-status-tier:nth-child(2) > span)) {
+  --banner-lower-block: 2lh;
 }
 /* The fit pass reads layout straight after writing it. Reduced motion stretches every zero-length
    transition to 0.01ms, which would hand the read back the old track sizes. */
@@ -680,8 +689,6 @@
   --banner-pad-inline: var(--banner-hero-pad);
   --banner-pad-bottom: var(--banner-hero-pad);
   height: auto;
-  min-height: var(--banner-hero-height);
-  align-items: center;
 }
 
 /* The logo can otherwise hold the score row open on tablet widths. */

@@ -155,6 +155,11 @@ function fitText() {
     const minimum = line.parentElement!.classList.contains('banner-initials') ? 0 : floor
     line.style.setProperty('--banner-line-fit', String(Math.max(minimum, Math.min(1, fit))))
   }
+  // Match the space below the score row, including wrapped tiers and the stacked gutter.
+  const lowerTracks = style.gridTemplateRows.split(' ').slice(1).map(parseFloat)
+  const lowerHeight = lowerTracks.reduce((height, track) => height + track, 0)
+  lineup.style.setProperty('--banner-lower-block', `${lowerHeight}px`)
+
   if (stateLine && scores.length) {
     if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
     if (inkContext) {
