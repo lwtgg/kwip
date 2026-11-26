@@ -7,6 +7,7 @@ const props = defineProps<{
   alwaysLive?: number
   now?: number
   stale?: boolean
+  matchState?: 'pre' | 'in' | 'post'
   /** Lane form: no chip and a short fixed-width text; the accessible label keeps the full wording. */
   quiet?: boolean
 }>()
@@ -15,6 +16,7 @@ const initialNow = useState('status-pill-now', () => Math.floor(Date.now() / 100
 const status = computed(() => {
   const now = props.now ?? initialNow.value
   const { startsAt, endsAt, alwaysLive } = props
+  if (props.matchState === 'post') return { text: 'Final', aria: 'Final', state: 'final' }
   const label = windowLabel({ startsAt, endsAt, alwaysLive, now })
 
   if (alwaysLive === 1) return { ...label, state: 'always-live' }

@@ -72,6 +72,32 @@ matched hero with none is banner-only like any other card, not a grey hole. Unde
 not mount by itself, because 16 MB of buffer is the user's choice to make: the plate button says "Play" and the
 first tap mounts the frame, muted. Everything else in rule 26 stands.
 
+28. **The hero player sits beside the plate, not under it.** Rule 27 put the box under the banner and the owner
+found it too tall: at 1280 it was 693 px inside an 850 px viewport, so the fold was mostly player and the card
+read as a picture with a caption. From the `md` breakpoint the hero card is two columns — the player on the
+left, the plate on the right at its natural height, each roughly half the card — and the card's height is the
+taller of the two, so the box no longer sets it. The player stays a sibling of the link with a reserved 16:9
+box and the link stays the plate; the plate is no longer full-bleed, it is the right-hand column with the card's
+own radius on its right corners. Below `md` the card is one column again, the plate is full width and the box
+goes under it as rule 27 had it; the reserved box is 16:9 at every width, so a reflow between the two never
+re-measures it. Sound control stays in the plate. Nothing else in rule 27 changes.
+
+29. **A live score is allowed to be at most a minute old, and the page moves by itself.** The owner reported wrong
+scores in the wild. They are not mapped wrong — every rendered digit matched the snapshot on 201 banners — they are
+frozen: the snapshot only changes when a publish run lands, and the page's cache boundary was derived from the
+event clock, so an edge copy could be 15 minutes old while the card still said "Live". A selected stream with
+`match.state === 'in'` therefore clamps its own cache boundary to 60 s, the same-origin `/api/feed/streams` is
+refetched in an open tab on the same 60 s beat, and the freshness notice appears at ten minutes, not twenty.
+Ten and not two, because the notice *replaces* the listing: the publish runs every five minutes, so a two-minute
+cut would hide the page on most visits. Ten is two publish cadences and still under the twelve-minute watchdog.
+The event clock still governs non-live pages. Publish cadence remains the floor: the page can never be fresher
+than the last generation.
+
+30. **The detail page shows its own match, and the state is not guessed from the clock.** The item's `match` is in
+the payload and was unused, so a final event page showed "Live" and no score. The hero renders the item's own
+`MatchBanner`, and `StatusPill` prefers `match.state === 'post'` over the `endsAt` window. The page title and `<h1>`
+take the same away-first order as the banner, so the title and the digits can never read the result opposite ways.
+
 
 ## Deferred (do not build, just note)
 

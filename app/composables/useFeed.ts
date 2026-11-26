@@ -164,6 +164,7 @@ function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
 function useFeedEndpoint<T extends { success: boolean }>(
   keyPrefix: MaybeRefOrGetter<string>,
   resolveEndpoint: () => FeedEndpoint,
+  hasLiveMatch?: (payload: T | undefined) => boolean,
 ) {
   const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
@@ -172,7 +173,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
   const event = import.meta.server ? useRequestEvent() : undefined
   const now = import.meta.server ? useState('feed-initial-now', () => Math.floor(Date.now() / 1000)) : undefined
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
-  const browserRefresh = import.meta.client
+  const crossOrigin = import.meta.client
     && isCrossOriginFeed(config.public.feedBase, requestUrl, resolveEndpoint())
   const feed = useAsyncData<T & FeedProvenance>(
     cacheKey,
@@ -185,7 +186,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
       const serverError = import.meta.client ? nuxtApp.payload._errors[key] : undefined
       if (isSnapshotOmitted(serverError)) throw serverError
       try {
-        if (browserRefresh) {
+        if (crossOrigin) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
         }
         const generation = import.meta.server && endpoint.kind !== 'ping'
@@ -212,7 +213,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
       } catch (error) {
         if (signal.aborted || key !== cacheKey.value || isSnapshotOmitted(error)) throw error
         if (previous) return { ...previous, fromCache: true }
-        if (browserRefresh && endpoint.kind !== 'ping') {
+        if (crossOrigin && endpoint.kind !== 'ping') {
           return fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, requestUrl.host).catch(() => {
             throw error
           })
@@ -230,13 +231,31 @@ function useFeedEndpoint<T extends { success: boolean }>(
     },
   )
 
-  if (browserRefresh && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
+  if (crossOrigin && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
     // Keep the SSR payload in place until Nuxt has finished hydrating.
     onNuxtReady(() => {
       if (!isSnapshotOmitted(feed.error.value) && (!feed.data.value || feed.data.value.fromCache)) {
         void feed.refresh({ dedupe: 'defer' })
       }
     })
+  }
+
+  if (import.meta.client && hasLiveMatch) {
+    let timer: ReturnType<typeof setInterval> | undefined
+    const stopPolling = () => {
+      clearInterval(timer)
+      timer = undefined
+    }
+    onMounted(() => {
+      watch(() => hasLiveMatch(feed.data.value ?? undefined), (live) => {
+        stopPolling()
+        if (!live) return
+        timer = setInterval(() => {
+          if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
+        }, FEED_CACHE_WINDOW_MS)
+      }, { immediate: true })
+    })
+    onScopeDispose(stopPolling)
   }
 
   return feed
@@ -257,8 +276,14 @@ export function usePing() {
   return useFeedEndpoint<FeedPingResponse>('feed:ping', () => ({ kind: 'ping' }))
 }
 
-export function useStreams() {
-  return useFeedEndpoint<FeedStreamsResponse>('feed:streams', () => ({ kind: 'streams' }))
+export function useStreams(pollLive = true) {
+  return useFeedEndpoint<FeedStreamsResponse>(
+    'feed:streams',
+    () => ({ kind: 'streams' }),
+    pollLive ? payload => !!payload?.streams.some(category =>
+      category.streams.some(stream => stream.match?.state === 'in'),
+    ) : undefined,
+  )
 }
 
 type RawStreamDetail = Omit<FeedStreamDetail,
@@ -287,6 +312,10 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
   const feed = useFeedEndpoint<{ success: true; data: RawStreamDetail }>(
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
+    (payload) => {
+      const item = payload?.data
+      return !!item && (item.uri_name ?? item.uri) === toValue(uriName) && item.match?.state === 'in'
+    },
   )
   let adopted: { uri: string; id: string; generation: string } | undefined
   const publishedDetail = shallowRef<{

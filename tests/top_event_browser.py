@@ -495,7 +495,7 @@ def main():
                             'NUXT_PUBLIC_BANNER_CREATIVES': json.dumps(creative) if variant == 'zlive' else '{}'},
                         banner_fixture=output / 'public/og-default.jpg' if variant == 'zlive' else None) as origin:
                     if not args.below_fold_only and variant != 'stale':
-                        for width in (320, 390, 1024, 1280):
+                        for width in (320, 390, 1024, 1280, 1440, 1920, 2560):
                             check(browser, oracle, origin, feed, listing, event, width, variant)
                         if variant in ('zlive', 'save-data'):
                             for width in (320, 390):

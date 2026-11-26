@@ -1,6 +1,6 @@
 import type { MaybeRefOrGetter, Ref } from 'vue'
 
-const staleAfterSeconds = 20 * 60
+const staleAfterSeconds = 120
 const currentSeconds = () => Math.floor(Date.now() / 1000)
 
 type RefreshPayload = { fromCache?: boolean } | null | undefined
@@ -32,7 +32,7 @@ export function useFeedFreshness(
     }
 
     const anchor = toValue(origin) ?? freshAt.value ?? receivedAt.value
-    return anchor !== null && now - anchor > staleAfterSeconds
+    return anchor !== null && now - anchor >= staleAfterSeconds
   })
 
   async function retry(
