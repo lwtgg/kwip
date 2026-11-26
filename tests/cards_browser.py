@@ -5,7 +5,7 @@ from base64 import b64encode
 from datetime import datetime, timezone
 import json
 from itertools import product
-from math import ceil, floor
+from math import ceil, floor, isfinite
 import platform
 import re
 from pathlib import Path
@@ -286,9 +286,23 @@ def check_known_hero(browser, origin, assets, dest):
 
 DEAD_BAND_WIDTHS = (320, 390, 1024, 1280, 1440, 1920, 2560)
 PIXEL_WIDTHS = (320, 390, 640, 768, 1023, 1024, 1200, 1280, 1288, 1289, 1290, 1366, 1440, 1536, 1920, 2560)
-# Fixed across engines and DPRs. See the coverage sweep in docs/redesign-60.md.
+# Fixture calibration. See the coverage sweep and reference measurements in docs/redesign-60.md.
 PARITY_COVERAGE = .675
 PARITY_DEVICE_PX = 1.3
+PARITY_RESIDUAL_CSS_PX = {2: .35, 4: .22}
+# Signed model-minus-pixel midranges on 68077cb, in CSS px.
+# Pairs are top/bottom edges for state, away score, home score, and detail.
+PARITY_BIAS = {
+    ('chromium', 2): ((.163, .060), (.044, .044), (.044, .045), (.172, .054)),
+    ('chromium', 4): ((.127, .014), (.024, .056), (.025, .057), (.129, .026)),
+    ('webkit', 2): ((-.118, -.129), (.139, .081), (.140, .083), (.164, .191)),
+    ('webkit', 4): ((-.061, -.036), (.097, .063), (.098, .063), (.079, .074)),
+}
+PARITY_CONTROL_CSS_PX = {
+    2: {'uniform': .50, 'score': .60, 'detail': .60},
+    4: {'uniform': .25, 'score': .35, 'detail': .35},
+}
+PARITY_CONTROL_FAIL_PCT = 90
 HERO_GAP_LIMIT = 1.6
 PAINTED_GAP_MARGIN_PCT = 5
 
@@ -992,38 +1006,48 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
 def screenshot_ink(line, dpr, *, check_parity=False):
     """Decode the element's painted pixels on the device grid, including ink outside its line box."""
     page = line.page
+    box = line.bounding_box()
+    left = max(0, floor(box['x']) - 2)
+    top = max(0, floor(box['y']) - 8)
+    right = ceil(box['x'] + box['width']) + 2
+    bottom = ceil(box['y'] + box['height']) + 8
+    clip = dict(x=left, y=top, width=right - left, height=bottom - top)
+    plate_style = """
+      .match-banner { background: black !important }
+      .match-banner * { visibility: hidden !important }
+    """
+    plate = page.screenshot(clip=clip, style=plate_style)
     line.evaluate("el => el.setAttribute('data-ink-target', '')")
     try:
-        box = line.bounding_box()
-        left = max(0, floor(box['x']) - 2)
-        top = max(0, floor(box['y']) - 8)
-        right = ceil(box['x'] + box['width']) + 2
-        bottom = ceil(box['y'] + box['height']) + 8
-        image = page.screenshot(
-            clip=dict(x=left, y=top, width=right - left, height=bottom - top),
-            style="""
-              .match-banner { background: black !important }
-              .match-banner * { visibility: hidden !important }
-              .match-banner [data-ink-target] { visibility: visible !important; color: white !important }
-            """,
-        )
+        ink = page.screenshot(clip=clip, style=plate_style + """
+          .match-banner [data-ink-target] { visibility: visible !important; color: white !important }
+        """)
     finally:
         line.evaluate("el => el.removeAttribute('data-ink-target')")
-    bounds = page.evaluate("""async ({png, parityCoverage}) => {
-      const bytes = Uint8Array.from(atob(png), value => value.charCodeAt(0));
-      const image = await createImageBitmap(new Blob([bytes], {type: 'image/png'}));
+    bounds = page.evaluate("""async ({plate, ink, parityCoverage}) => {
       const canvas = document.createElement('canvas');
-      canvas.width = image.width;
-      canvas.height = image.height;
       const context = canvas.getContext('2d');
-      context.drawImage(image, 0, 0);
-      image.close();
-      const {data} = context.getImageData(0, 0, canvas.width, canvas.height);
+      const decode = async png => {
+        const bytes = Uint8Array.from(atob(png), value => value.charCodeAt(0));
+        const image = await createImageBitmap(new Blob([bytes], {type: 'image/png'}));
+        canvas.width = image.width;
+        canvas.height = image.height;
+        context.drawImage(image, 0, 0);
+        image.close();
+        return context.getImageData(0, 0, canvas.width, canvas.height).data;
+      };
+      const hasColor = pixels => pixels.some((value, index) => index % 4 !== 3 && value !== 0);
+      if (hasColor(await decode(plate))) return {error: 'screenshot plate is not empty'};
+      const data = await decode(ink);
+      const stride = canvas.width * 4;
+      if (hasColor(data.subarray(0, stride)) || hasColor(data.subarray(-stride))) {
+        return {error: 'ink touches screenshot clip edge'};
+      }
       const coverage = [];
       for (let y = 0; y < canvas.height; y++) {
         let peak = 0;
-        const end = (y + 1) * canvas.width * 4;
-        for (let i = y * canvas.width * 4; i < end; i += 4) {
+        const end = (y + 1) * stride;
+        for (let i = y * stride; i < end; i += 4) {
           // White ink over the black plate gives (pixel - 0) / (255 - 0).
           peak = Math.max(peak, Math.min(data[i], data[i + 1], data[i + 2]) / 255);
         }
@@ -1043,10 +1067,11 @@ def screenshot_ink(line, dpr, *, check_parity=False):
       // Interpolate the coverage crossing between neighbouring pixel centres.
       const crossing = (outside, inside) => outside + 0.5
         + (inside - outside) * (parityCoverage - coverage[outside]) / (coverage[inside] - coverage[outside]);
-      return {pixels, parity: [start ? crossing(start - 1, start) : start,
-        end + 1 < coverage.length ? crossing(end + 1, end) : end + 1]};
-    }""", dict(png=b64encode(image).decode('ascii'), parityCoverage=PARITY_COVERAGE if check_parity else None))
+      return {pixels, parity: [crossing(start - 1, start), crossing(end + 1, end)]};
+    }""", dict(plate=b64encode(plate).decode('ascii'), ink=b64encode(ink).decode('ascii'),
+              parityCoverage=PARITY_COVERAGE if check_parity else None))
     assert bounds, ('no screenshot ink', line.inner_text(), box)
+    assert 'error' not in bounds, (bounds.get('error'), line.inner_text(), box)
     pixels = [top + edge / dpr for edge in bounds['pixels']]
     if check_parity:
         assert 'parity' in bounds, ('no screenshot ink at parity coverage', line.inner_text(), box, PARITY_COVERAGE)
@@ -1081,36 +1106,60 @@ def measure_pixel_card(card, cell, dpr):
     if check_parity:
         errors = [[prediction - observed for prediction, observed in zip(model_edges, pixel_edges)]
                   for model_edges, pixel_edges in zip(model, parity_edges)]
-        result.update(parity_edges=parity_edges, edge_errors=errors,
-                      parity_limit=PARITY_DEVICE_PX / dpr)
+        parity = parity_result(errors, cell['engine'], dpr)
+        result.update(parity_edges=parity_edges, edge_errors=errors, parity=parity)
     print(json.dumps(result), flush=True)
     if check_parity:
-        assert all(abs(edge) <= result['parity_limit'] for pair in errors for edge in pair), (
-            'pixel/model ink parity', result)
+        assert not parity['outer_fails'], ('absolute pixel/model ink parity', result)
+        assert not parity['inner_fails'], ('bias-corrected pixel/model ink parity', result)
     assert all(abs(offset) <= 1.25 for offset in offsets), ('pixel state ink centre offset', result)
     return result
 
 
+def parity_result(errors, engine, dpr):
+    assert all(isfinite(edge) for pair in errors for edge in pair), ('non-finite ink residual', engine, dpr, errors)
+    bias = PARITY_BIAS[engine, dpr]
+    corrected = [[edge - reference for edge, reference in zip(pair, bias_pair)]
+                 for pair, bias_pair in zip(errors, bias)]
+    outer_error = max(abs(edge) for pair in errors for edge in pair)
+    inner_error = max(abs(edge) for pair in corrected for edge in pair)
+    outer_limit = PARITY_DEVICE_PX / dpr
+    inner_limit = PARITY_RESIDUAL_CSS_PX[dpr]
+    return dict(corrected=corrected, outer_error=outer_error, inner_error=inner_error,
+                outer_limit=outer_limit, inner_limit=inner_limit,
+                outer_fails=outer_error > outer_limit, inner_fails=inner_error > inner_limit)
+
+
 def check_parity_controls(card, row):
-    limit = row['parity_limit']
+    engine, dpr = row['engine'], row['dpr']
     errors = row['edge_errors']
-    device_pixel = 1 / row['dpr']
-    uniform_error = max(abs(edge + device_pixel) for pair in errors for edge in pair)
-    score_error = max(abs(edge + (device_pixel if index in (1, 2) else 0))
-                      for index, pair in enumerate(errors) for edge in pair)
-    half_css_error = max(abs(edge + .5) for pair in errors for edge in pair)
-    controls = dict(uniform_one_device_px=uniform_error, score_one_device_px=score_error,
-                    uniform_half_css_px=half_css_error)
-    assert half_css_error > limit, ('uniform model error passed parity', row, controls)
+    controls = {}
+    for name, lines in (('uniform', range(4)), ('score', (1, 2)), ('detail', (3,))):
+        amount = PARITY_CONTROL_CSS_PX[dpr][name]
+        for direction, shift in (('up', -amount), ('down', amount)):
+            shifted = [[edge + shift for edge in pair] if index in lines else pair
+                       for index, pair in enumerate(errors)]
+            controls[f'{name}_{direction}'] = parity_result(shifted, engine, dpr)
     if row['width'] == 390 and row['scale'] == 'listing':
-        times = banner_geometry(card, snap_paint_baseline=row['engine'] == 'chromium', model_font_family='Times')
+        times = banner_geometry(card, snap_paint_baseline=engine == 'chromium', model_font_family='Times')
         model = [times['stateInk'], *times['scoreInk'], times['detailInk']]
-        times_error = max(abs(predicted - painted) for pair, observed in zip(model, row['parity_edges'])
-                          for predicted, painted in zip(pair, observed))
-        controls['times'] = times_error
-        assert times_error > limit, ('Times model passed parity', row, controls)
-    row['parity_controls'] = {name: dict(error=error, passes=error <= limit)
-                              for name, error in controls.items()}
+        times_errors = [[predicted - painted for predicted, painted in zip(pair, observed)]
+                        for pair, observed in zip(model, row['parity_edges'])]
+        controls['times'] = parity_result(times_errors, engine, dpr)
+    row['parity_controls'] = controls
+
+
+def assert_parity_control_counts(rows, engine, dpr):
+    controls = [row['parity_controls'] for row in rows if row['engine'] == engine and row['dpr'] == dpr]
+    expected_rows = 2 * len(PIXEL_WIDTHS) + (dpr == 4)
+    names = [f'{name}_{direction}' for name in PARITY_CONTROL_CSS_PX[dpr] for direction in ('up', 'down')]
+    for name in (*names, 'times'):
+        trials = [row[name] for row in controls if name in row]
+        total = 1 if name == 'times' else expected_rows
+        assert len(trials) == total, ('missing parity controls', engine, dpr, name, len(trials), total)
+        failed = sum(trial['inner_fails'] for trial in trials)
+        assert 100 * failed >= PARITY_CONTROL_FAIL_PCT * total, (
+            'parity control below fail floor', engine, dpr, name, failed, total)
 
 
 def assert_acumin_used(card):
@@ -1171,7 +1220,7 @@ def check_pixel_ink(pw, origin, assets, dest):
                     assert abs(offset) < 20, ('wrapped state displaced', engine, offset)
                 row = measure_pixel_card(card, dict(engine=engine, version=browser.version,
                                                     width=width, scale=scale), dpr)
-                if dpr == 4:
+                if 'parity' in row:
                     check_parity_controls(card, row)
                 if scale == 'listing':
                     listing_row = row
@@ -1189,9 +1238,8 @@ def check_pixel_ink(pw, origin, assets, dest):
                 results.append(row)
             page.close()
         browser.close()
-        assert any(not row['parity_controls']['uniform_one_device_px']['passes']
-                   for row in results if row['engine'] == engine and 'parity_controls' in row), (
-                       'uniform one-device-pixel model error always passed', engine)
+        for dpr in PARITY_RESIDUAL_CSS_PX:
+            assert_parity_control_counts(results, engine, dpr)
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
 
 

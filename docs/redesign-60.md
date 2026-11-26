@@ -434,30 +434,71 @@ The matched-card layout matrix in Chromium also includes 2560 px. Gap, fill and 
 use device rows at 50% coverage.
 
 Round eight swept 25% to 75% coverage in 2.5-point steps for edge parity at DPR 2 and 4.
-The decoder estimates coverage from white ink over a black plate and interpolates the
-crossing between adjacent pixel centres independently of the canvas model. With the
-WebKit baseline snap removed, 67.5% gave the lowest worst-case error in device pixels.
+The decoder measures white ink over a black plate and interpolates between adjacent device
+pixel centres. It checks an all-hidden screenshot for any nonblack pixel and requires both
+boundary rows of the ink shot to be black. The shared 67.5% crossing is a fixture calibration.
+Review found that Chromium DPR 4 continued to improve past 77.5%, while WebKit DPR 2 was
+best near 65%. At 67.5%, WebKit DPR 4 had a mean signed residual of about −0.62 device px
+for state and +0.40 for scores. Keeping the WebKit baseline snap at that crossing would
+reduce its raw worst edges to 0.425 CSS px at DPR 2 and 0.203 at DPR 4.
 
-| Engine | DPR | Worst edge error at 50% with the previous model (CSS px) | Worst at 67.5% (CSS px) | Mean outward error at 50% → 67.5% (device px) |
-| --- | --- | --- | --- | --- |
-| Chromium | 2 | 0.558 | 0.470 | 0.351 → 0.115 |
-| Chromium | 4 | 0.328 | 0.256 | 0.322 → 0.075 |
-| WebKit | 2 | 0.520 | 0.451 | 0.287 → 0.033 |
-| WebKit | 4 | 0.256 | 0.253 | 0.294 → 0.060 |
+Round nine measured two independent full pixel runs of the committed build at `68077cb`
+on macOS 27.3 with Chromium 159.0.8154.6 and WebKit 27.2. For each engine and DPR, take
+the midpoint of the minimum and maximum signed `model − pixel` residual for each line
+edge. This choice minimises the largest absolute corrected residual for that edge.
+Each midpoint uses 32 listing and hero rows at DPR 2 or 33 rows at DPR 4, including the
+wrapped state. Both runs produced identical edge residuals and midpoints. The gate
+subtracts the following fixed references, rounded to 0.001 CSS px.
 
-The worst CSS error leaves 0.030 px under the old 0.5 px limit. The new limit is 1.3
-device px (0.650 CSS px at DPR 2 and 0.325 at DPR 4), 27% above the worst measured
-1.024 device px. WebKit passes with its baseline snap removed. Keeping that snap at 67.5%
-would reduce its worst edges to 0.425 CSS px at DPR 2 and 0.203 at DPR 4.
+| Engine | DPR | State top / bottom | Away score top / bottom | Home score top / bottom | Detail top / bottom |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | +0.163 / +0.060 | +0.044 / +0.044 | +0.044 / +0.045 | +0.172 / +0.054 |
+| Chromium | 4 | +0.127 / +0.014 | +0.024 / +0.056 | +0.025 / +0.057 | +0.129 / +0.026 |
+| WebKit | 2 | −0.118 / −0.129 | +0.139 / +0.081 | +0.140 / +0.083 | +0.164 / +0.191 |
+| WebKit | 4 | −0.061 / −0.036 | +0.097 / +0.063 | +0.098 / +0.063 | +0.079 / +0.074 |
 
-The check is intended to catch shifts around 0.4–0.5 CSS px or larger. At DPR 4 the
-0.5 CSS px uniform model shift failed in all 66 rows. Times substituted in the
-canvas model failed on the 390 px listing with 0.951 CSS px error in Chromium
-and 0.911 in WebKit, against a 0.325 px limit. In the 12 review cells
-(320, 1280 and 1440 px, listing and hero, both engines), a one-device-pixel shift
-(0.25 CSS px) of all model edges now fails 11 of 12, and shifting only score edges
-fails 8 of 12. Across the full DPR 4 matrix those controls fail 63 of 66 and 50 of 66
-respectively. A one-device-pixel error can still pass.
+The absolute uncorrected bound remains 1.3 device px, or 0.650 CSS px at DPR 2 and
+0.325 at DPR 4. The corrected bound is 0.35 CSS px at DPR 2 and 0.22 at DPR 4. At DPR 2,
+even the best fixed reference for the state top edge leaves 0.307 CSS px in Chromium
+and 0.332 in WebKit, so a 0.30 CSS px limit would reject the reference fixture.
+
+| Engine | DPR | Worst raw (CSS px) | Worst corrected (CSS px) |
+| --- | --- | --- | --- |
+| Chromium | 2 | 0.470 | 0.307 |
+| Chromium | 4 | 0.256 | 0.129 |
+| WebKit | 2 | 0.451 | 0.333 |
+| WebKit | 4 | 0.253 | 0.200 |
+
+Each shift class and direction must fail the corrected bound in at least 90% of rows
+for each engine and DPR. The table gives failure counts for the outer bound alone
+and the inner bound alone, with up meaning a negative shift of the model edges.
+
+| Engine | DPR | Control (CSS px) | Rows | Raw up / down | Corrected up / down |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | Uniform 0.50 | 32 | 8 / 32 | 32 / 32 |
+| Chromium | 2 | Scores 0.60 | 32 | 8 / 32 | 32 / 32 |
+| Chromium | 2 | Detail 0.60 | 32 | 0 / 32 | 32 / 32 |
+| WebKit | 2 | Uniform 0.50 | 32 | 23 / 30 | 31 / 32 |
+| WebKit | 2 | Scores 0.60 | 32 | 1 / 29 | 32 / 32 |
+| WebKit | 2 | Detail 0.60 | 32 | 1 / 10 | 32 / 32 |
+| Chromium | 4 | Uniform 0.25 | 33 | 3 / 33 | 33 / 33 |
+| Chromium | 4 | Scores 0.35 | 33 | 14 / 33 | 33 / 33 |
+| Chromium | 4 | Detail 0.35 | 33 | 22 / 33 | 33 / 33 |
+| WebKit | 4 | Uniform 0.25 | 33 | 26 / 30 | 32 / 33 |
+| WebKit | 4 | Scores 0.35 | 33 | 6 / 33 | 33 / 33 |
+| WebKit | 4 | Detail 0.35 | 33 | 6 / 31 | 33 / 33 |
+
+Uniform shifts use one device pixel at each DPR. The focused controls use 1.2 device
+px at DPR 2 and 1.4 at DPR 4. With one-device-pixel shifts, the corrected WebKit
+score-only control fails 25/32 up and 31/32 down at DPR 2, and 15/33 up and 28/33
+down at DPR 4. The corrected WebKit detail-only control fails 30/32 up and 25/32
+down at DPR 2, and 9/33 up and 27/33 down at DPR 4. Times substituted in the
+canvas model on the 390 px listing fails both bounds in each engine and DPR.
+
+Opposite-direction errors can still pass both bounds. In the WebKit DPR 4 listing
+at 640 px, shifting state down 0.24 CSS px and both scores up 0.24 CSS px leaves a raw
+error of 0.178 CSS px and a corrected error of 0.206 CSS px. Both pass despite a relative
+error of about 1.9 device px. Gap, fill and centring read painted rows directly. Parity checks the canvas model used by the model dead-band assertion.
 
 The matched-card matrix covered 2,100 listings, 112 heroes, 24 stale matched listings
 and eight Next up cases, with zero hydration or uncaught page errors. Both engines kept
@@ -473,6 +514,14 @@ Round eight reran the default and node-server builds, build-key check, Wrangler 
 click-under, generation-first and four-width source-health checks. The 270-cell zoom probe
 found no clipping, and the earlier layout build failed the painted-gap control. Round-eight
 logs and reports are in `/tmp/60r8`.
+
+Round-nine calibration, build and browser evidence is in `/tmp/kw60-r9-final`.
+`cal-a/pixel-ink-report.json` and `cal-b/pixel-ink-report.json` capture the two
+baseline runs with the committed `tests/cards_browser.py --pixels-only`.
+The full card run writes the uncorrected and corrected values and each
+control outcome to `cards/pixel-ink-report.json`. The four-width generation replay
+uses the round-eight fixture harness, whose decoder handles the null-prototype
+payload that raises a TypeError in the repository script.
 
 ## Review follow-ups
 
