@@ -504,12 +504,11 @@ def main():
                     if variant in ('zlive', 'save-data', 'stale'):
                         widths = (1024, 1280) if variant == 'stale' else (320, 390)
                         for width in widths:
-                            # The footer no longer stacks the audience over the button (task 60), so the
-                            # 200% hero is shorter; a 500px viewport keeps the button below the fold.
+                            # Keep the player below the fold with the shorter centred score plate.
                             check(browser, oracle, origin, feed, listing, event, width, variant,
-                                  root_text=True, below_fold=True, height=850 if variant == 'stale' else 500)
+                                  root_text=True, below_fold=True, height=400)
                     if variant == 'zlive':
-                        for width, height in ((844, 390), (667, 375), (932, 430), (1280, 500)):
+                        for width, height in ((844, 390), (667, 375), (932, 380), (1280, 400)):
                             check(browser, oracle, origin, feed, listing, event, width, variant,
                                   height=height, below_fold=True)
 

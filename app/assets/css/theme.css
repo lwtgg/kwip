@@ -458,14 +458,15 @@
   --banner-away-stop: 30%;
   --banner-home-stop: 71%;
   --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
-  --banner-score-size: 2rem;
+  --banner-score-size: min(2.875rem, var(--banner-score-mobile-cap));
+  --banner-score-mobile-cap: 15vw;
   /* Both hero sizes stop growing at the viewport where 9vw reaches the logo ceiling. */
   --banner-logo-hero-min: 2.75rem;
   --banner-logo-hero-max: 7.25rem;
-  --banner-score-hero: clamp(2.75rem, 10vw, calc(var(--banner-logo-hero-max) * 10 / 9));
+  --banner-score-hero: clamp(min(2.75rem, var(--banner-score-mobile-cap)), 10vw, calc(var(--banner-logo-hero-max) * 10 / 9));
   --banner-status-size: var(--text-metadata);
   --banner-status-hero: clamp(0.875rem, 2.25vw, 2rem);
-  --banner-logo: 2.5rem;
+  --banner-logo: min(2.5rem, calc(var(--banner-score-size) * var(--banner-score-leading)));
   --banner-logo-hero: clamp(var(--banner-logo-hero-min), 9vw, var(--banner-logo-hero-max));
   --banner-status-width: 36%;
   --banner-team-width: 20%;
@@ -478,14 +479,19 @@
   --banner-score-weight: 700;
   --banner-label-weight: 400;
   --banner-status-leading: 1.3;
-  /* The score opens the first row, so its line box holds the whole content area of the font. */
-  --banner-score-leading: 1.16;
-  --banner-hero-score-leading: 0.80;
+  /* Tight leading keeps the logo and digits at comparable heights. */
+  --banner-score-leading: 0.87;
+  --banner-hero-score-leading: 0.73;
+  --banner-hero-scored-logo-inset: calc(var(--spacing-1) / 5);
   /* The timeline track: translucent white over the team field, so it reads on any team colour. */
   --banner-track: color-mix(in srgb, var(--banner-white) 36%, transparent);
   --banner-pad-inline: var(--spacing-2);
   --banner-pad-bottom: var(--spacing-2);
   --banner-hero-pad: var(--spacing-4);
+  --banner-state-gap: 0.35em;
+  --banner-state-ink-gap: 0.9;
+  --banner-track-height: var(--spacing-1);
+  --banner-track-gap: var(--spacing-1);
 }
 
 [data-density='compact'] {
@@ -521,25 +527,20 @@
     minmax(var(--banner-status-min, 0px), var(--banner-status-width))
     minmax(var(--banner-scored-min, 0px), 1fr)
     minmax(var(--banner-team-min), var(--banner-team-width));
-  grid-template-rows: auto auto auto minmax(1lh, auto);
+  grid-template-rows: auto auto auto auto auto;
+  align-content: center;
   align-items: center;
-  /* Before fitting, each populated lower tier occupies one line. */
-  --banner-lower-block: 1lh;
-  padding-block: calc(var(--banner-pad-bottom) + var(--banner-lower-block)) var(--banner-pad-bottom);
+  /* Balance the fitted tracks on either side of the score row. */
+  --banner-upper-block: calc(1lh + var(--banner-state-gap));
+  --banner-lower-block: calc(1lh + var(--banner-track-gap) + var(--banner-track-height));
+  padding-block:
+    calc(var(--banner-pad-bottom) + max(0px, var(--banner-lower-block) - var(--banner-upper-block)))
+    calc(var(--banner-pad-bottom) + max(0px, var(--banner-upper-block) - var(--banner-lower-block)));
   padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
   font-size: var(--banner-status-size);
   font-weight: var(--banner-label-weight);
   line-height: var(--banner-status-leading);
   text-align: center;
-}
-.banner-lineup:has(.banner-status-tier:nth-child(2) > span) {
-  --banner-lower-block: 2lh;
-}
-.banner-lineup:has(.banner-status-tier:nth-child(3) > span) {
-  --banner-lower-block: 3lh;
-}
-.banner-lineup:has(.banner-status-tier:nth-child(3) > span):not(:has(.banner-status-tier:nth-child(2) > span)) {
-  --banner-lower-block: 2lh;
 }
 /* The fit pass reads layout straight after writing it. Reduced motion stretches every zero-length
    transition to 0.01ms, which would hand the read back the old track sizes. */
@@ -548,7 +549,8 @@
   --banner-scored-min: calc(var(--banner-score-min, 0px) + var(--banner-gutter));
 }
 .banner-team {
-  grid-row: 1;
+  grid-row: 2;
+  align-self: end;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   place-items: center;
@@ -572,13 +574,14 @@
 }
 .banner-abbreviation {
   grid-row: 4;
+  align-self: start;
   min-width: 0;
 }
 .banner-away-team, .banner-away-label { grid-column: 1; }
 .banner-home-team, .banner-home-label { grid-column: 5; }
 .banner-away-score { grid-column: 2; padding-inline-end: var(--banner-gutter); }
 .banner-home-score { grid-column: 4; padding-inline-start: var(--banner-gutter); }
-.banner-score-slot { grid-row: 1; min-width: 0; }
+.banner-score-slot { grid-row: 2; min-width: 0; }
 .banner-score {
   font-family: var(--font-score);
   font-size: var(--banner-score-size);
@@ -587,9 +590,8 @@
   font-variant-numeric: lining-nums tabular-nums;
   line-height: var(--banner-score-leading);
 }
-/* The middle column's four tiers: state on the score row, then detail, audience and the timeline.
-   It spans the score tracks too, so the timeline can run from one abbreviation to the other; the
-   text tiers stay in the middle track. */
+/* The state leads the score row. Detail shares the score row, with a
+   full-width fallback for words that cannot fit between the digits. */
 .banner-status {
   --banner-middle: 2;
   grid-column: 2 / 5;
@@ -602,6 +604,15 @@
 }
 .banner-status > * { grid-column: var(--banner-middle); }
 .banner-status-tier { align-self: center; min-width: 0; }
+.banner-status-tier:nth-child(1) { grid-row: 1; padding-block-end: var(--banner-state-gap); }
+.banner-status-tier:nth-child(2) { grid-row: 2; }
+.banner-status-tier:nth-child(3) { grid-row: 4; }
+.banner-lineup:not([data-stacked]) .banner-status-tier:nth-child(3) { grid-column: 1 / -1; }
+.banner-lineup[data-wide-detail]:not([data-stacked]) .banner-status-tier:nth-child(3) { grid-column: 2 / 5; }
+.banner-lineup[data-wide-score-detail] .banner-abbreviation { grid-row: 3; }
+.banner-lineup[data-wide-score-detail] .banner-status-tier:nth-child(2) { grid-row: 4; }
+.banner-lineup[data-wide-score-detail] .banner-status-tier:nth-child(3) { grid-row: 5; }
+.banner-lineup[data-wide-score-detail] .banner-progress { grid-row: 6; }
 .banner-status-line {
   overflow-wrap: break-word;
   --banner-size-fit: min(1, calc(var(--banner-status-fit-width) / (var(--banner-status-size) * var(--banner-chars))));
@@ -613,7 +624,7 @@
   display: block;
   width: max-content;
   white-space: nowrap;
-  transform: translate(-50%, var(--banner-state-offset, 0px)) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
+  transform: translate(-50%, var(--banner-ink-offset, 0px)) scaleX(var(--banner-line-fit, var(--banner-size-fit, 1)));
 }
 /* Below the floor the line wraps at the width the floor allows, then is drawn at the floor. */
 .banner-fit-text[data-wrap] {
@@ -641,15 +652,17 @@
 .banner-lineup[data-stacked] .banner-away-label { grid-column: 1 / 3; }
 .banner-lineup[data-stacked] .banner-home-label { grid-column: 4 / 6; }
 .banner-lineup[data-stacked] .banner-progress { grid-column: var(--banner-middle); }
-.banner-lineup[data-stacked] .banner-status-tier:nth-child(2):has(.banner-status-line) {
-  padding-block-start: var(--banner-gutter);
-}
-/* A word that cannot fit the middle column at the floor takes its whole row; nothing else is on it. */
+/* Expand only the tier whose word would otherwise break at the fit floor. */
 .banner-lineup[data-wide-detail] .banner-status {
   --banner-middle: 3;
   grid-column: 1 / -1;
 }
-.banner-lineup[data-wide-detail] .banner-status > .banner-status-tier:not(:first-child) { grid-column: 1 / -1; }
+.banner-lineup[data-wide-score-detail] .banner-status-tier:nth-child(2),
+.banner-lineup[data-wide-audience] .banner-status-tier:nth-child(3) { grid-column: 1 / -1; }
+.banner-lineup[data-wide-audience] .banner-status-tier:nth-child(3) { grid-row: 5; }
+.banner-lineup[data-wide-detail] { grid-template-rows: auto auto auto auto auto auto; }
+.banner-lineup[data-wide-audience] .banner-progress { grid-row: 6; }
+.banner-lineup[data-wide-detail]:not([data-stacked]) .banner-progress { grid-column: 2 / 5; }
 .banner-fit-text[data-mono] { font-family: ui-monospace, monospace; }
 
 /* Wide listing card: the middle columns narrow and each score hugs the detail, as in the mockup. */
@@ -667,12 +680,14 @@
   .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-home-score .banner-score { transform-origin: left center; }
 }
 
-/* The timeline is the bottom row's middle cell: a track between the abbreviations, centred on them. */
+/* The timeline follows the audience and team names. */
 .banner-progress {
-  grid-row: 4;
+  grid-row: 5;
   grid-column: 1 / -1;
   align-self: center;
   margin-inline: var(--banner-gutter);
+  min-height: calc(var(--banner-track-gap) + var(--banner-track-height));
+  padding-block-start: var(--banner-track-gap);
   min-width: 0;
 }
 .banner-progress [role="progressbar"] {
@@ -691,13 +706,9 @@
   height: auto;
 }
 
-/* The logo can otherwise hold the score row open on tablet widths. */
+/* Keep the logo inside the scored row across the hero scale. */
 .match-banner[data-scale="hero"]:has(.banner-score-slot) {
-  --banner-logo: clamp(
-    var(--banner-logo-hero-min),
-    calc(var(--banner-score-size) * var(--banner-score-leading)),
-    var(--banner-logo-hero)
-  );
+  --banner-logo: calc(var(--banner-score-size) * var(--banner-score-leading) - var(--banner-hero-scored-logo-inset));
 }
 
 /* Keep the existing wide sizing for heroes without a score. */

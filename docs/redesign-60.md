@@ -603,3 +603,102 @@ pixel and parity reports are in `/tmp/kw60-r10`.
 - Revisit the stacking threshold for `matched-live` at 390 px with root text at 200 %. The unstacked
   card measured 239.2 px high with its audience on two lines. The stacked wide-detail fixtures
   measured 212.6 px.
+
+## 60c. State above the score row
+
+The mockup's two cards put the state ink centre about 28% of the card height
+above the card centre. The score ink is 29–32% of card height and 62–84% of logo
+ink height. The gap to the team name is 20–21% of logo ink height. The gap from
+state ink to score ink is about 80% of the state ink height. Detail and score
+ink share a band.
+
+The state occupies the top track. Logos sit at the bottom of the centred score
+track, with the team names and audience immediately underneath and the timeline
+below them. Detail sits between the scores. A detail word that cannot fit there
+at the existing fit floor gets a full-width track after the names. This keeps
+the long-word fixtures readable and preserves the score gutters.
+The fitting pass balances the actual track heights on either side of the score
+row and keeps at least the density's bottom clearance. It positions the state
+from the measured digit ink. The centre track aligns detail with the scores.
+
+The brief measured the old logo-to-name gap at 33.8 px on a 40 px listing logo
+and 74.8 px on a 102 px hero logo (0.84× and 0.73×). Old listing score ink was
+23 px on the 40 px logo (0.58×).
+
+### Layout and 4× paint
+
+The Halftime sweep used symmetric synthetic logos so a provider image's
+transparent margins would not affect the comparison. Across 144 cells in
+Chromium and WebKit (nine widths, two densities, two card scales and two root
+text sizes), the score row was within 0.008 px in layout and the two painted
+logos were within 1.422 px of the card centre. The layout cleared the density
+token at the bottom in every cell. The paint test checks the visible track
+fill and names against the same token, with 0.5 CSS px for screenshot rounding.
+
+| Measurement | Range |
+| --- | --- |
+| State ink centre above card centre | 20.57–30.41% of card height |
+| State-to-score ink gap | 0.837–0.916× the state ink height |
+| Logo-to-name ink gap | 0.077–0.261× the logo ink height |
+| Listing score-to-logo ink ratio | 0.766–0.775× |
+| Hero score-to-logo ink ratio | 0.917–0.963× |
+
+At normal text in Chromium, the 390 px listing measured 3.50–3.75 px between
+logo and name, compared with the brief's 33.8 px. The 1280 px hero measured
+8.25–8.50 px, compared with 74.8 px. The listing digit ink grew from 23 px in
+the brief to 31 px in the fixture probe. Restoring the old row order and equal
+padding moved listings 25.34 px above centre. Heroes moved 27.28 px high at
+390 px and 56.13 px high at 1280 px with the new type sizes.
+
+The narrow-width score cap preserves room between the digits at 200% root
+text. A wrapped state keeps one line's worth of clearance to the score ink.
+The 390 px root-text Hangul fixture now fits between the scores. Wider words
+or wrapped detail that would make the score row taller than the logos still
+use the full-width track.
+
+Baseline parity limits and biases stayed fixed. All 514 parity observations
+passed across 642 ink observations. The worst corrected errors were 0.3914 px
+at DPR 2 and 0.2084 px at DPR 4, compared with limits of 0.41 and 0.27 px.
+The WebKit 640 px hero at DPR 2 measured 0.27061 px, down from 60b's 0.41856 px.
+The hidden-width guard also prevents fitting a zero-width lineup. The geometry
+test requires a nonzero middle column after the fit pass has run.
+
+### Production score audit
+
+The published 2026-11-26 19:41:20 UTC snapshot was compared with ESPN's scoreboards,
+the matching detail API response, Nuxt SSR payload, and the digits rendered on the
+homepage. All 19 sampled cards with scores preserved the feed numbers and away/home
+order through render.
+
+| Event | Feed, SSR and card | ESPN when sampled |
+| --- | --- | --- |
+| [Georgetown at Texas](https://kwip.fyi/live/cbb/2026-11-26/gtwn-tex) | 5–10, first half 15:53 | [13–15, first half 11:51](https://www.espn.com/mens-college-basketball/game/_/gameId/401906869) |
+| [Monaco at Hearts](https://kwip.fyi/live/uecl/2026-11-26/hom-mon) | 2–2, Live 90'+4' | [3–2, Final](https://www.espn.com/soccer/match/_/gameId/401915811) |
+| [Riga at Kauno Žalgiris](https://kwip.fyi/live/uecl/2026-11-26/zal-rig) | 0–2, Live 88' | [0–2, Final](https://www.espn.com/soccer/match/_/gameId/401915739) |
+| [Chicago at Detroit](https://kwip.fyi/live/nfl/2026-11-26/chi-det) | 10–19, Halftime | [10–19, Halftime](https://www.espn.com/nfl/game/_/gameId/401873081) |
+
+The differing numbers and states were already in the [published feed](https://kwip.fyi/api/feed/streams).
+The fit pass preserved those digits. The audit was read-only.
+
+### Local gate
+
+The default Cloudflare build, node-server build, Wrangler dry run and build-key
+check passed. All 199 unit tests and the 1,224-case contrast sweep passed.
+Wrangler reported a 1,037.39 KiB upload and 277.17 KiB gzipped. The build-key
+probe missed after the second build and hit the new CSS on the third request.
+The matched matrix passed across 2,700 listings and 144 heroes with zero
+hydration or uncaught page errors. The largest layout centre offset was
+0.016 px across that corpus. The 24 stale matched listings and eight Next up
+cases passed. The card boundary and 32 fresh/stale checks, top-event cases,
+banner, density, not-live, click-under and seeded source-health suites passed. The stock
+generation replay still raises the known devalue TypeError. The scratch
+decoder passed the four-width replay. The CSS controls rejected the old
+row order, collapsed clearance, excess hero leading, state on the score row
+and detail under the score row.
+
+The 270-cell zoom probe found all score ink inside the banners. The legacy
+probe's tighter score-line-box assertion passed in 47 cells. The other 223
+had a maximum ink overhang of 1.672 CSS px with the new hero score leading.
+
+Evidence is under `/tmp/kw60c-gate`. The production snapshot comparison is
+in `production-final.log`.

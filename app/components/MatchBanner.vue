@@ -32,10 +32,10 @@ function unbreakableWidth(line: HTMLElement) {
 
 let inkContext: CanvasRenderingContext2D | null | undefined
 
-/** Measure the visible text relative to its own box, so the fit never changes the grid alignment. */
-function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
+/** Measure the visible text independently of the grid track that holds it. */
+function inkBounds(line: HTMLElement, context: CanvasRenderingContext2D) {
   const text = line.firstChild
-  if (!(text instanceof Text)) return NaN
+  if (!(text instanceof Text)) return null
   const style = getComputedStyle(line)
   context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
   const range = document.createRange()
@@ -48,7 +48,7 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
   const baseline = probe.getBoundingClientRect().top
   probe.remove()
   const rects = [...range.getClientRects()].filter(rect => rect.height > 0)
-  if (!rects.length) return NaN
+  if (!rects.length) return null
   const rows = new Map<number, string>()
   if (rects.length === 1) {
     rows.set(rects[0]!.top, text.data)
@@ -66,20 +66,21 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
   }
   let top = Infinity
   let bottom = -Infinity
+  let lineCount = 0
   for (const [rowTop, content] of rows) {
     if (!content.trim()) continue
+    lineCount++
     const metrics = context.measureText(content.trim())
     const rowBaseline = baseline + rowTop - rects[0]!.top
     top = Math.min(top, rowBaseline - metrics.actualBoundingBoxAscent)
     bottom = Math.max(bottom, rowBaseline + metrics.actualBoundingBoxDescent)
   }
-  const box = line.getBoundingClientRect()
-  return (top + bottom - box.top - box.bottom) / 2
+  return Number.isFinite(top) ? { top, bottom, lineCount } : null
 }
 
 function fitText() {
   const lineup = lineupElement.value
-  if (!lineup) return
+  if (!lineup?.clientWidth) return
   const style = getComputedStyle(lineup)
   const floor = cssNumber(style, '--banner-fit-floor', 0.6)
   const compression = cssNumber(style, '--banner-score-compression', 0.85)
@@ -89,6 +90,8 @@ function fitText() {
   const status = lines.filter(line => line.classList.contains('banner-status-line'))
   delete lineup.dataset.stacked
   delete lineup.dataset.wideDetail
+  delete lineup.dataset.wideScoreDetail
+  delete lineup.dataset.wideAudience
   lineup.style.removeProperty('--banner-lineup-min')
   const preferredRoom = room(lineup)
   // Reserve the full width to read the minimum padding resolved by the CSS clamp.
@@ -130,15 +133,21 @@ function fitText() {
   const compactSide = Math.max(labelMin, scoreMin + gutter + Math.min(logo, parseFloat(style.fontSize)))
   const compactMiddle = Math.max(0, available - 2 * compactSide)
   const share = Number.parseFloat(style.getPropertyValue('--banner-status-width')) / 100
-  // Detail and audience have their rows to themselves. When a word in them cannot fit the middle
-  // column even at the floor, they take the full row instead of breaking the word.
-  const stateLine = lineup.querySelector<HTMLElement>('.banner-status-tier:first-child .banner-status-line')
-  const lowerWords = status.flatMap((line, index) => line === stateLine ? [] : [statusWidths[index]!])
-  const stateWords = status.flatMap((line, index) => line === stateLine ? [statusWidths[index]!] : [])
-  const wideDetail = compact && Math.ceil(Math.max(0, ...lowerWords) * floor) + 1 > compactMiddle
-  const middleMin = wideDetail ? Math.ceil(Math.max(0, ...stateWords) * floor) + 1 : statusMin
+  // Give the state its actual minimum even when a lower tier needs the full width.
+  const stateLine = status[0]
+  const detailLine = lineup.querySelector<HTMLElement>('.banner-status-tier:nth-child(2) .banner-status-line')
+  const audienceLine = lineup.querySelector<HTMLElement>('.banner-status-tier:nth-child(3) .banner-status-line')
+  const needsWide = (line: HTMLElement | null) => line !== null
+    && Math.ceil(statusWidths[status.indexOf(line)]! * floor) + 1 > compactMiddle
+  const wideDetail = compact && needsWide(detailLine)
+  const wideAudience = compact && needsWide(audienceLine)
+  const sideTierWords = statusWidths.filter((_, index) =>
+    !(wideDetail && status[index] === detailLine) && !(wideAudience && status[index] === audienceLine))
+  const middleMin = Math.ceil(Math.max(...sideTierWords) * floor) + 1
   const middleWidth = Number.isFinite(share) ? Math.max(middleMin, available * share) : middleMin
-  lineup.toggleAttribute('data-wide-detail', wideDetail)
+  lineup.toggleAttribute('data-wide-detail', wideDetail || wideAudience)
+  lineup.toggleAttribute('data-wide-score-detail', wideDetail)
+  lineup.toggleAttribute('data-wide-audience', wideAudience)
   lineup.style.setProperty('--banner-compact-middle', `${Math.min(compactMiddle, middleWidth)}px`)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
@@ -150,28 +159,41 @@ function fitText() {
       line.style.setProperty('--banner-line-fit', String(scoreFit))
       continue
     }
+    fitLine(line)
+  }
+  function fitLine(line: HTMLElement) {
     const fit = room(line.parentElement!) / natural.get(line)!
-    if (fit < floor && status.includes(line)) line.dataset.wrap = ''
+    line.toggleAttribute('data-wrap', fit < floor && status.includes(line))
     const minimum = line.parentElement!.classList.contains('banner-initials') ? 0 : floor
     line.style.setProperty('--banner-line-fit', String(Math.max(minimum, Math.min(1, fit))))
   }
-  // Match the space below the score row, including wrapped tiers and the stacked gutter.
-  const lowerTracks = style.gridTemplateRows.split(' ').slice(1).map(parseFloat)
+  // A tall wrapped detail cannot share the row without pushing its logos down.
+  if (detailLine?.hasAttribute('data-wrap') && scores.length && !wideDetail
+      && detailLine.offsetHeight > Math.max(logo, ...scores.map(score => score.offsetHeight))) {
+    lineup.dataset.wideDetail = ''
+    lineup.dataset.wideScoreDetail = ''
+    fitLine(detailLine)
+  }
+  // Measure the final tracks, including any wrapped text. Changes to the
+  // balancing padding leave these intrinsic track heights unchanged.
+  const [upperHeight, , ...lowerTracks] = style.gridTemplateRows.split(' ').map(parseFloat)
   const lowerHeight = lowerTracks.reduce((height, track) => height + track, 0)
+  lineup.style.setProperty('--banner-upper-block', `${upperHeight}px`)
   lineup.style.setProperty('--banner-lower-block', `${lowerHeight}px`)
 
-  if (stateLine && scores.length) {
-    if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
-    if (inkContext) {
-      const context = inkContext
-      const scoreCentre = scores.reduce((sum, score) => sum + inkOffset(score, context), 0) / scores.length
-      const dpr = window.devicePixelRatio
-      const offset = Math.round((scoreCentre - inkOffset(stateLine, context)) * dpr) / dpr
-      if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset}px`)
-      else stateLine.style.removeProperty('--banner-state-offset')
-    }
-  } else {
-    stateLine?.style.removeProperty('--banner-state-offset')
+  stateLine?.style.removeProperty('--banner-ink-offset')
+  if (!scores.length || !stateLine) return
+  if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
+  const context = inkContext
+  if (!context) return
+  const digits = scores.flatMap(score => inkBounds(score, context) ?? [])
+  const stateInk = inkBounds(stateLine, context)
+  if (stateInk && digits.length) {
+    // A wrapped state still leaves one line's worth of clearance.
+    const lineInkHeight = (stateInk.bottom - stateInk.top) / stateInk.lineCount
+    const gap = Number(style.getPropertyValue('--banner-state-ink-gap')) * lineInkHeight
+    const offset = Math.min(...digits.map(ink => ink.top)) - gap - stateInk.bottom
+    stateLine.style.setProperty('--banner-ink-offset', `${offset.toFixed(3)}px`)
   }
 }
 let observer: ResizeObserver | undefined
