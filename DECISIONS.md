@@ -85,18 +85,26 @@ re-measures it. Sound control stays in the plate. Nothing else in rule 27 change
 29. **A live score is allowed to be at most a minute old, and the page moves by itself.** The owner reported wrong
 scores in the wild. They are not mapped wrong — every rendered digit matched the snapshot on 201 banners — they are
 frozen: the snapshot only changes when a publish run lands, and the page's cache boundary was derived from the
-event clock, so an edge copy could be 15 minutes old while the card still said "Live". A selected stream with
-`match.state === 'in'` therefore clamps its own cache boundary to 60 s, the same-origin `/api/feed/streams` is
-refetched in an open tab on the same 60 s beat, and the freshness notice appears at ten minutes, not twenty.
-Ten and not two, because the notice *replaces* the listing: the publish runs every five minutes, so a two-minute
-cut would hide the page on most visits. Ten is two publish cadences and still under the twelve-minute watchdog.
-The event clock still governs non-live pages. Publish cadence remains the floor: the page can never be fresher
-than the last generation.
+event clock, so a live page could be served for a quarter of an hour while the card still said "Live". A selected
+stream with `match.state === 'in'` therefore clamps its own cache boundary to 60 s, the same-origin
+`/api/feed/streams` is refetched in an open tab on the same 60 s beat, and the freshness notice appears at ten
+minutes, not twenty. Ten and not two, because the notice *replaces* the listing: the publish runs every five
+minutes, so a two-minute cut would hide the page on most visits. Ten is two publish cadences and still under the
+twelve-minute watchdog. The event clock still governs non-live pages.
+
+The client poll, not the clamp, is what moves a score: the edge key already carries the generation, so a re-render
+of the same generation yields the same digits and only the clock-derived text changes. The clamp is kept for that
+text and for machines without JS, at a cost of up to five renders per live page per publish. Publish cadence
+remains the floor: the page can never be fresher than the last generation, and a stalled publisher is the
+remaining gap.
 
 30. **The detail page shows its own match, and the state is not guessed from the clock.** The item's `match` is in
 the payload and was unused, so a final event page showed "Live" and no score. The hero renders the item's own
-`MatchBanner`, and `StatusPill` prefers `match.state === 'post'` over the `endsAt` window. The page title and `<h1>`
-take the same away-first order as the banner, so the title and the digits can never read the result opposite ways.
+`MatchBanner`, and that hero keeps moving: the item is polled while its match is `in`, and also while it is `pre`
+and the window has opened, so a page opened a minute before kickoff cannot stay frozen on "Upcoming". The pill
+maps `match.state` — `post` to Final, `in` to Live, `pre` to Upcoming while the window is open — instead of
+comparing `now` to `endsAt`. The page title and `<h1>` take the same away-first order as the banner, in the
+heading fallback and the seed document too, so the title and the digits can never read the result opposite ways.
 
 
 ## Deferred (do not build, just note)
