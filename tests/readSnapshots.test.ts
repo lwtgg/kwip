@@ -217,6 +217,43 @@ test('selected live matches cap listing deadlines at one minute', async () => {
   }
 })
 
+test('an always-live channel clamps for an in-play match only where its score shows', async () => {
+  const event = (id: number, state: string) => ({
+    id, uri: `sport/${id}`, name: `Event ${id}`, starts_at: 50, ends_at: 900, match: matchWithState(state),
+  })
+  const streams = { ...channels, streams: [
+    { category: 'Rolling Rail', always_live: 1, streams: [event(1, 'in')] },
+  ] }
+  const { bucket } = fixture(false, detail, false, 'sport/example', true, streams)
+  for (const [path, now, boundary] of [
+    ['/', 100, 160],
+    ['/?filter=live', 100, 160],
+    ['/c/rolling-rail', 100, 160],
+    ['/c/rolling-rail?filter=live', 100, 160],
+    ['/?filter=upcoming', 100, Infinity],
+  ] as const) {
+    const generation = await readFeedGeneration(
+      bucket, new URL(path, requestUrl), requestUrl.host, [{ kind: 'streams' }], now,
+    )
+    assert.equal(generation.cacheBoundary, boundary, path)
+  }
+})
+
+test('detail deadlines follow a live related card in the same category', async () => {
+  const streams = { ...channels, streams: [
+    { category: 'Sports', streams: [
+      { id: 1, uri_name: 'sport/example', name: 'Example', starts_at: 400, ends_at: 900 },
+      { id: 2, uri_name: 'sport/related', name: 'Related', starts_at: 50, ends_at: 900, match: matchWithState('in') },
+      { id: 3, uri_name: 'sport/upcoming', name: 'Upcoming', starts_at: 500, ends_at: 900, match: matchWithState('pre') },
+    ] },
+  ] }
+  const soonDetail = { ...detail, data: { ...detail.data, starts_at: 400, ends_at: 900 } }
+  const { bucket } = fixture(true, soonDetail, false, 'sport/example', true, streams)
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints], 100)
+  // The item's own kickoff (400) would allow it; the related live card caps it at a minute.
+  assert.equal(generation.cacheBoundary, 160)
+})
+
 test('detail deadlines use the detail match state even past the event window', async () => {
   for (const [state, now, boundary] of [
     ['in', 500, 560], ['in', 880, 900], ['in', 950, 1010],

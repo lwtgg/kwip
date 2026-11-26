@@ -82,7 +82,7 @@ function humanizeUri(uri: string): string {
 
 // Review #11: every state (loading, error, empty, content) renders the page `h1`.
 const pageHeading = computed(() => {
-  const match = detail.value?.match
+  const match = detail.value?.match ?? matchingListItem.value?.match
   return match
     ? `${match.away.name} vs. ${match.home.name}`
     : detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value)

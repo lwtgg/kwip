@@ -145,6 +145,11 @@ export interface FeedVodDetailResponse {
 }
 
 const FEED_CACHE_WINDOW_MS = 60_000
+/** A detail page opened this long before kickoff starts polling for its own match (rule 30). */
+const DETAIL_POLL_MARGIN_SECONDS = 120
+
+/** `true` polls now; `{ resumeAt }` (seconds) wakes once at that instant; `false` stops. */
+type FeedPoll = boolean | { resumeAt: number }
 
 function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
   const nuxtApp = useNuxtApp()
@@ -164,7 +169,7 @@ function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
 function useFeedEndpoint<T extends { success: boolean }>(
   keyPrefix: MaybeRefOrGetter<string>,
   resolveEndpoint: () => FeedEndpoint,
-  hasLiveMatch?: (payload: T | undefined) => boolean,
+  hasLiveMatch?: (payload: T | undefined) => FeedPoll,
 ) {
   const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
@@ -242,18 +247,30 @@ function useFeedEndpoint<T extends { success: boolean }>(
 
   if (import.meta.client && hasLiveMatch) {
     let timer: ReturnType<typeof setInterval> | undefined
+    let alarm: ReturnType<typeof setTimeout> | undefined
     const stopPolling = () => {
       clearInterval(timer)
+      clearTimeout(alarm)
       timer = undefined
+      alarm = undefined
+    }
+    const startPolling = () => {
+      timer = setInterval(() => {
+        if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
+      }, FEED_CACHE_WINDOW_MS)
+    }
+    const schedule = (poll: FeedPoll | undefined) => {
+      stopPolling()
+      if (!poll) return
+      if (poll === true) return startPolling()
+      alarm = setTimeout(() => {
+        alarm = undefined
+        void feed.refresh({ dedupe: 'defer' })
+        startPolling()
+      }, Math.min(Math.max(0, poll.resumeAt * 1000 - Date.now()), 2_147_483_647))
     }
     onMounted(() => {
-      watch(() => hasLiveMatch(feed.data.value ?? undefined), (live) => {
-        stopPolling()
-        if (!live) return
-        timer = setInterval(() => {
-          if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
-        }, FEED_CACHE_WINDOW_MS)
-      }, { immediate: true })
+      watch(() => hasLiveMatch(feed.data.value ?? undefined), schedule, { immediate: true })
     })
     onScopeDispose(stopPolling)
   }
@@ -312,9 +329,15 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
   const feed = useFeedEndpoint<{ success: true; data: RawStreamDetail }>(
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
-    (payload) => {
+    (payload): FeedPoll => {
       const item = payload?.data
-      return !!item && (item.uri_name ?? item.uri) === toValue(uriName) && item.match?.state === 'in'
+      if (!item || (item.uri_name ?? item.uri) !== toValue(uriName)) return false
+      if (item.match?.state === 'in') return true
+      if (item.match?.state !== 'pre') return false
+      const start = Number(item.starts_at ?? item.start_timestamp)
+      if (!Number.isFinite(start) || start <= 0) return false
+      const opensAt = start - DETAIL_POLL_MARGIN_SECONDS
+      return Math.floor(Date.now() / 1000) >= opensAt ? true : { resumeAt: opensAt }
     },
   )
   let adopted: { uri: string; id: string; generation: string } | undefined

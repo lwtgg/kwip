@@ -15,12 +15,18 @@ const initialNow = useState('status-pill-now', () => Math.floor(Date.now() / 100
 
 const status = computed(() => {
   const now = props.now ?? initialNow.value
-  const { startsAt, endsAt, alwaysLive } = props
-  if (props.matchState === 'post') return { text: 'Final', aria: 'Final', state: 'final' }
+  const { startsAt, endsAt, alwaysLive, matchState } = props
+  if (matchState === 'post') return { text: 'Final', aria: 'Final', state: 'final' }
+  if (matchState === 'in') {
+    if (props.stale) return { text: 'Listed live', aria: 'Listed live', state: 'live' }
+    return { text: 'Live', aria: 'Live', state: 'live', timestamp: endsAt }
+  }
   const label = windowLabel({ startsAt, endsAt, alwaysLive, now })
 
   if (alwaysLive === 1) return { ...label, state: 'always-live' }
   if (startsAt === 0) return { ...label, state: 'event' }
+  // A `pre` match past kickoff is still Upcoming: the state comes from the match, not the clock.
+  if (matchState === 'pre' && now >= startsAt) return { text: 'Upcoming', aria: 'Upcoming', state: 'upcoming' }
   if (now < startsAt) return { ...label, state: 'upcoming', timestamp: startsAt }
   if (now < endsAt) {
     if (props.stale) return { text: 'Listed live', aria: 'Listed live', state: 'live' }
@@ -33,7 +39,10 @@ const status = computed(() => {
 // fact already says the time or Ended, and one line keeps the lane's height across kickoff.
 const shortText = computed(() => {
   const now = props.now ?? initialNow.value
-  if (status.value.state === 'upcoming') return `In ${formatRelative(props.startsAt - now)}`
+  if (status.value.state === 'upcoming') {
+    if (props.matchState === 'pre' && now >= props.startsAt) return 'Upcoming'
+    return `In ${formatRelative(props.startsAt - now)}`
+  }
   if (status.value.state === 'ended' && now > props.endsAt) return `${formatRelative(now - props.endsAt)} ago`
   return status.value.text
 })

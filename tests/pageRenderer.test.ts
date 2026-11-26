@@ -64,7 +64,11 @@ const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 
 function setup(
   context: TestContext,
-  { lateCache = false, pendingMatch }: { lateCache?: boolean; pendingMatch?: Promise<Response> } = {},
+  { lateCache = false, pendingMatch, seed = { name: 'Bundled replay' } }: {
+    lateCache?: boolean
+    pendingMatch?: Promise<Response>
+    seed?: object
+  } = {},
 ) {
   context.mock.timers.enable({ apis: ['setTimeout'] })
   let now = Date.parse(stamp)
@@ -92,7 +96,7 @@ function setup(
     } },
   })
   context.after(() => { delete globalThis.caches })
-  const assets = context.mock.fn(async () => Response.json({ success: true, data: { name: 'Bundled replay' } }))
+  const assets = context.mock.fn(async () => Response.json({ success: true, data: seed }))
   const generation = (event: H3Event) => getFeedGeneration(event, config.feedSnapshotBinding, config.public, new URL('https://kwip.fyi' + event.path))
   async function run(path: string, render: (event: H3Event) => unknown) {
     const req = new IncomingMessage(new Socket())
@@ -205,6 +209,33 @@ for (const fallback of ['cache', 'seed', '503', 'authoritative omission'] as con
     assert.equal(put.mock.callCount(), 0)
   })
 }
+
+test('a seed timeout fallback takes the away-first match order', async context => {
+  const { run, advance, moveClock } = setup(context, {
+    seed: {
+      name: 'Juventus vs. Omonia Nicosia',
+      match: { away: { name: 'Omonia Nicosia' }, home: { name: 'Juventus' } },
+    },
+  })
+  let resolveRender!: (value: string) => void
+  const render = new Promise<string>(resolve => { resolveRender = resolve })
+  const pending = run('/vods/replay', () => render)
+  await tick()
+  advance(250)
+  await tick()
+  advance(200)
+  await tick()
+  advance(7_000)
+  await tick()
+  moveClock(650)
+  resolveRender('late success')
+  const { body } = await pending
+  assert.ok(body instanceof Response)
+  assert.equal(body.status, 200)
+  const html = await body.text()
+  assert.match(html, /<title>Omonia Nicosia vs\. Juventus<\/title>/)
+  assert.match(html, /<h1>Omonia Nicosia vs\. Juventus<\/h1>/)
+})
 
 test('Nuxt payload requests bypass page logging', async context => {
   const { run, logs } = setup(context)

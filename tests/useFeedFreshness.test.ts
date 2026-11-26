@@ -39,3 +39,16 @@ test('a successful retry acknowledges a stale snapshot with an unchanged origin'
   assert.equal(isStale.value, false)
   assert.equal(freshAt.value, completedAt)
 })
+
+test('a retry answer with a newer timestamp clears the notice even from cache', async (context) => {
+  const completedAt = publishedAt + 601
+  context.mock.method(Date, 'now', () => completedAt * 1_000)
+  const origin = ref<number | null>(publishedAt)
+  const { isStale, retry } = useFeedFreshness(origin, ref(null), ref(null))
+
+  assert.equal(isStale.value, true)
+  // Production /api/feed/streams always answers fromCache: true; only the timestamp moves.
+  const newer = publishedAt + 300
+  await retry(async () => { origin.value = newer }, () => [{ timestamp: newer, fromCache: true }])
+  assert.equal(isStale.value, false)
+})

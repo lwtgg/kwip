@@ -3,7 +3,7 @@ import type { MaybeRefOrGetter, Ref } from 'vue'
 const staleAfterSeconds = 600
 const currentSeconds = () => Math.floor(Date.now() / 1000)
 
-type RefreshPayload = { fromCache?: boolean } | null | undefined
+type RefreshPayload = { timestamp?: number; fromCache?: boolean } | null | undefined
 
 export function useFeedFreshness(
   origin: MaybeRefOrGetter<number | null | undefined>,

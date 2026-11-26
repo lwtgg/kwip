@@ -412,6 +412,21 @@ function liveDetailWindow(payloads: Map<string, SnapshotPayload>, streamPath: st
   }
 }
 
+/**
+ * A detail page renders a live score for every related card in its own category, so the page
+ * deadline must also follow any live match there.
+ */
+function relatedScoreBoundary(payload: SnapshotPayload | undefined, streamPath: string, now: number) {
+  const uri = streamPath.slice('streams/'.length)
+  const categories = payload?.streams as StreamCategory[] | undefined
+  const category = categories?.find(candidate => candidate.streams.some(stream => stream.uri_name === uri))
+  let boundary = Infinity
+  for (const stream of category?.streams ?? []) {
+    if (stream.uri_name !== uri) boundary = Math.min(boundary, scoreBoundary(stream, now))
+  }
+  return boundary
+}
+
 function endedReplayPath(window: ReturnType<typeof liveDetailWindow>, streamPath: string, now: number) {
   if (window?.alwaysLive === 0 && window.end > 0 && now >= window.end) {
     return feedDetailPath('vods', streamPath.slice('streams/'.length))
@@ -499,7 +514,11 @@ export async function readFeedGeneration(
     : listingBoundary(payloads.get('streams'), requestUrl, now)
   return {
     readable: identity !== undefined,
-    cacheBoundary: Math.min(eventBoundary, window?.scoreBoundary ?? Infinity),
+    cacheBoundary: Math.min(
+      eventBoundary,
+      window?.scoreBoundary ?? Infinity,
+      streamPath ? relatedScoreBoundary(payloads.get('streams'), streamPath, now) : Infinity,
+    ),
     cacheIdentity: paths.every(path => payloads.has(path)) ? identity : undefined,
     get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
       return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
