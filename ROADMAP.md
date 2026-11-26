@@ -146,6 +146,16 @@ audience and the full gate are green. Production then showed the hero state abou
 (ascent 120) instead of Acumin (115), and the offset is ~5 px wrong. The fixture harnesses resolved the first
 family, so three reviews and the gate passed it. Round four is briefed and unrun at
 `.prompts/60-r4.md` on `task/60-scoreboard` (`137fb9c`); the two checks in flight were killed with the machine.
+**Paused 2026-11-26 for the night, with 60b in flight.** 60 shipped and is live (`54739326`), but the owner came
+back on it: the logos are still too high. He is right, and the reason is that the fix centred the *padding*, not the
+*row* — measured on production, the score row's centre sits 25.34 px above the card's centre at 390 and 1280 while
+both pads are 8.00 px. So production keeps a known visual fault tonight. `.prompts/60b-row-centre.md` is the brief
+(row centre = card centre, 2 px bound from layout and from 4x paint, bottom clearance kept, the equal-padding rule as
+the red control). A draft is committed unreviewed and ungated on `task/60-scoreboard` at `76bca05`: `1lh`-based
+`--banner-lower-block` with `:has()` tier counting, and the hero `min-height` removed through
+the `--banner-hero-height` token. Resume by gating and reviewing it, then re-verify, redeploy, and re-check the
+row-centre figure on production before anything is called done again.
+
 **Shipped 2026-11-26. Task 60 — the scoreboard grid, done in ten rounds.** Version `54739326`, merged `75833c5`.
 The row is centred in the card (symmetric padding, so the gap above equals the gap below), the hero leading is
 `0.8` from a 128-cell sweep, the hero score and logo stop growing at the same viewport, and the ink nudge takes
