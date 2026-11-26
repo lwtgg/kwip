@@ -146,7 +146,29 @@ audience and the full gate are green. Production then showed the hero state abou
 (ascent 120) instead of Acumin (115), and the offset is ~5 px wrong. The fixture harnesses resolved the first
 family, so three reviews and the gate passed it. Round four is briefed and unrun at
 `.prompts/60-r4.md` on `task/60-scoreboard` (`137fb9c`); the two checks in flight were killed with the machine.
-**Updated 2026-11-25 12:45.** Round three passed, 60 merged and deployed, then production showed the row sitting
+**Shipped 2026-11-26. Task 60 — the scoreboard grid, done in ten rounds.** Version `54739326`, merged `75833c5`.
+The row is centred in the card (symmetric padding, so the gap above equals the gap below), the hero leading is
+`0.8` from a 128-cell sweep, the hero score and logo stop growing at the same viewport, and the ink nudge takes
+its baseline from layout instead of a canvas ascent. Ten rounds of review produced a pixel oracle that reads ink
+at 67.5 % alpha coverage, compares it to the canvas model with a per-fixture-calibrated bias (0.41 / 0.27 px
+inner, 1.3 device px outer) and gates 320-2560 at four DPRs in Chromium and WebKit. Production `54739326`:
+gap difference 0.000 px on 240 live banners, track on 60/60, 50/50 absolute canonicals, zero overflow, zero
+page errors; the injected scored-feed pass adds hero ink 0.50 px worst, fill 83.0 % minimum, gap ratio
+0.83-1.17. The live feed was entirely "Upcoming" with no scored match during verification, so score, hero and
+Play figures come from that injected pass — supporting, not live. Follow-ups below. 61 follows.
+
+**Recorded 2026-11-26, review ten, not scheduled** (test-only): the DPR 4 parity inner limit has 0.009 px of
+headroom under omit-and-refit, so the next fixture can go red — refit on a corpus whose held-out fixtures are
+genuinely distinct (the "team name" fixture duplicates "Fourth" on state and scores); the `Overtime` fixture
+reaches the 1.25 px centring bound exactly at every width, so the next device-row step would fail; the three new
+fixtures skip the dead-band and gap assertions; listing digit fill is 57.6-59.3 % against a hero-only 60 % floor;
+the header overflows the page at 200 % root text (pre-existing). The parity gap definition in the record means the
+space under the track row, not under the status tiers — the literal reading is 17-42 px short by design. Playwright
+WebKit's `screenshot(style=)` captures a restyled banner unpainted, so the harness injects a `<style>` element
+instead.
+
+**Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
+showed the row sitting
 high (4 px above vs 8 px under; 23.6 vs 35.6 on the 1280 hero). Two reviews refuted the first diagnosis — Acumin's
 `@unicode-range` is digits-only, so layout and canvas both use Arial Narrow and the ink model was right. Round four
 fixed the real fault (symmetric padding, hero leading, layout baseline instead of canvas ascent, a pixel oracle in
