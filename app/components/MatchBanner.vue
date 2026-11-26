@@ -165,8 +165,9 @@ function fitText() {
     if (inkContext) {
       const context = inkContext
       const scoreCentre = scores.reduce((sum, score) => sum + inkOffset(score, context), 0) / scores.length
-      const offset = scoreCentre - inkOffset(stateLine, context)
-      if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset.toFixed(3)}px`)
+      const dpr = window.devicePixelRatio
+      const offset = Math.round((scoreCentre - inkOffset(stateLine, context)) * dpr) / dpr
+      if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset}px`)
       else stateLine.style.removeProperty('--banner-state-offset')
     }
   } else {

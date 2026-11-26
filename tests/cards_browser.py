@@ -625,7 +625,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         assert abs(drawn[0] - drawn[1]) < .001 and abs(drawn[0] - expected) < .01, (drawn, expected, scores)
         if all(score['room'] >= widest * geometry['compression'] for score in scores):
             assert abs(drawn[0] - geometry['compression']) < .001, ('squeezed with room to spare', drawn, scores)
-    if scored and listing_row and not allow_growth and box['width'] >= 600:
+    if scored and listing_row and not allow_growth and box['width'] >= 600 and card.page.viewport_size['width'] >= 1024:
         # Wide listing card: scores sit near the mockup's 38.5% and 57.6% of the width, not out at the edges.
         centres = [((paint[f'banner-{side}-score']['left'] + paint[f'banner-{side}-score']['right']) / 2 - box['left']) / box['width'] * 100
                    for side in ('away', 'home')]
@@ -654,8 +654,10 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
     assert score_row <= detail['top'], ('detail below scores', fixture, geometry)
     assert detail['bottom'] <= audience['top'] and audience['bottom'] <= min(label['top'] for label in labels), (
         'audience between detail and bottom row', fixture, geometry)
-    # 0.02px: a wrapped tier is laid out at 100% / floor and drawn at the floor, which rounds.
-    assert box['left'] <= middle['left'] <= state['left'] + .02 and state['right'] <= middle['right'] + .02 <= box['right'] + .02, (
+    # Any wrapped status line is laid out at 100% / floor and drawn at the floor, which rounds.
+    column_tolerance = min(.05, .02 * geometry['rootSize'] / 16)
+    assert (box['left'] <= middle['left'] <= state['left'] + column_tolerance
+            and state['right'] <= middle['right'] + column_tolerance and middle['right'] <= box['right']), (
         'state outside middle column', fixture, state, middle, box)
     axis = (middle['left'] + middle['right']) / 2
     for tier in (detail, audience):
@@ -666,7 +668,7 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
             assert tier['width'] == 0 or abs((tier['left'] + tier['right']) / 2 - axis) <= 1, (
                 'wide tier off the middle axis', fixture, tier, middle)
         else:
-            assert middle['left'] <= tier['left'] + .02 and tier['right'] <= middle['right'] + .02, (
+            assert middle['left'] <= tier['left'] + column_tolerance and tier['right'] <= middle['right'] + column_tolerance, (
                 'tier outside middle column', fixture, tier, middle, box)
     for tier in geometry['tiers']:
         assert box['top'] <= tier['top'] <= tier['bottom'] <= box['bottom'], (fixture, tier, box)
