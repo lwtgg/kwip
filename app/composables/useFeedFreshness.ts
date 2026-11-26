@@ -1,6 +1,6 @@
 import type { MaybeRefOrGetter, Ref } from 'vue'
 
-const staleAfterSeconds = 120
+const staleAfterSeconds = 600
 const currentSeconds = () => Math.floor(Date.now() / 1000)
 
 type RefreshPayload = { fromCache?: boolean } | null | undefined

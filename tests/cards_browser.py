@@ -15,6 +15,10 @@ from playwright.sync_api import expect, sync_playwright
 from click_under_browser import worker, CLS_OBSERVER, CLS_SCORE
 
 
+# Give fresh snapshots headroom for the browser matrix while keeping event times on the test clock.
+FRESH_TIMESTAMP_OFFSET = 900
+
+
 def fixtures(assets, stale=False):
     now = int(time.time())
     listing = json.loads((assets / 'fixtures/streams.json').read_text())
@@ -40,7 +44,7 @@ def fixtures(assets, stale=False):
                    viewers=str(100-i), **{}) for i, (label, _) in enumerate(cases)]
     for event, (_, changes) in zip(events, cases):
         event.update(changes)
-    listing.update(timestamp=now-7200 if stale else now, streams=[dict(listing['streams'][0], streams=events)])
+    listing.update(timestamp=now-7200 if stale else now + FRESH_TIMESTAMP_OFFSET, streams=[dict(listing['streams'][0], streams=events)])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     return cases
 
@@ -217,7 +221,7 @@ def check_boundaries(browser, origin, assets, dest):
     listing = json.loads((assets / 'fixtures/streams.json').read_text())
     event = listing['streams'][0]['streams'][0]
     event.update(starts_at=now+60, ends_at=now+120, name='Clock boundary', uri_name='basketball/boundary')
-    listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=[event])])
+    listing.update(timestamp=now + FRESH_TIMESTAMP_OFFSET, streams=[dict(listing['streams'][0], streams=[event])])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
     for width in (320, 390, 1024, 1280):
@@ -255,7 +259,7 @@ def check_known_hero(browser, origin, assets, dest):
     listing = json.loads((assets / 'fixtures/streams.json').read_text())
     event = listing['streams'][0]['streams'][0]
     event.update(starts_at=now+7200, ends_at=now+14400, name='Known kickoff', uri_name='basketball/known-kickoff')
-    listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=[event])])
+    listing.update(timestamp=now + FRESH_TIMESTAMP_OFFSET, streams=[dict(listing['streams'][0], streams=[event])])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     results = []
     for width in (320, 390, 1024, 1280):
@@ -592,7 +596,10 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
 
     geometry = banner_geometry(card)
     box, art, paint = (geometry[key] for key in ('card', 'banner', 'paint'))
-    assert box == art and len(set(geometry['radii'])) == 1, geometry
+    # The link is the plate in every case (rules 27, 28): a hero's reserved player is the link's sibling,
+    # never inside it, so with or without an embed the plate box is the link box and shares its corners.
+    assert card.locator('.hero-player, iframe').count() == 0, ('player inside the plate link', geometry)
+    assert box == art and len(set(geometry['radii'])) == 1, ('plate box is not the link box', geometry)
     measurements = assert_scoreboard_layout(geometry, event['uri_name'], bool(detail))
     if listing_row:
         assert box['height'] >= 44, geometry
@@ -837,6 +844,7 @@ def check_stale_matches(browser, origin, assets, dest, listing, events, measure_
                 for event in picks:
                     slug = event['uri_name'].rsplit('/', 1)[1]
                     card = page.locator(f'a.event-card[href$="/{slug}"]')
+                    expect(card.locator('.banner-lineup')).to_have_attribute('style', re.compile('--banner-lineup-min'))
                     geometry = banner_geometry(card)
                     if measure_only:
                         measurements = banner_measurements(geometry)
@@ -938,7 +946,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
             event['viewers'] = '123456789'
         if event['uri_name'].endswith('matched-always-live'):
             event['always_live'] = 1
-    listing.update(timestamp=now, streams=[dict(listing['streams'][0], streams=events)])
+    listing.update(timestamp=now + FRESH_TIMESTAMP_OFFSET, streams=[dict(listing['streams'][0], streams=events)])
     (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
     # Keep the oracle in a separate, unmodified Chromium page, including for SSR.
     oracle = browser.new_page() if not measure_only else None
@@ -1082,10 +1090,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                         assert geometry['paint'][tier]['scale'] >= geometry['floor'], (
                                             'first paint below fit floor', prefix, tier, geometry['paint'][tier])
                             assert page.goto(origin, wait_until='networkidle').ok
-                            (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
                             hero = page.locator('a.card-hero.card-matched')
                             expect(hero.locator('.banner-score')).to_have_count(2)
                             expect(hero.locator('.banner-lineup')).to_have_attribute('style', re.compile('--banner-lineup-min'))
+                            (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
                             page.evaluate('document.fonts.ready')
                             featured = page.get_by_role('region', name='Featured event')
                             expect(featured.locator('.hero-player')).to_have_count(0)
