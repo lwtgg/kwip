@@ -459,11 +459,14 @@
   --banner-home-stop: 71%;
   --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
   --banner-score-size: 2rem;
-  --banner-score-hero: clamp(2.75rem, 10vw, 9.0625rem);
+  /* Both hero sizes stop growing at the viewport where 9vw reaches the logo ceiling. */
+  --banner-logo-hero-min: 2.75rem;
+  --banner-logo-hero-max: 7.25rem;
+  --banner-score-hero: clamp(2.75rem, 10vw, calc(var(--banner-logo-hero-max) * 10 / 9));
   --banner-status-size: var(--text-metadata);
   --banner-status-hero: clamp(0.875rem, 2.25vw, 2rem);
   --banner-logo: 2.5rem;
-  --banner-logo-hero: clamp(2.75rem, 9vw, 7.25rem);
+  --banner-logo-hero: clamp(var(--banner-logo-hero-min), 9vw, var(--banner-logo-hero-max));
   --banner-status-width: 36%;
   --banner-team-width: 20%;
   --banner-status-fit-width: 5rem;
@@ -477,17 +480,17 @@
   --banner-status-leading: 1.3;
   /* The score opens the first row, so its line box holds the whole content area of the font. */
   --banner-score-leading: 1.16;
+  --banner-hero-score-leading: 0.80;
   /* The timeline track: translucent white over the team field, so it reads on any team colour. */
   --banner-track: color-mix(in srgb, var(--banner-white) 36%, transparent);
   --banner-pad-inline: var(--spacing-2);
-  --banner-pad-top: var(--spacing-1);
   --banner-pad-bottom: var(--spacing-2);
   --banner-hero-height: clamp(6rem, 25vw, var(--spacing-feature-art));
   --banner-hero-pad: var(--spacing-4);
 }
 
 [data-density='compact'] {
-  --banner-pad-top: calc(var(--spacing-1) / 2);
+  --banner-pad-bottom: calc(var(--spacing-1) / 2);
 }
 
 .card-matched {
@@ -521,6 +524,7 @@
     minmax(var(--banner-team-min), var(--banner-team-width));
   grid-template-rows: auto auto auto minmax(1lh, auto);
   align-items: center;
+  --banner-pad-top: var(--banner-pad-bottom);
   padding-block: var(--banner-pad-top) var(--banner-pad-bottom);
   padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
   font-size: var(--banner-status-size);
@@ -670,6 +674,7 @@
 .banner-progress [role="progressbar"] > div { background: var(--banner-white); }
 .match-banner[data-scale="hero"] {
   --banner-score-size: var(--banner-score-hero);
+  --banner-score-leading: var(--banner-hero-score-leading);
   --banner-logo: var(--banner-logo-hero);
   --banner-status-size: var(--banner-status-hero);
   --banner-pad-inline: var(--banner-hero-pad);
@@ -677,6 +682,22 @@
   height: auto;
   min-height: var(--banner-hero-height);
   align-items: center;
+}
+
+/* The logo can otherwise hold the score row open on tablet widths. */
+.match-banner[data-scale="hero"]:has(.banner-score-slot) {
+  --banner-logo: clamp(
+    var(--banner-logo-hero-min),
+    calc(var(--banner-score-size) * var(--banner-score-leading)),
+    var(--banner-logo-hero)
+  );
+}
+
+/* Keep the existing wide sizing for heroes without a score. */
+@media (width >= 64rem) {
+  .match-banner[data-scale="hero"] {
+    --banner-logo: min(var(--banner-logo-hero), calc(var(--banner-score-size) * var(--banner-score-leading)));
+  }
 }
 
 .hero-plate-link:focus-visible {

@@ -40,7 +40,15 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
   context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
   const range = document.createRange()
   range.selectNodeContents(text)
-  const rects = range.getClientRects()
+  // A zero-height inline block ends at the first line's baseline. The range rects
+  // give subsequent lines' Y offsets even when the text wraps.
+  const probe = document.createElement('span')
+  probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline'
+  line.prepend(probe)
+  const baseline = probe.getBoundingClientRect().top
+  probe.remove()
+  const rects = [...range.getClientRects()].filter(rect => rect.height > 0)
+  if (!rects.length) return NaN
   const rows = new Map<number, string>()
   if (rects.length === 1) {
     rows.set(rects[0]!.top, text.data)
@@ -51,17 +59,19 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
       range.setStart(text, index)
       index += character.length
       range.setEnd(text, index)
-      const { top } = range.getBoundingClientRect()
+      const { top, height } = range.getBoundingClientRect()
+      if (!height) continue
       rows.set(top, (rows.get(top) ?? '') + character)
     }
   }
   let top = Infinity
   let bottom = -Infinity
   for (const [rowTop, content] of rows) {
+    if (!content.trim()) continue
     const metrics = context.measureText(content.trim())
-    const baseline = rowTop + metrics.fontBoundingBoxAscent
-    top = Math.min(top, baseline - metrics.actualBoundingBoxAscent)
-    bottom = Math.max(bottom, baseline + metrics.actualBoundingBoxDescent)
+    const rowBaseline = baseline + rowTop - rects[0]!.top
+    top = Math.min(top, rowBaseline - metrics.actualBoundingBoxAscent)
+    bottom = Math.max(bottom, rowBaseline + metrics.actualBoundingBoxDescent)
   }
   const box = line.getBoundingClientRect()
   return (top + bottom - box.top - box.bottom) / 2

@@ -199,3 +199,11 @@ Fixed by setting `.env` to `/api/feed`, dropping both feed vars from the deploy 
 (`a4839204`). After the fix, a reload at 320/390/1280 keeps 175 banners through hydration and makes zero
 provider requests. Rule for future work: the deploy config must not re-pin a value the code already defaults,
 and a base-URL change must be verified on the *client* request log, not only on `curl /api/...`.
+
+## Generation-first replay decoder
+
+Add support for devalue null-prototype objects and `Reactive` wrappers in
+`tests/generation_first_browser.py`. Task 60 review reproduced the same
+`TypeError` on `main` and the scoreboard branch with the same packed generation.
+The corrected scratch decoder passed SSR and hydrated replay at 320, 390, 1024 and
+1280 px. Bring that coverage into the repository replay harness.

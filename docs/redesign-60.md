@@ -17,13 +17,17 @@ Every matched banner (listing row, `Next up` row, hero) uses one four-row grid:
 
 - `.banner-status` is a subgrid on both axes, spanning the score tracks and all four rows. The text
   tiers sit in the middle track. Logos and score boxes share a vertical centre. After wrapping and
-  horizontal fitting, the fit pass uses canvas glyph bounds and the rendered line positions to
-  align the state's ink with the scores' ink. The offset leaves the grid rows at their original
-  sizes. When there are no scores, the state box aligns with the logo boxes.
-- The score row's height is set by the tallest of the logo, the score and the state. The score's
-  line height is `--banner-score-leading` (1.16, the old stacked-only token). This keeps the font's
-  whole content area inside its line box now that the score always opens the card. At normal text
-  the 40 px logo is still the tallest item, so normal cards did not grow from this.
+  horizontal fitting, the fit pass aligns the state's ink with the scores' ink. A zero-size inline
+  block gives the first line's layout baseline, and range positions give the offset to subsequent
+  lines. Canvas supplies glyph ascent and descent. The fit drops collapsed whitespace rects and
+  whitespace-only rows. The offset does not change the grid rows. When there are no scores, the
+  state box aligns with the logo boxes.
+- The score row's height is set by the tallest of the logo, the score and the state. Listings use
+  `--banner-score-leading` (1.16), and the hero uses `--banner-hero-score-leading` (0.80 as of round seven).
+  At normal text the 40 px listing logo still sets the score row's height.
+- The grid has equal block padding at both edges. Listings use 8 px at comfortable density and
+  2 px at compact density. Heroes use 16 px at both densities. The hero minimum height can add
+  space equally at both ends.
 - Empty tiers collapse. A final with `detail == state` is two tiers, and a stale final is one.
 - Compact layout (`data-stacked`, chosen by the fit pass when five columns cannot hold the longest
   word at the floor): each abbreviation spans its team and score tracks, and the logo may shrink to
@@ -86,7 +90,7 @@ audience line box and each of its client rects, and must sit below the link. The
 with `plate.bottom <= button.top`. That can never hold, because the footer is inside `.hero-plate`, and
 the draft never ran it.
 
-## Measurements
+## Original measurements
 
 Chromium, `cards_browser.py` matched matrix: 25 fixtures, 4 widths, 2 themes, 2 densities, 3 text modes
 (1,200 listing observations), 32 matched hero observations (including root 200 %), a stale pass and
@@ -94,18 +98,13 @@ the `Next up` row. A card's ratio is width ÷ height.
 
 ### Centre offsets
 
-The largest offsets across all widths, text modes, themes and densities. Ink offsets in this
-table come from canvas font metrics. In review-two's own 4x DPR screenshots, which this round
-reproduced, the worst ink offset was 1.0 px with the correction and 4.62 px with it disabled.
+The original Chromium matrix compared the canvas model with itself. Its maxima were 0.017 px in
+listings and 0.009 px in the hero. These figures report internal agreement. Box geometry independently
+put logo and score box centres within 0.008 px in both layouts. The production pixel audit found
+a worst listing state-to-score offset of 1.125 px at 2× DPR. The round-four screenshot check allows
+1.25 px to account for pixel-grid snapping.
 
-| Measure | Required | Worst from font metrics or box geometry |
-|---|---|---|
-| Listing state ink vs either score's ink (box centres when unscored) | ≤ 1 px | 0.017 px |
-| Listing logo box vs score box | ≤ 1 px | 0.008 px |
-| Hero state ink vs either score's ink | ≤ 1 px | 0.009 px |
-| Hero logo box vs score box | ≤ 1 px | 0.008 px |
-
-### Ratio, listing rows at normal text
+### Original ratios, category rows at normal text
 
 These are the minimum across both themes and densities and every non-growth fixture. One tier is a
 stale final, two tiers is a final or a stale live/upcoming card, three tiers is live or upcoming.
@@ -136,8 +135,8 @@ rounded down to two places.
 | 1024 | 3.50 | kept; measured 4.68 |
 | 1280 | 3.50 | kept; measured 5.92 |
 
-The floor applies to every non-growth listing row, fresh and stale. No padding was shaved to reach 3.5
-at 390.
+The original floor applied to every non-growth category row, fresh and stale. The round-four floors
+are below.
 
 ### Text at 200 %
 
@@ -167,7 +166,7 @@ Each is restored or replaced with a stricter equivalent:
 | `status_gap` negative when no detail | `None` when there is no detail tier |
 | Hero footer disjointness replaced by an impossible check | disjointness restored (see Hero) |
 
-Coverage includes ink and box centre offsets, tier order and containment, fill width and contrast,
+The original suite covered model-relative ink centres, box centres, tier order and containment, fill width and contrast,
 an always-live fixture, a stale pass, and the expected wide-detail cells. The timeline test checks
 both endpoints against the score-slot edges in the five-column layout and the middle-column edges
 in the stacked layout. It allows 1 px of rounding after applying the gutter, and still checks
@@ -194,6 +193,7 @@ Hangul, Khmer and mixed fixtures. It did, in every run.
 
 ## Original verification gate
 
+All checks in this gate used local builds. The gate included no production pixel check.
 No Worker was serving during any build. Logs are under `/tmp/kw60-gate/final`, red-control logs under
 `/tmp/kw60-red`.
 
@@ -224,7 +224,7 @@ No Worker was serving during any build. Logs are under `/tmp/kw60-gate/final`, r
 
 ## Round two verification
 
-The score fixture (`Live`, 50–97) was also measured from screenshot pixels at 3× device scale.
+The score fixture (`Live`, 50–97) was also measured from local Chromium screenshot pixels at 3× device scale on macOS.
 Across 320, 390, 1024 and 1280 px at normal and root 200 % text, the state ink was within 1.0 px
 of either score in listings and within 0.67 px in the hero.
 
@@ -244,8 +244,360 @@ The contrast sweep passed. The browser gate used the same four-width scratch dri
 generation, with a build of the same click-under baseline as the original gate. Source health passed
 at all four widths after rebuilding a separate copy with the task 55 seed files present at build time.
 
+## Round four
+
+Acumin's `unicode-range: U+0030-0039` includes the score digits and excludes U+0020. The old model
+depended on canvas and layout choosing the same primary font for the line, typically Arial Narrow on
+the audit Mac, while Acumin draws the digits. The first-family-only font string can also lose the
+glyph fallback for the state text when an engine cannot resolve that family on its own. The fit
+retains the full computed stack and gets its baseline from layout. Chromium's platform font report
+confirms the two digit glyphs come from the custom Acumin face.
+
+### Row position and score-to-detail spacing
+
+Round four used the 50–97 fixture in dark theme, comfortable density and normal text on
+the local Chromium build. The ratio floors
+at 320 and 390 now use the measured category row heights after restoring symmetry. Both wide floors
+remain 3.50. The listing score row still measures 40 px at normal text. Across the full matrix
+the largest padding difference was 0.016 px, the minimum hero digit fill was 74.0%, and the
+largest hero-to-listing detail gap ratio was 1.5998.
+
+| Width | Listing above / below | Hero above / below | Hero digit fill | Listing / hero digit-to-detail gap | Category three-tier ratio (floor) |
+|---|---:|---:|---:|---:|---:|
+| 320 | 8 / 8 px | 16 / 16 px | 74.0% | 11.62 / 10.01 px | 2.700 (2.69) |
+| 390 | 8 / 8 px | 16 / 16 px | 74.0% | 11.62 / 10.01 px | 3.356 (3.35) |
+| 1024 | 8 / 8 px | 36.98 / 37.00 px | 74.0% | 11.62 / 14.69 px | 4.500 (3.50) |
+| 1280 | 8 / 8 px | 46.27 / 46.28 px | 74.0% | 11.62 / 18.59 px | 5.700 (3.50) |
+
+At 1280 px the hero's score line box fell from 148.47 px to 115.19 px. The fixture draws
+85.25 px of digit ink in the Chromium screenshot. The hero retains its 320 px minimum height for
+the plate proportions. Its content with the 16 px edge padding measures about 259.45 px, so the
+minimum adds about 30.27 px of space at each edge.
+
+### Screenshot ink oracle
+
+Local Playwright on macOS 27.3, DPR 4. The table shows the largest absolute state offset against
+either score and the largest absolute top or bottom error across the state and both scores. The
+decoder reads element clip screenshots with white text on black. On Chromium the model projects the
+layout baseline to the paint baseline by snapping in document coordinates before applying the
+transform. WebKit uses the fractional baseline directly. The limits are 1.25 px for centres and
+0.5 px for each edge.
+
+| Engine | Width / fixture | Max centre offset | Max edge error |
+|---|---|---:|---:|
+| Chromium 159.0.8154.6 | 390 listing | 0.875 px | 0.337 px |
+| Chromium 159.0.8154.6 | 390 hero | 0.500 px | 0.298 px |
+| Chromium 159.0.8154.6 | 1280 listing | 0.875 px | 0.337 px |
+| Chromium 159.0.8154.6 | 1280 hero | 0.000 px | 0.231 px |
+| Chromium 159.0.8154.6 | 320 wrapped state, root 200% | 0.250 px | 0.159 px |
+| Chromium 159.0.8154.6 | 320 hero | 0.500 px | 0.298 px |
+| WebKit 27.2 | 390 listing | 0.375 px | 0.251 px |
+| WebKit 27.2 | 390 hero | 0.125 px | 0.127 px |
+| WebKit 27.2 | 1280 listing | 0.375 px | 0.258 px |
+| WebKit 27.2 | 1280 hero | 0.000 px | 0.158 px |
+| WebKit 27.2 | 320 wrapped state, root 200% | 0.125 px | 0.133 px |
+| WebKit 27.2 | 320 hero | 0.125 px | 0.127 px |
+
+### Regression controls
+
+Restoring the 4 px top padding gave 4 px above and 8 px below the listing row, which failed the
+symmetry assertion. Restoring hero leading to 1.16 brought digit fill down to 57.4%, which failed
+the 60% floor. Removing the state offset displaced its modelled centre by 4.53 px, and moving it
+to its own row displaced it by 28.44 px. Both failed their centre assertion.
+
+With Times substituted only in the canvas model in both the component and test on a separate
+build, the 390 listing still aligned within 0.125 px by pixels. The screenshot parity check
+failed with a 1.107 px state top error and 0.75 px on each score top against the 0.5 px bound.
+
+### Verification gate
+
+All checks used local builds. This round has no production pixel check or deployment. Logs and
+reports are in `/tmp/kw60-r4-final`.
+
+- `pnpm test` passed all 199 tests. The default build, node-server build, default rebuild and
+  Wrangler dry run passed. The build-key Worker check missed after the second build and hit
+  the new CSS on the third request. A final default rebuild and dry run followed it.
+- The cards, top-event, banner, density, not-live, click-under, source-health and generation-first
+  browser suites passed at 320, 390, 1024 and 1280 px. The card sweep reported zero hydration or
+  uncaught page errors. The contrast sweep passed.
+- As in the earlier gate, the four-width scratch drivers used the banner slot expectations for
+  all four widths and the generation-first payload decoder for null-prototype objects. Click-under
+  used the existing baseline build, generation-first used a locally packed generation, and source
+  health used a separate build with the task 55 seed.
+
+## Round five. Hero leading and cross-engine coverage
+
+WebKit painted a 19.00 px hero gap at 1280 px against an 11.75 px category listing gap at DPR 4,
+a ratio of 1.6170×. The 1.6× dead-band assertion previously ran only in the Chromium layout matrix.
+The dual-engine screenshots measured state and score ink, leaving the detail unmeasured.
+
+The first 1280 px sweep tried 0.90, 0.88, and each hundredth from 0.86 to 0.80. The wide hero
+logo held the first row open and WebKit's painted ratio stayed at 1.6170× at DPR 4 and 1.6383×
+at DPR 8. At 64rem and up, the hero now caps the logo at the score line-box height. The second
+sweep used the same 50–97 Halftime fixture with a timeline in dark, comfortable, normal text.
+Each result is the painted hero gap divided by the painted listing gap on local macOS.
+
+| Score leading with wide logo cap | WebKit DPR 4 | WebKit DPR 8 |
+|---|---:|---:|
+| 0.90 | 1.6170× | 1.6383× |
+| 0.89 | 1.5745× | 1.5851× |
+| 0.88 | 1.5106× | 1.5319× |
+| 0.87 | 1.4681× | 1.4787× |
+| 0.86 | 1.4043× | 1.4255× |
+| 0.85 | 1.3404× | 1.3723× |
+| 0.84 | 1.2979× | 1.3191× |
+
+0.87 was the largest hundredth to clear 5% headroom at both scales (target ≤ 1.52×).
+The cap resolves to about 111.36 px at 1280 px, down from 115.2 px.
+
+The pixel report now records the painted state, away score, home score and detail in that order.
+At 320, 390, 1024 and 1280 px, each engine compares the painted gap in the hero with the
+matching category row and checks the hero's 60% painted digit-fill floor. The wrapped-state
+pixel row at 320 px and 200% root size also records the detail. Running the new assertions on
+the previous build reproduced the WebKit failure at 1280 px.
+
+| Width | Chromium painted ratio | WebKit painted ratio |
+|---|---:|---:|
+| 320 | 0.7500× | 0.8298× |
+| 390 | 0.7500× | 0.8298× |
+| 1024 | 1.1250× | 1.1489× |
+| 1280 | 1.4375× | 1.4681× |
+
+The built CSS gave WebKit 17.25 / 11.75 px at DPR 4 and 17.375 / 11.75 px at DPR 8
+at 1280 px, about 8.2% and 7.6% below the limit. Both densities gave the same ratios with
+and without a timeline. The eight DPR 4 hero rows painted at least 76.3% digit fill.
+
+The full cards run covered 1,200 matched listings, 64 heroes, 24 stale matched listings,
+eight Next up cases and 18 screenshot rows. It reported zero hydration or uncaught page errors.
+The padding, loose leading, zero offset and separate state row controls failed their intended
+assertions. Substituting Times in the canvas model failed pixel parity in both engines.
+The preliminary review traced the WebKit Play pointer-focus and sound-control hit-test failures
+to the `52c30fc` baseline.
+
+The local gate passed all 199 unit tests, the default and node-server builds, the build-key
+Worker check, the final default rebuild, Wrangler dry run, and the four-width browser and
+contrast suites. The browser runs used the same scratch drivers, click-under baseline, source
+health seed and packed generation as round four. Logs are in `/tmp/kw60-r5-final`.
+
+## Rounds six through eight. Hero growth ceiling, painted gap and parity
+
+Hero score leading is 0.80. The 10vw score size caps at 128.89 px at a 16 px root,
+the viewport width where the 9vw logo scale reaches its 7.25rem cap. The score ceiling
+freezes the scored row at about 103.11 px. The 2.75rem logo floor intentionally sets the
+row height below about 550 px at 100% text and 1100 px at 200% root text. Above those widths,
+the score line box limits the logo. Previously the logo held the score row open from about
+550 px through 1023 px at normal text, while the hero's minimum height kept the card height
+steady. On desktop the score line grows at 8vw and caps below 7.25rem, so the
+logo's independent ceiling is a secondary guard. The detail has its own scale and reaches
+its ceiling by 1440 px.
+
+The browser gate and the wider sweep use the same two-digit Halftime fixture and isolate
+each painted text target. The ratio divides the hero's digit-to-detail gap by the listing's.
+Margin is `100 × (1 − ratio / 1.6)`. Round six's narrowest gate margin was 9.1% at
+WebKit DPR 1, with a 16 px hero gap and an 11 px listing gap. The gate rejects margins below
+5% and requires hero digit ink to fill at least 60% of the score line box.
+
+### Painted sweep
+
+The sweep covered 128 cells on macOS 27.3 with Playwright Chromium 159.0.8154.6 and WebKit 27.2.
+The narrowest margin in the gate and sweep was 20.5% at WebKit DPR 1 from
+1440 px onward (14 px / 11 px, 1.2727×). Holding the listing gap fixed, the 5% gate is
+three device pixels away (17/11), and the 15% target is one device pixel away
+(15/11 leaves a 14.8% margin). A one-device-pixel increase in the hero gap and a
+one-device-pixel decrease in the listing gap together would leave a 6.25% margin. The lowest
+normal-text hero digit fill was 82.4%. Each table cell shows the ratio and its margin.
+
+| Width (px) | Chromium 1× | Chromium 2× | Chromium 4× | Chromium 8× | WebKit 1× | WebKit 2× | WebKit 4× | WebKit 8× |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 320 | 0.8333× (47.9%) | 0.8696× (45.7%) | 0.8333× (47.9%) | 0.8438× (47.3%) | 0.8182× (48.9%) | 0.8261× (48.4%) | 0.8298× (48.1%) | 0.8105× (49.3%) |
+| 390 | 0.7500× (53.1%) | 0.8696× (45.7%) | 0.8333× (47.9%) | 0.8438× (47.3%) | 0.8182× (48.9%) | 0.8261× (48.4%) | 0.8298× (48.1%) | 0.8105× (49.3%) |
+| 640 | 0.5000× (68.8%) | 0.5652× (64.7%) | 0.5417× (66.1%) | 0.5521× (65.5%) | 0.4545× (71.6%) | 0.5217× (67.4%) | 0.5106× (68.1%) | 0.5106× (68.1%) |
+| 768 | 0.5000× (68.8%) | 0.5652× (64.7%) | 0.5417× (66.1%) | 0.5312× (66.8%) | 0.6364× (60.2%) | 0.6522× (59.2%) | 0.5957× (62.8%) | 0.6064× (62.1%) |
+| 1023 | 0.8333× (47.9%) | 0.8696× (45.7%) | 0.8750× (45.3%) | 0.8646× (46.0%) | 0.9091× (43.2%) | 0.8261× (48.4%) | 0.8511× (46.8%) | 0.8511× (46.8%) |
+| 1024 | 0.8333× (47.9%) | 0.8696× (45.7%) | 0.8750× (45.3%) | 0.8646× (46.0%) | 0.9091× (43.2%) | 0.8261× (48.4%) | 0.8511× (46.8%) | 0.8511× (46.8%) |
+| 1200 | 0.9167× (42.7%) | 1.0000× (37.5%) | 0.9583× (40.1%) | 0.9688× (39.5%) | 1.0000× (37.5%) | 1.0000× (37.5%) | 1.0000× (37.5%) | 1.0213× (36.2%) |
+| 1280 | 1.0000× (37.5%) | 1.0435× (34.8%) | 1.0208× (36.2%) | 1.0312× (35.5%) | 1.1818× (26.1%) | 1.0870× (32.1%) | 1.0851× (32.2%) | 1.0957× (31.5%) |
+| 1288 | 1.0000× (37.5%) | 1.0435× (34.8%) | 1.0000× (37.5%) | 1.0208× (36.2%) | 1.1818× (26.1%) | 1.1304× (29.3%) | 1.1064× (30.9%) | 1.0957× (31.5%) |
+| 1289 | 1.0000× (37.5%) | 1.0435× (34.8%) | 1.0000× (37.5%) | 1.0208× (36.2%) | 1.1818× (26.1%) | 1.1304× (29.3%) | 1.1064× (30.9%) | 1.1064× (30.9%) |
+| 1290 | 1.0000× (37.5%) | 1.0435× (34.8%) | 1.0000× (37.5%) | 1.0104× (36.8%) | 1.1818× (26.1%) | 1.1304× (29.3%) | 1.0851× (32.2%) | 1.1064× (30.9%) |
+| 1366 | 1.0833× (32.3%) | 1.0870× (32.1%) | 1.0625× (33.6%) | 1.0833× (32.3%) | 1.0909× (31.8%) | 1.1304× (29.3%) | 1.1489× (28.2%) | 1.1489× (28.2%) |
+| 1440 | 1.0833× (32.3%) | 1.1304× (29.3%) | 1.0833× (32.3%) | 1.0833× (32.3%) | 1.2727× (20.5%) | 1.2174× (23.9%) | 1.1702× (26.9%) | 1.1809× (26.2%) |
+| 1536 | 1.0833× (32.3%) | 1.1304× (29.3%) | 1.0833× (32.3%) | 1.0833× (32.3%) | 1.2727× (20.5%) | 1.2174× (23.9%) | 1.1702× (26.9%) | 1.1809× (26.2%) |
+| 1920 | 1.0833× (32.3%) | 1.1304× (29.3%) | 1.0833× (32.3%) | 1.0833× (32.3%) | 1.2727× (20.5%) | 1.2174× (23.9%) | 1.1702× (26.9%) | 1.1809× (26.2%) |
+| 2560 | 1.0833× (32.3%) | 1.1304× (29.3%) | 1.0833× (32.3%) | 1.0833× (32.3%) | 1.2727× (20.5%) | 1.2174× (23.9%) | 1.1702× (26.9%) | 1.1809× (26.2%) |
+
+### Browser gate
+
+Both engines check the painted ratio at DPR 1, 2, 4 and 8 across all 16 widths in the table.
+The pixel gate covers 642 rows, including 514 parity rows and one wrapped-state listing per engine.
+The matched-card layout matrix in Chromium also includes 2560 px. Gap, fill and centring
+use device rows at 50% coverage.
+
+### Pixel/model parity calibration
+
+The Halftime fixture still drives the gap, fill and centring checks at DPR 1, 2, 4
+and 8, including a wrapped-state listing at DPR 4. Those measurements use device
+rows at 50% coverage. The pixel decoder checks that an all-hidden screenshot is
+black, then checks the outermost rows **and columns** of the ink screenshot for
+any nonblack pixel. Parity uses the 67.5% coverage crossing from the round-eight
+sweep, interpolated between adjacent device pixel centres.
+
+At DPR 2 and 4, Chromium 159.0.8154.6 and WebKit 27.2 on macOS 27.3 measure listing
+and hero cards at all 16 widths from 320 to 2560 px. The four fixtures are in
+`tests/cards_browser.py`.
+
+| Fixture | Feed state | Detail | Away–home |
+| --- | --- | --- | --- |
+| Halftime | `in` | Halftime | 50–97 |
+| Fourth | `in` | 4th 2:31 | 8–104 |
+| Overtime | `post` | Final/OT | 113–111 |
+| Team name | `in` | Wolverhampton Wanderers | 8–104 |
+
+For each engine and DPR, take the midpoint of the minimum and maximum signed
+`model − pixel` residual for each top and bottom edge, pooling away and home
+score edges. Freeze the result at 0.001 CSS px. The fit excludes both scales at
+WebKit DPR 2/1366 for Fourth and WebKit DPR 4/1290 for Overtime. The gate still
+runs both fixtures at every width, including the reserved rows.
+
+| Engine | DPR | State top / bottom | Pooled scores top / bottom | Detail top / bottom |
+| --- | --- | --- | --- | --- |
+| Chromium | 2 | +0.168 / +0.107 | +0.041 / +0.081 | +0.167 / +0.057 |
+| Chromium | 4 | +0.125 / +0.031 | +0.027 / +0.049 | +0.127 / +0.029 |
+| WebKit | 2 | −0.105 / −0.120 | +0.175 / +0.117 | +0.173 / +0.134 |
+| WebKit | 4 | −0.061 / −0.035 | +0.084 / +0.042 | +0.079 / +0.046 |
+
+The outer bound remains 1.3 device px (0.650 and 0.325 CSS px). For each DPR,
+take the largest corrected residual in the fit across both engines, add at
+least 0.05 CSS px, and round upward to the next 0.01 CSS px. The fitted worsts
+are 0.350850 and 0.213528 CSS px, yielding inner limits of **0.41 and 0.27 CSS px**.
+The table includes the held-out rows, so each fixture's extremes remain visible.
+
+| Engine | DPR | Halftime | Fourth | Overtime | Team name |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | 0.312 | 0.334 | 0.334 | 0.334 |
+| Chromium | 4 | 0.131 | 0.134 | 0.140 | 0.134 |
+| WebKit | 2 | 0.346 | 0.350 | 0.351 | 0.350 |
+| WebKit | 4 | 0.200 | 0.214 | 0.244 | 0.214 |
+
+Round-nine review found WebKit failures with the same model on Fourth at
+1366 px/DPR 2 (hero state top, 0.363 vs 0.35) and Overtime at 1290 px/DPR 4
+(hero state bottom, 0.243 vs 0.22). Those hero rows now measure 0.350 vs 0.41
+and 0.244 vs 0.27, with 0.060 and 0.026 CSS px of margin. Their paired listings
+measure 0.275 and 0.195 CSS px. Repeating the old run reproduced its residuals
+exactly. Transferring its listing-only fit to heroes yielded worst residuals
+of 0.556 and 0.569 CSS px at DPR 2 in Chromium and WebKit.
+
+As a separate transfer check, refit on three fixtures at a time and omit the
+entire Fourth or Overtime fixture being scored. Both complete held-out matrices
+pass the fixed 0.41 / 0.27 CSS px limits.
+
+| Engine | DPR | Fourth held-out worst | Overtime held-out worst |
+| --- | --- | --- | --- |
+| Chromium | 2 | 0.334 | 0.345 |
+| Chromium | 4 | 0.134 | 0.149 |
+| WebKit | 2 | 0.350 | 0.353 |
+| WebKit | 4 | 0.229 | 0.251 |
+
+The smallest whole-fixture margin is 0.019 CSS px (WebKit DPR 4 Overtime).
+
+**Recalibration rule.** Keep a bias or limit recalibration in a separate change
+from any model or screenshot decoder change. First run the Times and bidirectional
+uniform controls against the frozen inner bound and confirm that both re-prove it.
+Then refit across the whole calibration matrix with the reserved rows excluded.
+Record each fixture's worst, the holdout margins and the first-fail distances
+with the new fixed values. Re-run both controls against the new bound. A refit
+absorbs a model shift already present in its inputs because the midrange moves
+with the shift.
+
+The gate requires the inner bound to reject at least 90% of rows in each
+shift class and direction per engine and DPR. The table gives the smallest
+shift boundary for reaching that floor across the 128 rows at DPR 2 or 129
+at DPR 4, in CSS px. Up is a negative shift of the model edges. An amount
+strictly above the boundary triggers the failure. The controls use fixed
+amounts with slack in both directions.
+
+| Engine | DPR | Uniform up / down | Scores up / down | Detail up / down | State up / down |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | 0.250 / 0.268 | 0.393 / 0.372 | 0.411 / 0.502 | 0.334 / 0.624 |
+| Chromium | 4 | 0.269 / 0.236 | 0.269 / 0.260 | 0.277 / 0.285 | 0.313 / 0.323 |
+| WebKit | 2 | 0.402 / 0.326 | 0.609 / 0.399 | 0.503 / 0.602 | 0.671 / 0.669 |
+| WebKit | 4 | 0.239 / 0.208 | 0.329 / 0.320 | 0.396 / 0.320 | 0.394 / 0.462 |
+
+Control amplitudes at DPR 2 are 0.50 CSS px for uniform and 0.80 for scores,
+detail and state. At DPR 4 they are 0.30, 0.45, 0.45 and 0.55 respectively.
+The 390 px listing for each fixture also substitutes Times in the model,
+which must fail the inner bound. On Halftime, Times leaves corrected errors
+of 0.757 and 0.829 CSS px in Chromium and 0.883 and 0.878 CSS px in WebKit,
+at DPR 2 and 4 respectively. Across all fixtures, the weakest uniform control
+was WebKit up (124/128 at DPR 2 and 125/129 at DPR 4), and every focused
+control rejected every row.
+
+A uniform error applied to every row trips the gate as soon as either bound
+fails on any row. The following first-fail boundaries are in CSS px per line.
+They are recorded for the full gate and for the inner bound alone so the
+sensitivity added by the correction is visible.
+
+| Engine | DPR | Gate uniform up / down | Inner uniform up / down | State vs scores up / down | Scores vs detail up / down |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | 0.076 / 0.076 | 0.076 / 0.076 | 0.076 / 0.076 | 0.123 / 0.123 |
+| Chromium | 4 | 0.131 / 0.066 | 0.131 / 0.130 | 0.130 / 0.066 | 0.131 / 0.130 |
+| WebKit | 2 | 0.059 / 0.060 | 0.059 / 0.060 | 0.059 / 0.060 | 0.120 / 0.120 |
+| WebKit | 4 | 0.026 / 0.056 | 0.026 / 0.056 | 0.026 / 0.056 | 0.103 / 0.095 |
+
+Opposite-direction errors can pass **per row**. In the WebKit DPR 4 Halftime
+listing at 640 px, shifting state down 0.24 CSS px and both scores up 0.24 CSS
+px leaves a raw error of 0.178 and a corrected error of 0.185 CSS px, despite
+a relative error of about 1.9 device px. Applied matrix-wide, that direction
+trips the gate above 0.056 CSS px per line. The table uses the direction of
+the first named line group, with the second group shifted the opposite way.
+The report also gives both directions for state, detail, each individual
+score and both scores together. All of those gate-level boundaries are below
+0.25 CSS px.
+
+The matched-card matrix covered 2,100 listings, 112 heroes, 24 stale matched listings
+and eight Next up cases, with zero hydration or uncaught page errors. Both engines kept
+hero digit fill above 83.0% under 200% root and element text in the DPR 4 probe.
+
+The round-seven local gate included 199 unit tests, the default and node-server builds, the build-key
+Worker check, a final default rebuild and Wrangler dry run, the browser and contrast suites,
+and the padding, leading and alignment controls. The supplemental WebKit Play probe
+reproduced the comparison build's focus failure. Logs and reports are in `/tmp/kw60-r7-final`.
+
+Round eight reran the default and node-server builds, build-key check, Wrangler dry run,
+199 unit tests, the full card and top-event suites, contrast, banner, density, not-live,
+click-under, generation-first and four-width source-health checks. The 270-cell zoom probe
+found no clipping, and the earlier layout build failed the painted-gap control. Round-eight
+logs and reports are in `/tmp/60r8`.
+
+Round-nine calibration, build and browser evidence is in `/tmp/kw60-r9-final`.
+`cal-a/pixel-ink-report.json` and `cal-b/pixel-ink-report.json` capture the two
+baseline runs with the committed `tests/cards_browser.py --pixels-only`.
+The full card run writes the uncorrected and corrected values and each
+control outcome to `cards/pixel-ink-report.json`. The four-width generation replay
+uses the round-eight fixture harness, whose decoder handles the null-prototype
+payload that raises a TypeError in the repository script.
+
+Round ten reran the local gate. The 199 unit tests, default and node-server builds,
+build-key check, Wrangler dry run, card and top-event suites, contrast, banner,
+density, not-live, click-under and four-width source-health checks passed. All
+514 parity rows passed both limits. The 270-cell zoom probe and the painted-gap
+and CSS regression controls also passed. A separate clip probe rejected ink on
+both boundary columns while accepting ink inset by 1 CSS px in both engines
+at DPR 1, 2, 4 and 8. Stock generation replay still raises the pre-existing
+devalue TypeError. The scratch decoder passed the four-width replay. Logs and
+pixel and parity reports are in `/tmp/kw60-r10`.
+
 ## Review follow-ups
 
+- Listing digit fill ranged from 57.6% to 59.3%. The 60% gate floor applies to heroes.
+- F3/F11. The production listing correction overshot by 0.875–1.0 px at 4× DPR in the audit,
+  and by up to 1.125 px at 2×. With the correction disabled, the reviewed listings sat 0.25–0.375 px
+  above the digits. The local Chromium listing still sits 0.875 px below them at 4×.
+- F5. At root 200%, the existing header controls can overflow the document at 320 and 390 px.
+  The review measured document scroll width of 400 px at both widths. The card matrix checks each
+  banner's containment in this mode.
+- F6. The original ratio table measured category rows. Production rail rows measured 480 × 116 px
+  at 1024 and 1280 px, for a ratio of 4.138. Rails need their own measurements.
 - Measure the fill against the translucent track on bright team fields. The review estimated about
   2.4:1 at the lightest allowed field. The existing sweep measures fill against the field.
 - Revisit the stacking threshold for `matched-live` at 390 px with root text at 200 %. The unstacked
