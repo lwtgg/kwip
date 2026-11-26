@@ -284,14 +284,14 @@ def check_known_hero(browser, origin, assets, dest):
     (dest / 'hero-report.json').write_text(json.dumps(results, indent=2))
 
 
-DEAD_BAND_WIDTHS = (320, 390, 1024, 1280, 1440, 1920)
+DEAD_BAND_WIDTHS = (320, 390, 1024, 1280, 1440, 1920, 2560)
 HERO_GAP_LIMIT = 1.6
 PAINTED_GAP_MARGIN_PCT = 5
 
 # Smallest width-to-height ratio of a listing row, measured per viewport for task 60 (docs/redesign-60.md).
 # The measured three-tier rows fall below 3.5 at 320px and 390px.
 # After restoring symmetric padding, the three-tier ratios are 2.6999 at 320px and 3.3561 at 390px.
-RATIO_FLOOR = {320: 2.69, 390: 3.35, 1024: 3.5, 1280: 3.5, 1440: 3.5, 1920: 3.5}
+RATIO_FLOOR = {320: 2.69, 390: 3.35, 1024: 3.5, 1280: 3.5, 1440: 3.5, 1920: 3.5, 2560: 3.5}
 # Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
 WIDE_DETAIL = {
     (320, 'element'): {'matched-widest', 'matched-hangul-long-word'},
@@ -302,8 +302,8 @@ WIDE_DETAIL = {
 }
 
 
-def banner_geometry(card, snap_paint_baseline=False):
-    return card.evaluate(r"""(el, snapPaintBaseline) => {
+def banner_geometry(card, snap_paint_baseline=False, paint_dpr=None):
+    return card.evaluate(r"""(el, {snapPaintBaseline, paintDpr}) => {
       const rect = r => ({left:r.left, right:r.right, top:r.top, bottom:r.bottom,
         width:r.width, height:r.height});
       const banner = el.querySelector('.match-banner');
@@ -337,6 +337,8 @@ def banner_geometry(card, snap_paint_baseline=False):
           let rowBaseline = baseline + top - firstRow;
           // Chromium snaps the text baseline in layout coordinates, before the CSS transform.
           if (snapPaintBaseline) rowBaseline = Math.round(rowBaseline + scrollY - translateY) - scrollY + translateY;
+          // WebKit paints on the device grid after the state translation.
+          if (paintDpr) rowBaseline = Math.round(rowBaseline * paintDpr) / paintDpr;
           return [rowBaseline - m.actualBoundingBoxAscent, rowBaseline + m.actualBoundingBoxDescent];
         });
         return [Math.min(...ink.map(row => row[0])), Math.max(...ink.map(row => row[1]))];
@@ -398,7 +400,7 @@ def banner_geometry(card, snap_paint_baseline=False):
           return {natural:n.offsetWidth + 1, room:n.parentElement.getBoundingClientRect().width - parseFloat(slot.paddingLeft) - parseFloat(slot.paddingRight)};
         })
       };
-    }""", snap_paint_baseline)
+    }""", dict(snapPaintBaseline=snap_paint_baseline, paintDpr=paint_dpr))
 
 
 def banner_measurements(geometry):
@@ -985,7 +987,7 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
     (dest / 'match-report.json').write_text(json.dumps(results, indent=2))
 
 
-def screenshot_ink(line, dpr):
+def screenshot_ink(line, dpr, *, subpixel=False):
     """Decode the element's painted pixels on the device grid, including ink outside its line box."""
     page = line.page
     line.evaluate("el => el.setAttribute('data-ink-target', '')")
@@ -1015,20 +1017,32 @@ def screenshot_ink(line, dpr):
       context.drawImage(image, 0, 0);
       image.close();
       const {data} = context.getImageData(0, 0, canvas.width, canvas.height);
-      const rows = [];
+      const coverage = [];
       for (let y = 0; y < canvas.height; y++) {
+        let peak = 0;
         const end = (y + 1) * canvas.width * 4;
         for (let i = y * canvas.width * 4; i < end; i += 4) {
-          if (Math.min(data[i], data[i + 1], data[i + 2]) >= 128) {
-            rows.push(y);
-            break;
-          }
+          peak = Math.max(peak, Math.min(data[i], data[i + 1], data[i + 2]));
         }
+        coverage.push(peak);
       }
-      return rows.length ? [rows[0], rows.at(-1) + 1] : null;
+      const first = coverage.findIndex(value => value >= 128);
+      const last = coverage.findLastIndex(value => value >= 128);
+      if (first < 0) return null;
+      // Estimate where coverage crosses 50% between neighbouring pixel centres.
+      const crossing = (outside, inside) => outside + 0.5
+        + (inside - outside) * (127.5 - coverage[outside]) / (coverage[inside] - coverage[outside]);
+      return {
+        pixels: [first, last + 1],
+        interpolated: [first ? crossing(first - 1, first) : first,
+          last + 1 < coverage.length ? crossing(last + 1, last) : last + 1]
+      };
     }""", b64encode(image).decode('ascii'))
     assert bounds, ('no screenshot ink', line.inner_text(), box)
-    return [top + edge / dpr for edge in bounds]
+    pixels = [top + edge / dpr for edge in bounds['pixels']]
+    if subpixel:
+        return pixels, [top + edge / dpr for edge in bounds['interpolated']]
+    return pixels
 
 
 def measure_pixel_card(card, cell, dpr):
@@ -1039,23 +1053,31 @@ def measure_pixel_card(card, cell, dpr):
     scores = card.locator('.banner-score').all()
     detail = card.locator('.banner-status-tier:nth-child(2) .banner-status-line')
     model = [geometry['stateInk'], *geometry['scoreInk'], geometry['detailInk']]
-    pixels = [screenshot_ink(line, dpr) for line in (state, *scores, detail)]
+    check_parity = dpr in (2, 4)
+    ink = [screenshot_ink(line, dpr, subpixel=check_parity) for line in (state, *scores, detail)]
+    if check_parity:
+        pixels, subpixel_edges = zip(*ink)
+        paint = banner_geometry(card, paint_dpr=dpr) if cell['engine'] == 'webkit' else geometry
+        parity_model = [paint['stateInk'], *paint['scoreInk'], paint['detailInk']]
+    else:
+        pixels = ink
     state_ink, away_ink, home_ink, detail_ink = pixels
     score_ink = (away_ink, home_ink)
     detail_gap = detail_ink[0] - max(bottom for _, bottom in score_ink)
     model_detail_gap = model[3][0] - max(bottom for _, bottom in model[1:3])
     digit_fill = min((bottom - top) / box['height']
                      for (top, bottom), box in zip(score_ink, geometry['scoreBoxes']))
-    errors = [[prediction - observed for prediction, observed in zip(model_edges, pixel_edges)]
-              for model_edges, pixel_edges in zip(model, pixels)]
     offsets = [(sum(state_ink) - sum(score)) / 2 for score in score_ink]
     result = dict(**cell, dpr=dpr, os=f'macOS {platform.mac_ver()[0]}' if platform.mac_ver()[0] else platform.platform(),
-                  pixels=pixels, model=model, edge_errors=errors, state_minus_score=offsets,
+                  pixels=pixels, model=model, state_minus_score=offsets,
                   detail_ink_gap=detail_gap, model_detail_ink_gap=model_detail_gap, digit_fill=digit_fill)
+    if check_parity:
+        errors = [[prediction - observed for prediction, observed in zip(model_edges, pixel_edges)]
+                  for model_edges, pixel_edges in zip(parity_model, subpixel_edges)]
+        result.update(parity_model=parity_model, subpixel_edges=subpixel_edges, edge_errors=errors)
     print(json.dumps(result), flush=True)
-    # At DPR 1 a painted edge can move by a whole CSS pixel; keep the subpixel bound at DPR 4.
-    edge_tolerance = max(.5, 1 / dpr)
-    assert all(abs(edge) <= edge_tolerance for pair in errors for edge in pair), ('pixel/model ink parity', result)
+    if check_parity:
+        assert all(abs(edge) <= .5 for pair in errors for edge in pair), ('pixel/model ink parity', result)
     assert all(abs(offset) <= 1.25 for offset in offsets), ('pixel state ink centre offset', result)
     return result
 
@@ -1091,7 +1113,7 @@ def check_pixel_ink(pw, origin, assets, dest):
     results = []
     for engine in ('chromium', 'webkit'):
         browser = getattr(pw, engine).launch()
-        scales = (4,) if engine == 'chromium' else (4, 1)
+        scales = (1, 2, 4, 8)
         for dpr, width in product(scales, DEAD_BAND_WIDTHS):
             page = browser.new_page(viewport={'width': width, 'height': 900}, device_scale_factor=dpr)
             variants = [('listing', '/c/basketball'), ('hero', '/')]
