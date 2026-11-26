@@ -287,20 +287,34 @@ def check_known_hero(browser, origin, assets, dest):
 DEAD_BAND_WIDTHS = (320, 390, 1024, 1280, 1440, 1920, 2560)
 PIXEL_WIDTHS = (320, 390, 640, 768, 1023, 1024, 1200, 1280, 1288, 1289, 1290, 1366, 1440, 1536, 1920, 2560)
 # Fixture calibration. See the coverage sweep and reference measurements in docs/redesign-60.md.
+PARITY_FIXTURES = {
+    'halftime': ('in', 'Halftime', 50, 97),
+    'fourth': ('in', '4th 2:31', 8, 104),
+    'overtime': ('post', 'Final/OT', 113, 111),
+    'team-name': ('in', 'Wolverhampton Wanderers', 8, 104),
+}
+# Reserve both card scales at the review widths from the corresponding fit.
+PARITY_HOLDOUTS = {('fourth', 'webkit', 2, 1366), ('overtime', 'webkit', 4, 1290)}
 PARITY_COVERAGE = .675
 PARITY_DEVICE_PX = 1.3
-PARITY_RESIDUAL_CSS_PX = {2: .35, 4: .22}
-# Signed model-minus-pixel midranges on 68077cb, in CSS px.
-# Pairs are top/bottom edges for state, away score, home score, and detail.
+# Round the largest fitted residual plus 0.05 CSS px up to the next hundredth.
+PARITY_RESIDUAL_CSS_PX = {2: .41, 4: .27}
+# Signed model-minus-pixel midranges. The top/bottom pairs are state, pooled scores, detail.
 PARITY_BIAS = {
-    ('chromium', 2): ((.163, .060), (.044, .044), (.044, .045), (.172, .054)),
-    ('chromium', 4): ((.127, .014), (.024, .056), (.025, .057), (.129, .026)),
-    ('webkit', 2): ((-.118, -.129), (.139, .081), (.140, .083), (.164, .191)),
-    ('webkit', 4): ((-.061, -.036), (.097, .063), (.098, .063), (.079, .074)),
+    ('chromium', 2): ((.168, .107), (.041, .081), (.167, .057)),
+    ('chromium', 4): ((.125, .031), (.027, .049), (.127, .029)),
+    ('webkit', 2): ((-.105, -.120), (.175, .117), (.173, .134)),
+    ('webkit', 4): ((-.061, -.035), (.084, .042), (.079, .046)),
+}
+PARITY_CONTROL_LINES = {
+    'uniform': (0, 1, 2, 3),
+    'score': (1, 2),
+    'detail': (3,),
+    'state': (0,),
 }
 PARITY_CONTROL_CSS_PX = {
-    2: {'uniform': .50, 'score': .60, 'detail': .60},
-    4: {'uniform': .25, 'score': .35, 'detail': .35},
+    2: {'uniform': .50, 'score': .80, 'detail': .80, 'state': .80},
+    4: {'uniform': .30, 'score': .45, 'detail': .45, 'state': .55},
 }
 PARITY_CONTROL_FAIL_PCT = 90
 HERO_GAP_LIMIT = 1.6
@@ -1047,7 +1061,11 @@ def screenshot_ink(line, dpr, *, check_parity=False):
       for (let y = 0; y < canvas.height; y++) {
         let peak = 0;
         const end = (y + 1) * stride;
-        for (let i = y * stride; i < end; i += 4) {
+        const start = y * stride;
+        if (hasColor(data.subarray(start, start + 4)) || hasColor(data.subarray(end - 4, end))) {
+          return {error: 'ink touches screenshot clip edge'};
+        }
+        for (let i = start; i < end; i += 4) {
           // White ink over the black plate gives (pixel - 0) / (255 - 0).
           peak = Math.max(peak, Math.min(data[i], data[i + 1], data[i + 2]) / 255);
         }
@@ -1118,7 +1136,8 @@ def measure_pixel_card(card, cell, dpr):
 
 def parity_result(errors, engine, dpr):
     assert all(isfinite(edge) for pair in errors for edge in pair), ('non-finite ink residual', engine, dpr, errors)
-    bias = PARITY_BIAS[engine, dpr]
+    state, score, detail = PARITY_BIAS[engine, dpr]
+    bias = (state, score, score, detail)
     corrected = [[edge - reference for edge, reference in zip(pair, bias_pair)]
                  for pair, bias_pair in zip(errors, bias)]
     outer_error = max(abs(edge) for pair in errors for edge in pair)
@@ -1134,7 +1153,7 @@ def check_parity_controls(card, row):
     engine, dpr = row['engine'], row['dpr']
     errors = row['edge_errors']
     controls = {}
-    for name, lines in (('uniform', range(4)), ('score', (1, 2)), ('detail', (3,))):
+    for name, lines in PARITY_CONTROL_LINES.items():
         amount = PARITY_CONTROL_CSS_PX[dpr][name]
         for direction, shift in (('up', -amount), ('down', amount)):
             shifted = [[edge + shift for edge in pair] if index in lines else pair
@@ -1149,20 +1168,67 @@ def check_parity_controls(card, row):
     row['parity_controls'] = controls
 
 
-def assert_parity_control_counts(rows, engine, dpr):
-    controls = [row['parity_controls'] for row in rows if row['engine'] == engine and row['dpr'] == dpr]
-    expected_rows = 2 * len(PIXEL_WIDTHS) + (dpr == 4)
-    names = [f'{name}_{direction}' for name in PARITY_CONTROL_CSS_PX[dpr] for direction in ('up', 'down')]
+def parity_threshold(row, shifts, *, inner_only):
+    """Distance to the bound for unit signed shifts on selected model lines."""
+    parity = row['parity']
+    bounds = [(parity['corrected'], parity['inner_limit'])]
+    if not inner_only:
+        bounds.append((row['edge_errors'], parity['outer_limit']))
+    return min(limit - direction * edge for errors, limit in bounds
+               for line, direction in shifts.items() for edge in errors[line])
+
+
+def summarize_parity(rows, engine, dpr):
+    rows = [row for row in rows if row['engine'] == engine and row['dpr'] == dpr]
+    by_fixture = {name: [row for row in rows if row['fixture'] == name] for name in PARITY_FIXTURES}
+    for name, trials in by_fixture.items():
+        expected = 2 * len(PIXEL_WIDTHS) + (dpr == 4 and name == 'halftime')
+        assert len(trials) == expected, ('missing parity rows', engine, dpr, name, len(trials), expected)
+    names = [f'{name}_{direction}' for name in PARITY_CONTROL_LINES for direction in ('up', 'down')]
+    counts = {}
     for name in (*names, 'times'):
-        trials = [row[name] for row in controls if name in row]
-        total = 1 if name == 'times' else expected_rows
+        trials = [row['parity_controls'][name] for row in rows if name in row['parity_controls']]
+        total = len(PARITY_FIXTURES) if name == 'times' else len(rows)
         assert len(trials) == total, ('missing parity controls', engine, dpr, name, len(trials), total)
         failed = sum(trial['inner_fails'] for trial in trials)
         assert 100 * failed >= PARITY_CONTROL_FAIL_PCT * total, (
             'parity control below fail floor', engine, dpr, name, failed, total)
+        counts[name] = dict(total=total, inner_failed=failed, outer_failed=sum(t['outer_fails'] for t in trials))
+    patterns = {**PARITY_CONTROL_LINES, 'away': (1,), 'home': (2,)}
+    shifts = {
+        f'{name}_{direction}': {line: sign for line in lines}
+        for name, lines in patterns.items() for direction, sign in (('up', -1), ('down', 1))
+    }
+    for direction, sign in (('up', -1), ('down', 1)):
+        shifts[f'state_vs_scores_{direction}'] = {0: sign, 1: -sign, 2: -sign}
+        shifts[f'scores_vs_detail_{direction}'] = {1: sign, 2: sign, 3: -sign}
+
+    holdouts = [row for row in rows if (row['fixture'], engine, dpr, row['width']) in PARITY_HOLDOUTS]
+    expected_holdouts = sorted((fixture, width, scale)
+                               for fixture, held_engine, held_dpr, width in PARITY_HOLDOUTS
+                               if (engine, dpr) == (held_engine, held_dpr)
+                               for scale in ('listing', 'hero'))
+    actual_holdouts = sorted((row['fixture'], row['width'], row['scale']) for row in holdouts)
+    assert actual_holdouts == expected_holdouts, ('missing or duplicate parity holdout', engine, dpr, actual_holdouts)
+
+    return dict(
+        engine=engine, dpr=dpr, controls=counts,
+        worst_by_fixture={name: max(row['parity']['inner_error'] for row in trials)
+                          for name, trials in by_fixture.items()},
+        holdouts=[dict(fixture=row['fixture'], width=row['width'], scale=row['scale'],
+                       inner_error=row['parity']['inner_error'],
+                       inner_margin=row['parity']['inner_limit'] - row['parity']['inner_error'])
+                  for row in holdouts],
+        first_fail={name: min(parity_threshold(row, pattern, inner_only=False) for row in rows)
+                    for name, pattern in shifts.items()},
+        inner_first_fail={name: min(parity_threshold(row, pattern, inner_only=True) for row in rows)
+                          for name, pattern in shifts.items()},
+        inner_fail_floor={name: sorted(parity_threshold(row, shifts[name], inner_only=True) for row in rows)
+                          [ceil(PARITY_CONTROL_FAIL_PCT * len(rows) / 100) - 1] for name in names},
+    )
 
 
-def assert_acumin_used(card):
+def assert_acumin_used(card, digits):
     session = card.page.context.new_cdp_session(card.page)
     try:
         session.send('DOM.enable')
@@ -1170,13 +1236,14 @@ def assert_acumin_used(card):
         root = session.send('DOM.getDocument')['root']['nodeId']
         node = session.send('DOM.querySelector', dict(nodeId=root, selector='.match-banner .banner-score'))['nodeId']
         fonts = session.send('CSS.getPlatformFontsForNode', dict(nodeId=node))['fonts']
-        assert any(font['isCustomFont'] and 'Acumin' in font['familyName'] and font['glyphCount'] == 2
+        assert any(font['isCustomFont'] and 'Acumin' in font['familyName'] and font['glyphCount'] == digits
                    for font in fonts), fonts
     finally:
         session.detach()
 
 
-def check_pixel_ink(pw, origin, assets, dest):
+def check_fixture_ink(pw, origin, assets, fixture):
+    state, detail, away_score, home_score = PARITY_FIXTURES[fixture]
     asset = assets / 'fixtures/streams.json'
     listing = json.loads(asset.read_text())
     group = listing['streams'][0]
@@ -1184,29 +1251,34 @@ def check_pixel_ink(pw, origin, assets, dest):
     event = dict(group['streams'][0], id=9000, uri_name='basketball/matched-live',
                  name='Colorado State Rams at Arizona Wildcats', viewers='62', always_live=0,
                  starts_at=now - 3600, ends_at=now + 3600,
-                 match=dict(state='in', detail='Halftime',
+                 match=dict(state=state, detail=detail,
                             away=dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b',
-                                      logo='/icon-32.png', score=50),
+                                      logo='/icon-32.png', score=away_score),
                             home=dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033',
-                                      logo='/icon-48.png', score=97)))
+                                      logo='/icon-48.png', score=home_score)))
+    reference = fixture == 'halftime'
+    if fixture == 'team-name':
+        event['name'] = f'{detail} at Arizona Wildcats'
+        event['match']['away'].update(name=detail, abbreviation='WOL')
     asset.write_text(json.dumps(dict(listing, timestamp=now, streams=[dict(group, streams=[event])])))
     results = []
     for engine in ('chromium', 'webkit'):
         browser = getattr(pw, engine).launch()
-        scales = (1, 2, 4, 8)
-        for dpr, width in product(scales, PIXEL_WIDTHS):
+        dprs = (1, 2, 4, 8) if reference else (2, 4)
+        for dpr, width in product(dprs, PIXEL_WIDTHS):
             page = browser.new_page(viewport={'width': width, 'height': 900}, device_scale_factor=dpr)
             variants = [('listing', '/c/basketball'), ('hero', '/')]
-            if width == 320 and dpr == 4:
+            if reference and width == 320 and dpr == 4:
                 variants.append(('wrapped', '/c/basketball'))
             for scale, path in variants:
                 assert page.goto(origin + path, wait_until='networkidle').ok
                 card = page.locator('a.event-card:has(.banner-score)').first
-                expect(card.locator('.banner-score')).to_have_count(2)
+                expect(card.locator('.banner-score')).to_have_text([str(away_score), str(home_score)])
+                expect(card.locator('.banner-status-tier:nth-child(2) .banner-status-line')).to_have_text(detail)
                 page.evaluate('document.fonts.ready')
                 assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
                 if engine == 'chromium':
-                    assert_acumin_used(card)
+                    assert_acumin_used(card, len(str(away_score)))
                 if scale == 'wrapped':
                     # Feed states are single words. Replace the rendered fixture state and resize
                     # so the real component fit pass sees two lines and collapsed whitespace.
@@ -1219,12 +1291,12 @@ def check_pixel_ink(pw, origin, assets, dest):
                     offset = state.evaluate("el => parseFloat(el.style.getPropertyValue('--banner-state-offset'))")
                     assert abs(offset) < 20, ('wrapped state displaced', engine, offset)
                 row = measure_pixel_card(card, dict(engine=engine, version=browser.version,
-                                                    width=width, scale=scale), dpr)
+                                                    width=width, scale=scale, fixture=fixture), dpr)
                 if 'parity' in row:
                     check_parity_controls(card, row)
                 if scale == 'listing':
                     listing_row = row
-                if scale == 'hero':
+                if reference and scale == 'hero':
                     assert_hero_dead_band(row, listing_row, (engine, width, dpr, 'paint'))
                     row['detail_gap_ratio'] = row['detail_ink_gap'] / listing_row['detail_ink_gap']
                     row['detail_gap_margin_pct'] = 100 * (1 - row['detail_gap_ratio'] / HERO_GAP_LIMIT)
@@ -1238,9 +1310,16 @@ def check_pixel_ink(pw, origin, assets, dest):
                 results.append(row)
             page.close()
         browser.close()
-        for dpr in PARITY_RESIDUAL_CSS_PX:
-            assert_parity_control_counts(results, engine, dpr)
+    asset.write_text(json.dumps(listing))
+    return results
+
+
+def check_pixel_ink(pw, origin, assets, dest):
+    results = [row for fixture in PARITY_FIXTURES for row in check_fixture_ink(pw, origin, assets, fixture)]
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
+    summary = [summarize_parity(results, engine, dpr)
+               for engine, dpr in product(('chromium', 'webkit'), PARITY_RESIDUAL_CSS_PX)]
+    (dest / 'parity-summary.json').write_text(json.dumps(summary, indent=2))
 
 
 def main():

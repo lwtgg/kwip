@@ -429,76 +429,130 @@ normal-text hero digit fill was 82.4%. Each table cell shows the ratio and its m
 ### Browser gate
 
 Both engines check the painted ratio at DPR 1, 2, 4 and 8 across all 16 widths in the table.
-The pixel gate covers 258 rows, including the wrapped-state fixture at DPR 4 in each engine.
+The pixel gate covers 642 rows, including 514 parity rows and one wrapped-state listing per engine.
 The matched-card layout matrix in Chromium also includes 2560 px. Gap, fill and centring
 use device rows at 50% coverage.
 
-Round eight swept 25% to 75% coverage in 2.5-point steps for edge parity at DPR 2 and 4.
-The decoder measures white ink over a black plate and interpolates between adjacent device
-pixel centres. It checks an all-hidden screenshot for any nonblack pixel and requires both
-boundary rows of the ink shot to be black. The shared 67.5% crossing is a fixture calibration.
-Review found that Chromium DPR 4 continued to improve past 77.5%, while WebKit DPR 2 was
-best near 65%. At 67.5%, WebKit DPR 4 had a mean signed residual of about −0.62 device px
-for state and +0.40 for scores. Keeping the WebKit baseline snap at that crossing would
-reduce its raw worst edges to 0.425 CSS px at DPR 2 and 0.203 at DPR 4.
+### Pixel/model parity calibration
 
-Round nine measured two independent full pixel runs of the committed build at `68077cb`
-on macOS 27.3 with Chromium 159.0.8154.6 and WebKit 27.2. For each engine and DPR, take
-the midpoint of the minimum and maximum signed `model − pixel` residual for each line
-edge. This choice minimises the largest absolute corrected residual for that edge.
-Each midpoint uses 32 listing and hero rows at DPR 2 or 33 rows at DPR 4, including the
-wrapped state. Both runs produced identical edge residuals and midpoints. The gate
-subtracts the following fixed references, rounded to 0.001 CSS px.
+The Halftime fixture still drives the gap, fill and centring checks at DPR 1, 2, 4
+and 8, including a wrapped-state listing at DPR 4. Those measurements use device
+rows at 50% coverage. The pixel decoder checks that an all-hidden screenshot is
+black, then checks the outermost rows **and columns** of the ink screenshot for
+any nonblack pixel. Parity uses the 67.5% coverage crossing from the round-eight
+sweep, interpolated between adjacent device pixel centres.
 
-| Engine | DPR | State top / bottom | Away score top / bottom | Home score top / bottom | Detail top / bottom |
-| --- | --- | --- | --- | --- | --- |
-| Chromium | 2 | +0.163 / +0.060 | +0.044 / +0.044 | +0.044 / +0.045 | +0.172 / +0.054 |
-| Chromium | 4 | +0.127 / +0.014 | +0.024 / +0.056 | +0.025 / +0.057 | +0.129 / +0.026 |
-| WebKit | 2 | −0.118 / −0.129 | +0.139 / +0.081 | +0.140 / +0.083 | +0.164 / +0.191 |
-| WebKit | 4 | −0.061 / −0.036 | +0.097 / +0.063 | +0.098 / +0.063 | +0.079 / +0.074 |
+At DPR 2 and 4, Chromium 159.0.8154.6 and WebKit 27.2 on macOS 27.3 measure listing
+and hero cards at all 16 widths from 320 to 2560 px. The four fixtures are in
+`tests/cards_browser.py`.
 
-The absolute uncorrected bound remains 1.3 device px, or 0.650 CSS px at DPR 2 and
-0.325 at DPR 4. The corrected bound is 0.35 CSS px at DPR 2 and 0.22 at DPR 4. At DPR 2,
-even the best fixed reference for the state top edge leaves 0.307 CSS px in Chromium
-and 0.332 in WebKit, so a 0.30 CSS px limit would reject the reference fixture.
-
-| Engine | DPR | Worst raw (CSS px) | Worst corrected (CSS px) |
+| Fixture | Feed state | Detail | Away–home |
 | --- | --- | --- | --- |
-| Chromium | 2 | 0.470 | 0.307 |
-| Chromium | 4 | 0.256 | 0.129 |
-| WebKit | 2 | 0.451 | 0.333 |
-| WebKit | 4 | 0.253 | 0.200 |
+| Halftime | `in` | Halftime | 50–97 |
+| Fourth | `in` | 4th 2:31 | 8–104 |
+| Overtime | `post` | Final/OT | 113–111 |
+| Team name | `in` | Wolverhampton Wanderers | 8–104 |
 
-Each shift class and direction must fail the corrected bound in at least 90% of rows
-for each engine and DPR. The table gives failure counts for the outer bound alone
-and the inner bound alone, with up meaning a negative shift of the model edges.
+For each engine and DPR, take the midpoint of the minimum and maximum signed
+`model − pixel` residual for each top and bottom edge, pooling away and home
+score edges. Freeze the result at 0.001 CSS px. The fit excludes both scales at
+WebKit DPR 2/1366 for Fourth and WebKit DPR 4/1290 for Overtime. The gate still
+runs both fixtures at every width, including the reserved rows.
 
-| Engine | DPR | Control (CSS px) | Rows | Raw up / down | Corrected up / down |
+| Engine | DPR | State top / bottom | Pooled scores top / bottom | Detail top / bottom |
+| --- | --- | --- | --- | --- |
+| Chromium | 2 | +0.168 / +0.107 | +0.041 / +0.081 | +0.167 / +0.057 |
+| Chromium | 4 | +0.125 / +0.031 | +0.027 / +0.049 | +0.127 / +0.029 |
+| WebKit | 2 | −0.105 / −0.120 | +0.175 / +0.117 | +0.173 / +0.134 |
+| WebKit | 4 | −0.061 / −0.035 | +0.084 / +0.042 | +0.079 / +0.046 |
+
+The outer bound remains 1.3 device px (0.650 and 0.325 CSS px). For each DPR,
+take the largest corrected residual in the fit across both engines, add at
+least 0.05 CSS px, and round upward to the next 0.01 CSS px. The fitted worsts
+are 0.350850 and 0.213528 CSS px, yielding inner limits of **0.41 and 0.27 CSS px**.
+The table includes the held-out rows, so each fixture's extremes remain visible.
+
+| Engine | DPR | Halftime | Fourth | Overtime | Team name |
 | --- | --- | --- | --- | --- | --- |
-| Chromium | 2 | Uniform 0.50 | 32 | 8 / 32 | 32 / 32 |
-| Chromium | 2 | Scores 0.60 | 32 | 8 / 32 | 32 / 32 |
-| Chromium | 2 | Detail 0.60 | 32 | 0 / 32 | 32 / 32 |
-| WebKit | 2 | Uniform 0.50 | 32 | 23 / 30 | 31 / 32 |
-| WebKit | 2 | Scores 0.60 | 32 | 1 / 29 | 32 / 32 |
-| WebKit | 2 | Detail 0.60 | 32 | 1 / 10 | 32 / 32 |
-| Chromium | 4 | Uniform 0.25 | 33 | 3 / 33 | 33 / 33 |
-| Chromium | 4 | Scores 0.35 | 33 | 14 / 33 | 33 / 33 |
-| Chromium | 4 | Detail 0.35 | 33 | 22 / 33 | 33 / 33 |
-| WebKit | 4 | Uniform 0.25 | 33 | 26 / 30 | 32 / 33 |
-| WebKit | 4 | Scores 0.35 | 33 | 6 / 33 | 33 / 33 |
-| WebKit | 4 | Detail 0.35 | 33 | 6 / 31 | 33 / 33 |
+| Chromium | 2 | 0.312 | 0.334 | 0.334 | 0.334 |
+| Chromium | 4 | 0.131 | 0.134 | 0.140 | 0.134 |
+| WebKit | 2 | 0.346 | 0.350 | 0.351 | 0.350 |
+| WebKit | 4 | 0.200 | 0.214 | 0.244 | 0.214 |
 
-Uniform shifts use one device pixel at each DPR. The focused controls use 1.2 device
-px at DPR 2 and 1.4 at DPR 4. With one-device-pixel shifts, the corrected WebKit
-score-only control fails 25/32 up and 31/32 down at DPR 2, and 15/33 up and 28/33
-down at DPR 4. The corrected WebKit detail-only control fails 30/32 up and 25/32
-down at DPR 2, and 9/33 up and 27/33 down at DPR 4. Times substituted in the
-canvas model on the 390 px listing fails both bounds in each engine and DPR.
+Round-nine review found WebKit failures with the same model on Fourth at
+1366 px/DPR 2 (hero state top, 0.363 vs 0.35) and Overtime at 1290 px/DPR 4
+(hero state bottom, 0.243 vs 0.22). Those hero rows now measure 0.350 vs 0.41
+and 0.244 vs 0.27, with 0.060 and 0.026 CSS px of margin. Their paired listings
+measure 0.275 and 0.195 CSS px. Repeating the old run reproduced its residuals
+exactly. Transferring its listing-only fit to heroes yielded worst residuals
+of 0.556 and 0.569 CSS px at DPR 2 in Chromium and WebKit.
 
-Opposite-direction errors can still pass both bounds. In the WebKit DPR 4 listing
-at 640 px, shifting state down 0.24 CSS px and both scores up 0.24 CSS px leaves a raw
-error of 0.178 CSS px and a corrected error of 0.206 CSS px. Both pass despite a relative
-error of about 1.9 device px. Gap, fill and centring read painted rows directly. Parity checks the canvas model used by the model dead-band assertion.
+As a separate transfer check, refit on three fixtures at a time and omit the
+entire Fourth or Overtime fixture being scored. Both complete held-out matrices
+pass the fixed 0.41 / 0.27 CSS px limits.
+
+| Engine | DPR | Fourth held-out worst | Overtime held-out worst |
+| --- | --- | --- | --- |
+| Chromium | 2 | 0.334 | 0.345 |
+| Chromium | 4 | 0.134 | 0.149 |
+| WebKit | 2 | 0.350 | 0.353 |
+| WebKit | 4 | 0.229 | 0.251 |
+
+The smallest whole-fixture margin is 0.019 CSS px (WebKit DPR 4 Overtime).
+
+**Recalibration rule.** Keep a bias or limit recalibration in a separate change
+from any model or screenshot decoder change. First run the Times and bidirectional
+uniform controls against the frozen inner bound and confirm that both re-prove it.
+Then refit across the whole calibration matrix with the reserved rows excluded.
+Record each fixture's worst, the holdout margins and the first-fail distances
+with the new fixed values. Re-run both controls against the new bound. A refit
+absorbs a model shift already present in its inputs because the midrange moves
+with the shift.
+
+The gate requires the inner bound to reject at least 90% of rows in each
+shift class and direction per engine and DPR. The table gives the smallest
+shift boundary for reaching that floor across the 128 rows at DPR 2 or 129
+at DPR 4, in CSS px. Up is a negative shift of the model edges. An amount
+strictly above the boundary triggers the failure. The controls use fixed
+amounts with slack in both directions.
+
+| Engine | DPR | Uniform up / down | Scores up / down | Detail up / down | State up / down |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | 0.250 / 0.268 | 0.393 / 0.372 | 0.411 / 0.502 | 0.334 / 0.624 |
+| Chromium | 4 | 0.269 / 0.236 | 0.269 / 0.260 | 0.277 / 0.285 | 0.313 / 0.323 |
+| WebKit | 2 | 0.402 / 0.326 | 0.609 / 0.399 | 0.503 / 0.602 | 0.671 / 0.669 |
+| WebKit | 4 | 0.239 / 0.208 | 0.329 / 0.320 | 0.396 / 0.320 | 0.394 / 0.462 |
+
+Control amplitudes at DPR 2 are 0.50 CSS px for uniform and 0.80 for scores,
+detail and state. At DPR 4 they are 0.30, 0.45, 0.45 and 0.55 respectively.
+The 390 px listing for each fixture also substitutes Times in the model,
+which must fail the inner bound. On Halftime, Times leaves corrected errors
+of 0.757 and 0.829 CSS px in Chromium and 0.883 and 0.878 CSS px in WebKit,
+at DPR 2 and 4 respectively. Across all fixtures, the weakest uniform control
+was WebKit up (124/128 at DPR 2 and 125/129 at DPR 4), and every focused
+control rejected every row.
+
+A uniform error applied to every row trips the gate as soon as either bound
+fails on any row. The following first-fail boundaries are in CSS px per line.
+They are recorded for the full gate and for the inner bound alone so the
+sensitivity added by the correction is visible.
+
+| Engine | DPR | Gate uniform up / down | Inner uniform up / down | State vs scores up / down | Scores vs detail up / down |
+| --- | --- | --- | --- | --- | --- |
+| Chromium | 2 | 0.076 / 0.076 | 0.076 / 0.076 | 0.076 / 0.076 | 0.123 / 0.123 |
+| Chromium | 4 | 0.131 / 0.066 | 0.131 / 0.130 | 0.130 / 0.066 | 0.131 / 0.130 |
+| WebKit | 2 | 0.059 / 0.060 | 0.059 / 0.060 | 0.059 / 0.060 | 0.120 / 0.120 |
+| WebKit | 4 | 0.026 / 0.056 | 0.026 / 0.056 | 0.026 / 0.056 | 0.103 / 0.095 |
+
+Opposite-direction errors can pass **per row**. In the WebKit DPR 4 Halftime
+listing at 640 px, shifting state down 0.24 CSS px and both scores up 0.24 CSS
+px leaves a raw error of 0.178 and a corrected error of 0.185 CSS px, despite
+a relative error of about 1.9 device px. Applied matrix-wide, that direction
+trips the gate above 0.056 CSS px per line. The table uses the direction of
+the first named line group, with the second group shifted the opposite way.
+The report also gives both directions for state, detail, each individual
+score and both scores together. All of those gate-level boundaries are below
+0.25 CSS px.
 
 The matched-card matrix covered 2,100 listings, 112 heroes, 24 stale matched listings
 and eight Next up cases, with zero hydration or uncaught page errors. Both engines kept
@@ -522,6 +576,16 @@ The full card run writes the uncorrected and corrected values and each
 control outcome to `cards/pixel-ink-report.json`. The four-width generation replay
 uses the round-eight fixture harness, whose decoder handles the null-prototype
 payload that raises a TypeError in the repository script.
+
+Round ten reran the local gate. The 199 unit tests, default and node-server builds,
+build-key check, Wrangler dry run, card and top-event suites, contrast, banner,
+density, not-live, click-under and four-width source-health checks passed. All
+514 parity rows passed both limits. The 270-cell zoom probe and the painted-gap
+and CSS regression controls also passed. A separate clip probe rejected ink on
+both boundary columns while accepting ink inset by 1 CSS px in both engines
+at DPR 1, 2, 4 and 8. Stock generation replay still raises the pre-existing
+devalue TypeError. The scratch decoder passed the four-width replay. Logs and
+pixel and parity reports are in `/tmp/kw60-r10`.
 
 ## Review follow-ups
 
