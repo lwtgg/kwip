@@ -81,6 +81,7 @@ function inkBounds(line: HTMLElement, context: CanvasRenderingContext2D) {
 function fitText() {
   const lineup = lineupElement.value
   if (!lineup?.clientWidth) return
+  lineup.dataset.fitted = ''
   const style = getComputedStyle(lineup)
   const floor = cssNumber(style, '--banner-fit-floor', 0.6)
   const compression = cssNumber(style, '--banner-score-compression', 0.85)
@@ -120,31 +121,33 @@ function fitText() {
   const gutter = scores.length ? parseFloat(getComputedStyle(scores[0]!.parentElement!).paddingInlineEnd) : 0
   const labelMin = Math.ceil(Math.max(...labels.map(line => natural.get(line)!)) * floor)
   const logo = lineup.querySelector('.banner-team > *')!.getBoundingClientRect().width
-  const wordMin = Math.ceil(Math.max(...statusWidths) * floor) + 1
-  const statusPreferred = Math.ceil(Math.max(...status.map(line => natural.get(line)!)) * floor)
   const sideMin = Math.max(logo, labelMin) + scoreMin + gutter
   const statusRoom = available - 2 * sideMin
-  const statusMin = Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
-  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
-  const compact = statusRoom < wordMin
-  lineup.toggleAttribute('data-stacked', compact)
   // The compact layout lets each abbreviation span its team and score tracks, and lets the logo
   // shrink to the text size, so the middle column keeps the state between the scores.
   const compactSide = Math.max(labelMin, scoreMin + gutter + Math.min(logo, parseFloat(style.fontSize)))
   const compactMiddle = Math.max(0, available - 2 * compactSide)
   const share = Number.parseFloat(style.getPropertyValue('--banner-status-width')) / 100
-  // Give the state its actual minimum even when a lower tier needs the full width.
   const stateLine = status[0]
   const detailLine = lineup.querySelector<HTMLElement>('.banner-status-tier:nth-child(2) .banner-status-line')
   const audienceLine = lineup.querySelector<HTMLElement>('.banner-status-tier:nth-child(3) .banner-status-line')
-  const needsWide = (line: HTMLElement | null) => line !== null
-    && Math.ceil(statusWidths[status.indexOf(line)]! * floor) + 1 > compactMiddle
-  const wideDetail = compact && needsWide(detailLine)
-  const wideAudience = compact && needsWide(audienceLine)
-  const sideTierWords = statusWidths.filter((_, index) =>
-    !(wideDetail && status[index] === detailLine) && !(wideAudience && status[index] === audienceLine))
-  const middleMin = Math.ceil(Math.max(...sideTierWords) * floor) + 1
+  const wordMin = (width: number) => Math.ceil(width * floor) + 1
+  const widestWord = wordMin(Math.max(...statusWidths))
+  const lowerTierMin = (line: HTMLElement | null) => line === null ? 0 : wordMin(statusWidths[status.indexOf(line)]!)
+  // On a roomy card a long detail can take its own row while the teams keep their tracks.
+  const fixedMiddleMin = Math.max(wordMin(statusWidths[0]!), lowerTierMin(audienceLine))
+  const compact = statusRoom < widestWord && (compactMiddle < widestWord || statusRoom < fixedMiddleMin)
+  const middleRoom = compact ? compactMiddle : statusRoom
+  const wideDetail = lowerTierMin(detailLine) > middleRoom
+  const wideAudience = compact && lowerTierMin(audienceLine) > middleRoom
+  const middleLines = status.filter(line =>
+    !(wideDetail && line === detailLine) && !(wideAudience && line === audienceLine))
+  const middleMin = wordMin(Math.max(...middleLines.map(line => statusWidths[status.indexOf(line)]!)))
+  const statusPreferred = Math.ceil(Math.max(...middleLines.map(line => natural.get(line)!)) * floor)
+  const statusMin = Math.max(middleMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
   const middleWidth = Number.isFinite(share) ? Math.max(middleMin, available * share) : middleMin
+  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
+  lineup.toggleAttribute('data-stacked', compact)
   lineup.toggleAttribute('data-wide-detail', wideDetail || wideAudience)
   lineup.toggleAttribute('data-wide-score-detail', wideDetail)
   lineup.toggleAttribute('data-wide-audience', wideAudience)

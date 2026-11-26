@@ -615,7 +615,13 @@
 .banner-lineup[data-wide-score-detail] .banner-progress { grid-row: 6; }
 .banner-status-line {
   overflow-wrap: break-word;
-  --banner-size-fit: min(1, calc(var(--banner-status-fit-width) / (var(--banner-status-size) * var(--banner-chars))));
+  --banner-size-fit: clamp(var(--banner-first-paint-floor, 0), calc(var(--banner-status-fit-width) / (var(--banner-status-size) * var(--banner-chars))), 1);
+}
+/* Before the fit pass, let long metadata wrap within the floor's available width. */
+.match-banner[data-scale="hero"] .banner-lineup:not([data-fitted]) .banner-status-line {
+  --banner-first-paint-floor: var(--banner-fit-floor);
+  max-width: calc(100% / var(--banner-size-fit));
+  white-space: normal;
 }
 .banner-status-line[data-hangul] { word-break: keep-all; }
 .banner-fit-text {
