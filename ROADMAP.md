@@ -177,6 +177,28 @@ space under the track row, not under the status tiers — the literal reading is
 WebKit's `screenshot(style=)` captures a restyled banner unpainted, so the harness injects a `<style>` element
 instead.
 
+**Shipped 2026-11-26. Tasks 60c and 60d — the banner's lower block, and a live score that moves by itself.**
+Version `07d96e2d`, merged `1a150bd`. 60c puts the state line in its own element above the row, keeps logos,
+digits and name below it, sets the detail level with the score ink, aligns logos to the row's bottom and bounds
+the name gap; the hero logo is back to 102 px with the score at 0.76-0.785 of it (ink, both engines, 320-1280).
+60d clamps a live page's cache boundary to 60 s, refetches the same-origin feed on the same beat, moves the
+freshness notice to ten minutes, renders the item's own match on the detail page and polls it across kickoff
+until `post`. Two re-reviews approved (the second with nits, all recorded here). Production `07d96e2d` at 1280
+and 1440: the state ink centre lands 0.2653 / 0.2703 of the card above centre against the mockup's 0.28, score
+ink 0.3232 / 0.3176 of card height against 0.27-0.32, detail within 2.75 / 5.0 px of the score ink centre, state
+clearance 17.5 / 20.5 px, row centre 2.8 px. A 70 s production watch saw `/api/feed/streams` at 60.7 s; the
+snapshot had not republished, so the digits were unchanged, which is the publish floor and not a defect.
+
+**Recorded 2026-11-26, from the 60c/60d reviews and production, not scheduled.** Real logos are padded: `fitText`
+reads the logo's *box* for both the name gap and the stacked check, so on production (ESPN marks, ~27 % transparent
+padding) the score ink is 1.05-1.07 x the drawn logo and the name gap 0.40-0.41 x it, against the mockup's
+0.47-0.56 and 0.12-0.18. The suite only uses tight square icon fixtures, so it never saw this. Fix by measuring the
+painted logo (canvas ink with a box fallback when the CDN taints it) and adding padded-icon fixtures. Also unscheduled:
+kickoff shifts the player 12 px and CLS 0.031 (`[...uri].vue:893`); a `pre` match whose window has ended polls
+forever with a stuck "Upcoming" pill; the opening alarm ignores `document.hidden` and there is no refresh on
+`visibilitychange`; the retry test passes regardless of `retry()`'s branch; the server picks a related category by
+containment while the client matches `category_name` slugs.
+
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting
 high (4 px above vs 8 px under; 23.6 vs 35.6 on the 1280 hero). Two reviews refuted the first diagnosis — Acumin's
