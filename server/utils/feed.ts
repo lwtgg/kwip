@@ -326,10 +326,16 @@ function pageRequirements(requestUrl: URL): FeedEndpoint[] {
   return endpoints
 }
 
+type StreamMatch = { match?: { state?: string } }
+
+function scoreBoundary(stream: StreamMatch, now: number) {
+  return stream.match?.state === 'in' ? now + 60 : Infinity
+}
+
 type StreamCategory = {
   category: string
   always_live?: number
-  streams: { uri_name: string; always_live?: number; starts_at?: number | string; ends_at?: number | string }[]
+  streams: (StreamMatch & { uri_name: string; always_live?: number; starts_at?: number | string; ends_at?: number | string })[]
 }
 
 function listingBoundary(payload: SnapshotPayload | undefined, url: URL, now: number) {
@@ -359,9 +365,15 @@ function listingBoundary(payload: SnapshotPayload | undefined, url: URL, now: nu
   for (const category of selected) {
     for (const stream of category.streams) {
       const alwaysLive = stream.always_live ?? category.always_live ?? 0
-      if (alwaysLive === 1 || (home && alwaysLive !== 0 && (filter === 'live' || filter === 'upcoming'))) continue
       const start = Number(stream.starts_at)
       const end = Number(stream.ends_at)
+      const showsScore = filter === 'live'
+        ? (alwaysLive === 1 || ((!home || alwaysLive === 0) && start <= now && end > now))
+        : filter !== 'upcoming' || ((home ? alwaysLive === 0 : alwaysLive !== 1) && start > now)
+      if (showsScore) {
+        boundary = Math.min(boundary, scoreBoundary(stream, now))
+      }
+      if (alwaysLive === 1 || (home && alwaysLive !== 0 && (filter === 'live' || filter === 'upcoming'))) continue
       if (start > now && (filter !== 'live' || end > start)) boundary = Math.min(boundary, start)
       if (end > now && filter !== 'upcoming' &&
           (filter !== 'live' || start <= now)) boundary = Math.min(boundary, end)
@@ -370,14 +382,14 @@ function listingBoundary(payload: SnapshotPayload | undefined, url: URL, now: nu
   return boundary
 }
 
-function liveDetailWindow(payloads: Map<string, SnapshotPayload>, streamPath: string) {
-  const stream = payloads.get(streamPath)?.data as {
+function liveDetailWindow(payloads: Map<string, SnapshotPayload>, streamPath: string, now: number) {
+  const stream = payloads.get(streamPath)?.data as (StreamMatch & {
     always_live?: number
     starts_at?: number | string
     start_timestamp?: number | string
     ends_at?: number | string
     end_timestamp?: number | string
-  } | undefined
+  }) | undefined
   if (!stream) return
 
   let alwaysLive = stream.always_live
@@ -394,9 +406,25 @@ function liveDetailWindow(payloads: Map<string, SnapshotPayload>, streamPath: st
 
   return {
     alwaysLive,
+    scoreBoundary: scoreBoundary(stream, now),
     start: Number(stream.starts_at ?? stream.start_timestamp),
     end: Number(stream.ends_at ?? stream.end_timestamp),
   }
+}
+
+/**
+ * A detail page renders a live score for every related card in its own category, so the page
+ * deadline must also follow any live match there.
+ */
+function relatedScoreBoundary(payload: SnapshotPayload | undefined, streamPath: string, now: number) {
+  const uri = streamPath.slice('streams/'.length)
+  const categories = payload?.streams as StreamCategory[] | undefined
+  const category = categories?.find(candidate => candidate.streams.some(stream => stream.uri_name === uri))
+  let boundary = Infinity
+  for (const stream of category?.streams ?? []) {
+    if (stream.uri_name !== uri) boundary = Math.min(boundary, scoreBoundary(stream, now))
+  }
+  return boundary
 }
 
 function endedReplayPath(window: ReturnType<typeof liveDetailWindow>, streamPath: string, now: number) {
@@ -465,7 +493,7 @@ export async function readFeedGeneration(
         }
         payloads.set(path, payload)
       }
-      window = streamPath ? liveDetailWindow(payloads, streamPath) : undefined
+      window = streamPath ? liveDetailWindow(payloads, streamPath, now) : undefined
       const replayPath = streamPath ? endedReplayPath(window, streamPath, now) : undefined
       if (streamPath && replayPath && snapshot.has(replayPath)) {
         const vods = (await reader.read(['vods'])).payloads.get('vods')?.payload
@@ -481,12 +509,16 @@ export async function readFeedGeneration(
     window = undefined
   }
   // Compare against the same clock SSR used, even if rendering crosses a boundary.
-  const cacheBoundary = window && window.alwaysLive !== 1
+  const eventBoundary = window && window.alwaysLive !== 1
     ? Math.min(window.start > now ? window.start : Infinity, window.end > now ? window.end : Infinity)
     : listingBoundary(payloads.get('streams'), requestUrl, now)
   return {
     readable: identity !== undefined,
-    cacheBoundary,
+    cacheBoundary: Math.min(
+      eventBoundary,
+      window?.scoreBoundary ?? Infinity,
+      streamPath ? relatedScoreBoundary(payloads.get('streams'), streamPath, now) : Infinity,
+    ),
     cacheIdentity: paths.every(path => payloads.has(path)) ? identity : undefined,
     get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
       return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined

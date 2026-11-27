@@ -20,6 +20,16 @@ function room(slot: HTMLElement) {
   return slot.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
 }
 
+/** Resolve a length token in the context of an element. */
+function resolveLength(parent: HTMLElement, value: string) {
+  const probe = document.createElement('span')
+  probe.style.cssText = `position:absolute;visibility:hidden;width:${value}`
+  parent.append(probe)
+  const width = probe.getBoundingClientRect().width
+  probe.remove()
+  return width
+}
+
 /** Ask the layout engine for the widest unit it will keep together. */
 function unbreakableWidth(line: HTMLElement) {
   line.style.whiteSpace = 'normal'
@@ -32,10 +42,10 @@ function unbreakableWidth(line: HTMLElement) {
 
 let inkContext: CanvasRenderingContext2D | null | undefined
 
-/** Measure the visible text relative to its own box, so the fit never changes the grid alignment. */
-function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
+/** Measure the visible text independently of the grid track that holds it. */
+function inkBounds(line: HTMLElement, context: CanvasRenderingContext2D) {
   const text = line.firstChild
-  if (!(text instanceof Text)) return NaN
+  if (!(text instanceof Text)) return null
   const style = getComputedStyle(line)
   context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
   const range = document.createRange()
@@ -48,7 +58,7 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
   const baseline = probe.getBoundingClientRect().top
   probe.remove()
   const rects = [...range.getClientRects()].filter(rect => rect.height > 0)
-  if (!rects.length) return NaN
+  if (!rects.length) return null
   const rows = new Map<number, string>()
   if (rects.length === 1) {
     rows.set(rects[0]!.top, text.data)
@@ -66,20 +76,22 @@ function inkOffset(line: HTMLElement, context: CanvasRenderingContext2D) {
   }
   let top = Infinity
   let bottom = -Infinity
+  let lineCount = 0
   for (const [rowTop, content] of rows) {
     if (!content.trim()) continue
+    lineCount++
     const metrics = context.measureText(content.trim())
     const rowBaseline = baseline + rowTop - rects[0]!.top
     top = Math.min(top, rowBaseline - metrics.actualBoundingBoxAscent)
     bottom = Math.max(bottom, rowBaseline + metrics.actualBoundingBoxDescent)
   }
-  const box = line.getBoundingClientRect()
-  return (top + bottom - box.top - box.bottom) / 2
+  return Number.isFinite(top) ? { top, bottom, lineCount, baseline } : null
 }
 
 function fitText() {
   const lineup = lineupElement.value
-  if (!lineup) return
+  if (!lineup?.clientWidth) return
+  lineup.dataset.fitted = ''
   const style = getComputedStyle(lineup)
   const floor = cssNumber(style, '--banner-fit-floor', 0.6)
   const compression = cssNumber(style, '--banner-score-compression', 0.85)
@@ -89,7 +101,10 @@ function fitText() {
   const status = lines.filter(line => line.classList.contains('banner-status-line'))
   delete lineup.dataset.stacked
   delete lineup.dataset.wideDetail
+  delete lineup.dataset.wideScoreDetail
+  delete lineup.dataset.wideAudience
   lineup.style.removeProperty('--banner-lineup-min')
+  lineup.style.removeProperty('--banner-top-surplus')
   const preferredRoom = room(lineup)
   // Reserve the full width to read the minimum padding resolved by the CSS clamp.
   lineup.style.setProperty('--banner-lineup-min', '100%')
@@ -117,28 +132,36 @@ function fitText() {
   const gutter = scores.length ? parseFloat(getComputedStyle(scores[0]!.parentElement!).paddingInlineEnd) : 0
   const labelMin = Math.ceil(Math.max(...labels.map(line => natural.get(line)!)) * floor)
   const logo = lineup.querySelector('.banner-team > *')!.getBoundingClientRect().width
-  const wordMin = Math.ceil(Math.max(...statusWidths) * floor) + 1
-  const statusPreferred = Math.ceil(Math.max(...status.map(line => natural.get(line)!)) * floor)
   const sideMin = Math.max(logo, labelMin) + scoreMin + gutter
   const statusRoom = available - 2 * sideMin
-  const statusMin = Math.max(wordMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
-  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
-  const compact = statusRoom < wordMin
-  lineup.toggleAttribute('data-stacked', compact)
   // The compact layout lets each abbreviation span its team and score tracks, and lets the logo
   // shrink to the text size, so the middle column keeps the state between the scores.
   const compactSide = Math.max(labelMin, scoreMin + gutter + Math.min(logo, parseFloat(style.fontSize)))
   const compactMiddle = Math.max(0, available - 2 * compactSide)
   const share = Number.parseFloat(style.getPropertyValue('--banner-status-width')) / 100
-  // Detail and audience have their rows to themselves. When a word in them cannot fit the middle
-  // column even at the floor, they take the full row instead of breaking the word.
-  const stateLine = lineup.querySelector<HTMLElement>('.banner-status-tier:first-child .banner-status-line')
-  const lowerWords = status.flatMap((line, index) => line === stateLine ? [] : [statusWidths[index]!])
-  const stateWords = status.flatMap((line, index) => line === stateLine ? [statusWidths[index]!] : [])
-  const wideDetail = compact && Math.ceil(Math.max(0, ...lowerWords) * floor) + 1 > compactMiddle
-  const middleMin = wideDetail ? Math.ceil(Math.max(0, ...stateWords) * floor) + 1 : statusMin
+  const stateLine = status[0]
+  const detailLine = lineup.querySelector<HTMLElement>('.banner-status-tier:nth-child(2) .banner-status-line')
+  const audienceLine = lineup.querySelector<HTMLElement>('.banner-status-tier:nth-child(3) .banner-status-line')
+  const wordMin = (width: number) => Math.ceil(width * floor) + 1
+  const widestWord = wordMin(Math.max(...statusWidths))
+  const lowerTierMin = (line: HTMLElement | null) => line === null ? 0 : wordMin(statusWidths[status.indexOf(line)]!)
+  // On a roomy card a long detail can take its own row while the teams keep their tracks.
+  const fixedMiddleMin = Math.max(wordMin(statusWidths[0]!), lowerTierMin(audienceLine))
+  const compact = statusRoom < widestWord && (compactMiddle < widestWord || statusRoom < fixedMiddleMin)
+  const middleRoom = compact ? compactMiddle : statusRoom
+  const wideDetail = lowerTierMin(detailLine) > middleRoom
+  const wideAudience = compact && lowerTierMin(audienceLine) > middleRoom
+  const middleLines = status.filter(line =>
+    !(wideDetail && line === detailLine) && !(wideAudience && line === audienceLine))
+  const middleMin = wordMin(Math.max(...middleLines.map(line => statusWidths[status.indexOf(line)]!)))
+  const statusPreferred = Math.ceil(Math.max(...middleLines.map(line => natural.get(line)!)) * floor)
+  const statusMin = Math.max(middleMin, Math.min(preferredRoom - 2 * sideMin, statusPreferred))
   const middleWidth = Number.isFinite(share) ? Math.max(middleMin, available * share) : middleMin
-  lineup.toggleAttribute('data-wide-detail', wideDetail)
+  lineup.style.setProperty('--banner-lineup-min', `${2 * sideMin + statusMin}px`)
+  lineup.toggleAttribute('data-stacked', compact)
+  lineup.toggleAttribute('data-wide-detail', wideDetail || wideAudience)
+  lineup.toggleAttribute('data-wide-score-detail', wideDetail)
+  lineup.toggleAttribute('data-wide-audience', wideAudience)
   lineup.style.setProperty('--banner-compact-middle', `${Math.min(compactMiddle, middleWidth)}px`)
   lineup.style.setProperty('--banner-label-min', `${labelMin}px`)
   lineup.style.setProperty('--banner-score-min', `${scoreMin}px`)
@@ -150,22 +173,95 @@ function fitText() {
       line.style.setProperty('--banner-line-fit', String(scoreFit))
       continue
     }
+    fitLine(line)
+  }
+  function fitLine(line: HTMLElement) {
     const fit = room(line.parentElement!) / natural.get(line)!
-    if (fit < floor && status.includes(line)) line.dataset.wrap = ''
+    line.toggleAttribute('data-wrap', fit < floor && status.includes(line))
     const minimum = line.parentElement!.classList.contains('banner-initials') ? 0 : floor
     line.style.setProperty('--banner-line-fit', String(Math.max(minimum, Math.min(1, fit))))
   }
-  if (stateLine && scores.length) {
-    if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
-    if (inkContext) {
-      const context = inkContext
-      const scoreCentre = scores.reduce((sum, score) => sum + inkOffset(score, context), 0) / scores.length
-      const offset = scoreCentre - inkOffset(stateLine, context)
-      if (Number.isFinite(offset)) stateLine.style.setProperty('--banner-state-offset', `${offset.toFixed(3)}px`)
-      else stateLine.style.removeProperty('--banner-state-offset')
+  // A tall wrapped detail cannot share the row without pushing its logos down.
+  if (detailLine?.hasAttribute('data-wrap') && scores.length && !wideDetail
+      && detailLine.offsetHeight > Math.max(logo, ...scores.map(score => score.offsetHeight))) {
+    lineup.dataset.wideDetail = ''
+    lineup.dataset.wideScoreDetail = ''
+    fitLine(detailLine)
+  }
+  // The names and the audience share a row only while a word gap separates their text.
+  if (audienceLine && !lineup.hasAttribute('data-wide-score-detail') && !wideAudience) {
+    const [away, home] = labels.map(label => label.getBoundingClientRect())
+    const audience = audienceLine.getBoundingClientRect()
+    if (Math.min(audience.left - away!.right, home!.left - audience.right) < resolveLength(lineup, 'var(--banner-gutter)')) {
+      lineup.dataset.wideDetail = ''
+      lineup.dataset.wideAudience = ''
+      fitLine(audienceLine)
     }
-  } else {
-    stateLine?.style.removeProperty('--banner-state-offset')
+  }
+  // The name gap follows the logo as drawn, which a stacked card may narrow.
+  const drawnLogo = lineup.querySelector('.banner-team > *')!.getBoundingClientRect().height
+  lineup.style.setProperty('--banner-logo-drawn', `${drawnLogo}px`)
+  // Measure the final tracks, including any wrapped text. Changes to the
+  // balancing padding leave these intrinsic track heights unchanged.
+  const [upperHeight, , ...lowerTracks] = style.gridTemplateRows.split(' ').map(parseFloat)
+  const lowerHeight = lowerTracks.reduce((height, track) => height + track, 0)
+  lineup.style.setProperty('--banner-upper-block', `${upperHeight}px`)
+  lineup.style.setProperty('--banner-lower-block', `${lowerHeight}px`)
+
+  stateLine?.style.removeProperty('--banner-ink-offset')
+  if (!stateLine) return
+  if (inkContext === undefined) inkContext = document.createElement('canvas').getContext('2d')
+  const context = inkContext
+  if (!context) return
+  const stateInk = inkBounds(stateLine, context)
+  if (!stateInk) return
+  let offset = 0
+  let anchored = 0
+  const digits = scores.flatMap(score => inkBounds(score, context) ?? [])
+  if (digits.length) {
+    // A wrapped state still leaves one line's worth of clearance.
+    const lineInkHeight = (stateInk.bottom - stateInk.top) / stateInk.lineCount
+    const gap = Number(style.getPropertyValue('--banner-state-ink-gap')) * lineInkHeight
+    // Land the moved baseline on the device grid. Engines snap text there, and WebKit rounds a
+    // fractional translate up, so an off-grid baseline can paint a device pixel away from layout.
+    const dpr = window.devicePixelRatio || 1
+    const baseline = stateInk.baseline + window.scrollY
+    const raw = Math.min(...digits.map(ink => ink.top)) - gap - stateInk.bottom
+    anchored = raw
+    offset = Math.round((baseline + raw) * dpr) / dpr - baseline
+    stateLine.style.setProperty('--banner-ink-offset', `${offset.toFixed(4)}px`)
+  }
+  // A full-width lower tier makes the stack below the row much taller than the state above it.
+  // Centring the row would leave an empty band over the state, so trim that band until the state
+  // sits where it does on an ordinary card. The state keeps its gap to the digits. Use the unsnapped
+  // position, so identical cards trim identically wherever they sit on the page.
+  if (lineup.hasAttribute('data-wide-detail')) placeState(lineup, stateLine, (stateInk.top + stateInk.bottom) / 2 + anchored)
+}
+
+function placeState(lineup: HTMLElement, stateLine: HTMLElement, stateCentre: number) {
+  const target = cssNumber(getComputedStyle(lineup), '--banner-state-position', 0.28)
+  const surplus = parseFloat(getComputedStyle(lineup).paddingTop) - resolveLength(lineup, 'var(--banner-pad-bottom)')
+  if (!(surplus > 0)) return
+  const anchor = stateLine.getBoundingClientRect().top
+  const position = (trim: number) => {
+    // Layout units are 1/64 px; quantising keeps twin cards at exactly the same height.
+    lineup.style.setProperty('--banner-top-surplus', `${Math.round((surplus - trim) * 64) / 64}px`)
+    const box = lineup.getBoundingClientRect()
+    const centre = stateCentre + stateLine.getBoundingClientRect().top - anchor
+    return (box.top + box.height / 2 - centre) / box.height
+  }
+  const start = position(0)
+  if (start >= target) {
+    lineup.style.removeProperty('--banner-top-surplus')
+    return
+  }
+  // Exact when the card takes its content height; a stretched grid cell needs the measured step.
+  const box = lineup.getBoundingClientRect()
+  let trim = Math.min(surplus, (stateCentre - box.top - box.height * (0.5 - target)) / (0.5 + target))
+  const reached = position(trim)
+  if (trim < surplus && Math.abs(reached - target) > 0.002 && reached !== start) {
+    trim = Math.min(surplus, trim * (target - start) / (reached - start))
+    position(trim)
   }
 }
 let observer: ResizeObserver | undefined

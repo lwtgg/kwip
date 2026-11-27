@@ -603,3 +603,199 @@ pixel and parity reports are in `/tmp/kw60-r10`.
 - Revisit the stacking threshold for `matched-live` at 390 px with root text at 200 %. The unstacked
   card measured 239.2 px high with its audience on two lines. The stacked wide-detail fixtures
   measured 212.6 px.
+
+## 60c. State above the score row
+
+The mockup's two cards put the state ink centre about 28% of the card height
+above the card centre. The score ink is 27–32% of card height and 0.47–0.56× the
+logo ink height on the same card. The gap to the team name is 0.12–0.18× the logo
+ink height. (The 60c brief quoted 0.62–0.84× and 0.20–0.21×; it measured the top
+card's score against the bottom card's logo. The fix-2 review re-measured both.) The gap from
+state ink to score ink is about 80% of the state ink height. Detail and score
+ink share a band.
+
+The state occupies the top track. Logos sit at the bottom of the centred score
+track, with the team names and audience immediately underneath and the timeline
+below them. Detail sits between the scores. A detail word that cannot fit there
+at the existing fit floor gets a full-width track after the names. This keeps
+the long-word fixtures readable and preserves the score gutters.
+The fitting pass balances the actual track heights on either side of the score
+row and keeps at least the density's bottom clearance. It positions the state
+from the measured digit ink. The centre track aligns detail with the scores.
+
+The brief measured the old logo-to-name gap at 33.8 px on a 40 px listing logo
+and 74.8 px on a 102 px hero logo (0.84× and 0.73×). Old listing score ink was
+23 px on the 40 px logo (0.58×).
+
+### Layout and 4× paint
+
+The Halftime sweep used symmetric synthetic logos so a provider image's
+transparent margins would not affect the comparison. Across 144 cells in
+Chromium and WebKit (nine widths, two densities, two card scales and two root
+text sizes), the score row was within 0.008 px in layout and the two painted
+logos were within 1.422 px of the card centre. The layout cleared the density
+token at the bottom in every cell. The paint test checks the visible track
+fill and names against the same token, with 0.5 CSS px for screenshot rounding.
+
+| Measurement | Range |
+| --- | --- |
+| State ink centre above card centre | 20.57–30.41% of card height |
+| State-to-score ink gap | 0.837–0.916× the state ink height |
+| Logo-to-name ink gap | 0.077–0.261× the logo ink height |
+| Listing score-to-logo ink ratio | 0.766–0.775× |
+| Hero score-to-logo ink ratio | 0.917–0.963× |
+
+At normal text in Chromium, the 390 px listing measured 3.50–3.75 px between
+logo and name, compared with the brief's 33.8 px. The 1280 px hero measured
+8.25–8.50 px, compared with 74.8 px. The listing digit ink grew from 23 px in
+the brief to 31 px in the fixture probe. Restoring the old row order and equal
+padding moved listings 25.34 px above centre. Heroes moved 27.28 px high at
+390 px and 56.13 px high at 1280 px with the new type sizes.
+
+The narrow-width score cap preserves room between the digits at 200% root
+text. A wrapped state keeps one line's worth of clearance to the score ink.
+Wider words, or wrapped detail that would make the score row taller than the
+logos, use the full-width track. (This section first said the 390 px root-text
+Hangul fixture fits between the scores. It does not: it takes the full-width
+track in all four theme/density cells. See fix round 2.)
+
+Baseline parity limits and biases stayed fixed. All 514 parity observations
+passed across 642 ink observations. The worst corrected errors were 0.3914 px
+at DPR 2 and 0.2084 px at DPR 4, compared with limits of 0.41 and 0.27 px.
+The WebKit 640 px hero at DPR 2 measured 0.27061 px, down from 60b's 0.41856 px.
+The hidden-width guard also prevents fitting a zero-width lineup. The geometry
+test requires a nonzero middle column after the fit pass has run.
+
+### Production score audit
+
+The published 2026-11-26 19:41:20 UTC snapshot was compared with ESPN's scoreboards,
+the matching detail API response, Nuxt SSR payload, and the digits rendered on the
+homepage. All 19 sampled cards with scores preserved the feed numbers and away/home
+order through render.
+
+| Event | Feed, SSR and card | ESPN when sampled |
+| --- | --- | --- |
+| [Georgetown at Texas](https://kwip.fyi/live/cbb/2026-11-26/gtwn-tex) | 5–10, first half 15:53 | [13–15, first half 11:51](https://www.espn.com/mens-college-basketball/game/_/gameId/401906869) |
+| [Monaco at Hearts](https://kwip.fyi/live/uecl/2026-11-26/hom-mon) | 2–2, Live 90'+4' | [3–2, Final](https://www.espn.com/soccer/match/_/gameId/401915811) |
+| [Riga at Kauno Žalgiris](https://kwip.fyi/live/uecl/2026-11-26/zal-rig) | 0–2, Live 88' | [0–2, Final](https://www.espn.com/soccer/match/_/gameId/401915739) |
+| [Chicago at Detroit](https://kwip.fyi/live/nfl/2026-11-26/chi-det) | 10–19, Halftime | [10–19, Halftime](https://www.espn.com/nfl/game/_/gameId/401873081) |
+
+The differing numbers and states were already in the [published feed](https://kwip.fyi/api/feed/streams).
+The fit pass preserved those digits. The audit was read-only.
+
+### Local gate
+
+The default Cloudflare build, node-server build, Wrangler dry run and build-key
+check passed. All 199 unit tests and the 1,224-case contrast sweep passed.
+Wrangler reported a 1,037.39 KiB upload and 277.17 KiB gzipped. The build-key
+probe missed after the second build and hit the new CSS on the third request.
+The matched matrix passed across 2,700 listings and 144 heroes with zero
+hydration or uncaught page errors. The largest layout centre offset was
+0.016 px across that corpus. The 24 stale matched listings and eight Next up
+cases passed. The card boundary and 32 fresh/stale checks, top-event cases,
+banner, density, not-live, click-under and seeded source-health suites passed. The stock
+generation replay still raises the known devalue TypeError. The scratch
+decoder passed the four-width replay. The CSS controls rejected the old
+row order, collapsed clearance, excess hero leading, state on the score row
+and detail under the score row.
+
+The 270-cell zoom probe found all score ink inside the banners. The legacy
+probe's tighter score-line-box assertion passed in 47 cells. The other 223
+had a maximum ink overhang of 1.672 CSS px with the new hero score leading.
+
+Evidence is under `/tmp/kw60c-gate`. The production snapshot comparison is
+in `production-final.log`.
+
+## 60c fix round 2
+
+The review of `f3918fc` asked for changes. These are the fixes.
+
+### Names and audience
+
+At 320 px with 200 % root text, the audience shared the names' row with no
+minimum gap. The hero drew 2.25–3.25 px of ink between "CSU", "62 Viewers" and
+"ARIZ". After fitting, the component now measures the names and the audience.
+If either gap is under the gutter (`--banner-gutter`), the audience moves to its
+own row under the names (`data-wide-audience`). The layout test asserts the box gap
+in every matrix cell where the two share a row. The paint sweeps assert the ink gap.
+
+### Score and logo sizes
+
+The scored hero logo again follows the pre-60c chain: `clamp(2.75rem, 8vw,
+7.25rem × 8/9)`, which is 102.4 px at 1280. `--banner-logo-hero-mobile-cap` (14vw)
+caps it on narrow screens with large text. The digits are now sized from the
+logo: `--banner-hero-score-per-logo` is 1.15 em per logo px. Digit ink is about
+0.67 em, so the hero ink is 0.76–0.78× the logo on unstacked cards, against
+0.917–0.977 before this round and the owner's "a bit bigger" than production's
+0.58. The listing ratio is unchanged at 0.76–0.79×. Stacking accommodates enlarged
+text at narrow widths. The layout can narrow the logo to make room for the text
+while the digits grow. Both stacked scales allow score ink up to 1.25× the drawn
+logo and keep their usual lower bounds.
+
+The 1280 px hero plate is 243 px tall for a plain hero, and 303 px with a
+creative line above it: 359 px at `06566fd` and 220 px at `f3918fc`, before the
+restored logo and name gap. At common laptop heights such as 1280×500, the
+reserved player box now starts inside the first viewport. Under rule 26 it therefore mounts on load, muted, as
+soon as it intersects. That is the rule's intent, and nothing in rule 26 or 27
+changes. `tests/top_event_browser.py` keeps its below-the-fold Play cases at
+400 px viewport heights, so those cases still start with the player outside
+the viewport.
+
+### Name gap
+
+`.banner-abbreviation` now has a top margin of
+`--banner-name-gap × drawn logo − (1lh − 1cap) / 2`. It takes the half-leading
+above the capitals back out, so the gap is measured from logo ink to name ink.
+The fit pass publishes the drawn logo as `--banner-logo-drawn`, because a stacked
+card can draw the logo smaller than `--banner-logo`. An audience that shares the
+names' row gets the same margin, so the two keep a common top edge. The test
+band is 0.12–0.22× the logo, ink to ink. The layout matrix checks it against the
+model ink, with 0.01 for device-pixel snapping. The paint sweeps check it exactly.
+
+### Wide-detail state position
+
+The state was already anchored to the digits with the normal ink gap. The
+empty band above it came from centring the row: a tall full-width lower stack
+was balanced with top padding. When `data-wide-detail` is set, the fit pass
+trims that top padding (`--banner-top-surplus`). It stops when the state ink
+centre sits at `--banner-state-position` (0.28 of the card height above centre,
+the mockup's value) or when the padding is gone. The state keeps its gap to the
+row. The row then sits at or above the card centre. On these cards the layout
+test asserts that, together with a state band of 0.26–0.30 of the card height.
+The trim is computed in one step for a card at its content height. A card
+stretched by its grid row gets one measured correction step.
+
+### State snapping
+
+The larger hero logo moved the 320 px hero state to a new sub-pixel phase. With
+an unsnapped offset, WebKit at DPR 2 drew it 0.4165 px from the model after
+bias correction, against the fixed 0.41 limit. A scan showed that WebKit rounds
+a fractional translate up to the next device pixel and snaps the text baseline
+on its own. Rounding the offset alone measured 0.545 px; rounding nothing
+measured 0.467 px. The fit pass now places the moved baseline on the device
+grid. In an 88-cell state-only sweep (11 widths, both scales and both DPRs, in
+each engine), the worst corrected state errors were 0.342/0.184 px in WebKit
+and 0.348/0.155 px in Chromium at DPR 2/4. The parity limits and biases are
+unchanged.
+
+### Assertions restored or tightened
+
+- `WIDE_DETAIL` (the detail takes its own track) and `WIDE_AUDIENCE` are asserted
+  with equality again. Both tables come from the measured matrix and were
+  identical in all four theme/density cells.
+- Stacked cards use the real score-slot gutter in the score-to-middle check. The
+  score-to-detail gap is asserted again in every cell: horizontally beside the
+  digits, or vertically when the detail has its own track.
+- A second paint sweep covers the widest, long-status, CJK and long-word fixtures
+  at 320, 390 and 1280 px. It runs in both densities, both scales, both text sizes
+  and both engines, and it includes stacked and wide-detail cells. It runs the
+  score clearance, state band, state gap, name gap, word gap and score/logo checks.
+- The score overhang limit is derived. Half-leading centres the font's content
+  area on the line box, and the digits stay inside it, so the ink can pass each
+  edge by at most half of (content height − line box), plus a device pixel.
+  The empirical 2 px cap keeps this check sensitive to excess digit overhang.
+- The mockup score-centre band still runs only for Halftime and long-status. The
+  three-digit and five-letter fixtures widen the middle column. Every other
+  scored wide listing is held by the stronger gutter-anchor check (|gap − gutter| ≤ 1).
+- The red control again requires the old order to pull the row up
+  (`row_offset < −2`).

@@ -183,6 +183,90 @@ test('listing deadlines follow home and category filters and ignore 24/7 schedul
   }
 })
 
+const matchWithState = (state: string) => {
+  const side = (name: string) => ({ name, abbreviation: name, color: null, logo: null, score: null })
+  return { state, detail: '', away: side('Away'), home: side('Home') }
+}
+
+test('selected live matches cap listing deadlines at one minute', async () => {
+  const event = (id: number, state: string, start: number, end: number) => ({
+    id, uri: `sport/${id}`, name: `Event ${id}`, starts_at: start, ends_at: end, match: matchWithState(state),
+  })
+  const streams = { ...channels, streams: [
+    { category: 'Live Sport', streams: [event(1, 'in', 50, 900)] },
+    { category: 'Upcoming Sport', streams: [event(2, 'pre', 500, 900)] },
+    { category: 'Final Sport', streams: [event(3, 'post', 50, 800)] },
+    { category: 'Near Finish', streams: [event(4, 'in', 50, 130)] },
+    { category: 'Past Window', streams: [event(5, 'in', 10, 90)] },
+  ] }
+  const { bucket } = fixture(false, detail, false, 'sport/example', true, streams)
+  for (const [path, now, boundary] of [
+    ['/', 140, 200],
+    ['/?filter=live', 140, 200],
+    ['/?filter=upcoming', 100, 500],
+    ['/c/live-sport?filter=live', 100, 160],
+    ['/c/upcoming-sport?filter=upcoming', 100, 500],
+    ['/c/final-sport', 100, 800],
+    ['/c/near-finish', 100, 130],
+    ['/c/past-window', 100, 160],
+  ] as const) {
+    const generation = await readFeedGeneration(
+      bucket, new URL(path, requestUrl), requestUrl.host, [{ kind: 'streams' }], now,
+    )
+    assert.equal(generation.cacheBoundary, boundary, path)
+  }
+})
+
+test('an always-live channel clamps for an in-play match only where its score shows', async () => {
+  const event = (id: number, state: string) => ({
+    id, uri: `sport/${id}`, name: `Event ${id}`, starts_at: 50, ends_at: 900, match: matchWithState(state),
+  })
+  const streams = { ...channels, streams: [
+    { category: 'Rolling Rail', always_live: 1, streams: [event(1, 'in')] },
+  ] }
+  const { bucket } = fixture(false, detail, false, 'sport/example', true, streams)
+  for (const [path, now, boundary] of [
+    ['/', 100, 160],
+    ['/?filter=live', 100, 160],
+    ['/c/rolling-rail', 100, 160],
+    ['/c/rolling-rail?filter=live', 100, 160],
+    ['/?filter=upcoming', 100, Infinity],
+  ] as const) {
+    const generation = await readFeedGeneration(
+      bucket, new URL(path, requestUrl), requestUrl.host, [{ kind: 'streams' }], now,
+    )
+    assert.equal(generation.cacheBoundary, boundary, path)
+  }
+})
+
+test('detail deadlines follow a live related card in the same category', async () => {
+  const streams = { ...channels, streams: [
+    { category: 'Sports', streams: [
+      { id: 1, uri_name: 'sport/example', name: 'Example', starts_at: 400, ends_at: 900 },
+      { id: 2, uri_name: 'sport/related', name: 'Related', starts_at: 50, ends_at: 900, match: matchWithState('in') },
+      { id: 3, uri_name: 'sport/upcoming', name: 'Upcoming', starts_at: 500, ends_at: 900, match: matchWithState('pre') },
+    ] },
+  ] }
+  const soonDetail = { ...detail, data: { ...detail.data, starts_at: 400, ends_at: 900 } }
+  const { bucket } = fixture(true, soonDetail, false, 'sport/example', true, streams)
+  const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints], 100)
+  // The item's own kickoff (400) would allow it; the related live card caps it at a minute.
+  assert.equal(generation.cacheBoundary, 160)
+})
+
+test('detail deadlines use the detail match state even past the event window', async () => {
+  for (const [state, now, boundary] of [
+    ['in', 500, 560], ['in', 880, 900], ['in', 950, 1010],
+    ['pre', 100, 400], ['post', 500, 900], ['post', 950, Infinity],
+  ] as const) {
+    const { bucket } = fixture(true, { ...detail, data: {
+      ...detail.data, start_timestamp: 400, end_timestamp: 900, match: matchWithState(state),
+    } })
+    const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints], now)
+    assert.equal(generation.cacheBoundary, boundary, `${state} at ${now}`)
+  }
+})
+
 test('live cache coverage moves from kickoff to the whistle to ended replay', async () => {
   for (const [now, boundary, replay] of [
     [399, 400, undefined], [400, 500, undefined], [499, 500, undefined], [500, Infinity, true],

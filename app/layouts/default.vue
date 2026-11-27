@@ -11,7 +11,8 @@ const { density, toggleDensity } = useDensity()
 const isCompact = computed(() => density.value === 'compact')
 const densityAction = computed(() => isCompact.value ? 'Switch to comfortable layout' : 'Switch to compact layout')
 const error = useError()
-const streamsData = error.value ? undefined : useStreams().data
+// Listing and detail pages own the polling for this shared feed.
+const streamsData = error.value ? undefined : useStreams(false).data
 
 function slugifyCategory(name: string): string {
   return name
