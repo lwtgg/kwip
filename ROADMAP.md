@@ -199,14 +199,14 @@ forever with a stuck "Upcoming" pill; the opening alarm ignores `document.hidden
 `visibilitychange`; the retry test passes regardless of `retry()`'s branch; the server picks a related category by
 containment while the client matches `category_name` slugs.
 
-**Recorded 2026-11-27, upstream.** `ppv.cx` stopped resolving: `api.ppv.cx` and the apex both answer NXDOMAIN at
-Cloudflare DoH and `1.1.1.1`'s records are stale cache, and the IPs Cloudflare still hands back abort the TLS
-handshake with alert 40 for SNI `api.ppv.cx` (both 104.21.69.111 and 172.67.207.188, while `kwip.fyi` on the same
-IP is a clean 200). A manual `publish:feed --bucket kwip-feed-prod` fails with `fetch failed` after one provider
-request. Production keeps serving the last snapshot and, correctly, marks it: the freshness notice and
-"Unconfirmed · Last listed" on every card. So an end-to-end proof that a live digit moves on a publish boundary is
-blocked on their DNS, not on us. Separately, the stale notice reads "more than 20 minutes ago" while the cut is
-ten — copy bug, fix with the padded-logo round.
+**Verified 2026-11-27, production, end to end.** The provider came back on its own and the boundary proof landed:
+an open tab held 38–47, the feed generation moved to 42–61 at t+387 s, the tab still read 38–47 at t+417, and the
+next 60 s poll (request at 421 s) rendered 42–61 at t+432 — one beat, no refresh. Polls ran at 241, 301, 361, 421 s
+with none missed. The earlier blocker stands as history: `ppv.cx` answered NXDOMAIN at Cloudflare DoH and both
+Cloudflare IPs aborted the handshake with alert 40 for that SNI while `kwip.fyi` on the same IP stayed a 200, and a
+manual `publish:feed --bucket kwip-feed-prod` failed with `fetch failed` after one provider request; production kept
+serving the last snapshot and marked it with the notice and "Unconfirmed · Last listed" on every card. Separately,
+the stale notice reads "more than 20 minutes ago" while the cut is ten — copy bug, fix with the padded-logo round.
 
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting
