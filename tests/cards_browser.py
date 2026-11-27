@@ -15,8 +15,11 @@ from playwright.sync_api import expect, sync_playwright
 from click_under_browser import worker, CLS_OBSERVER, CLS_SCORE
 
 
-# Give fresh snapshots headroom for the browser matrix while keeping event times on the test clock.
-FRESH_TIMESTAMP_OFFSET = 900
+# Keep the snapshot fresh for the whole matrix while event times stay on the test clock. The page now
+# refetches on a live beat and applies the ten-minute stale cut (rule 29), so the suite clock eats this
+# headroom at one second per second: 900 s only bought five minutes and the 1280 cases turned
+# "Unconfirmed" mid-run. 90 minutes leaves the cut unreachable inside a suite run.
+FRESH_TIMESTAMP_OFFSET = 5400
 
 
 def fixtures(assets, stale=False):
