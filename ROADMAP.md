@@ -218,7 +218,8 @@ on a 40 px mark; state ink 0.285 / 0.285 / 0.288 of card height; score ink 1.14-
 white plate and dark-ink threshold for logos, because production marks are dark navy and the harness's black plate
 and 0.5 min-channel threshold return nothing for them. Painted logo-to-name gap on real ESPN padding is 0.57-0.65
 of the mark (0.71-0.79 before the rise); the mockup's 0.47-0.56 is a box-relative fraction, so the two are not yet
-directly comparable — that is the padded-logo round below.
+directly comparable — that is the padded-logo round below. The owner judged it good at 0.1 on the live site; 0.14
+stays the lever if the padded-logo round does not land.
 
 The full pixel sweep died once at the 845th cell on a 30 s `Page.screenshot` timeout with no assertion failure.
 `screenshot_ink` now retries a screenshot timeout once, the same way it already retries an empty WebKit frame.
