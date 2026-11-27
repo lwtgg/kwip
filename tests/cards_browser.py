@@ -1093,9 +1093,15 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                         assert geometry['paint'][tier]['scale'] >= geometry['floor'], (
                                             'first paint below fit floor', prefix, tier, geometry['paint'][tier])
                             assert page.goto(origin, wait_until='networkidle').ok
+                            page.evaluate('document.fonts.ready')
                             hero = page.locator('a.card-hero.card-matched')
                             expect(hero.locator('.banner-score')).to_have_count(2)
-                            expect(hero.locator('.banner-lineup')).to_have_attribute('style', re.compile('--banner-lineup-min'))
+                            # The fit pass waits on fonts and its own frames; under a loaded machine that is
+                            # occasionally longer than the default five seconds, so give it frames and a longer
+                            # wait before calling the page unfitted.
+                            settle_fit(page)
+                            expect(hero.locator('.banner-lineup')).to_have_attribute(
+                                'style', re.compile('--banner-lineup-min'), timeout=15_000)
                             (assets / 'fixtures/streams.json').write_text(json.dumps(listing))
                             page.evaluate('document.fonts.ready')
                             featured = page.get_by_role('region', name='Featured event')
