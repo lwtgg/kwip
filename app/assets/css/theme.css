@@ -496,8 +496,12 @@
   --banner-state-ink-gap: 0.9;
   /* Where a wide-detail card puts the state ink centre above the card centre, as a fraction of its height. */
   --banner-state-position: 0.28;
-  /* Logo ink to name ink, as a fraction of the drawn logo. The half-leading above the caps is taken back out. */
+  /* Logo to name, as a fraction of the drawn logo. The half-leading above the caps is taken back out. The logo
+     rises by its own token below and the name stays put, so this gap is what remains once it has. */
   --banner-name-gap: 0.17;
+  /* Logos align to the score row's bottom, then rise by this share of the drawn logo so a real mark sits on the
+     digits rather than under them (its padding and the line's half-leading would otherwise drop it). */
+  --banner-logo-rise: 0.1;
   --banner-track-height: var(--spacing-1);
   --banner-track-gap: var(--spacing-1);
 }
@@ -562,6 +566,7 @@
 .banner-team {
   grid-row: 2;
   align-self: end;
+  translate: 0 calc(-1 * var(--banner-logo-rise) * var(--banner-logo-drawn, var(--banner-logo)));
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   place-items: center;

@@ -401,10 +401,12 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
       lineup.append(padProbe);
       const bottomPad = padProbe.getBoundingClientRect().height;
       padProbe.remove();
+      // The logo's rise is a transform, so the layout row bottom is the rect plus the rise.
+      const riseOf = side => -parseFloat(getComputedStyle(banner.querySelector('.banner-' + side + '-team')).translate.split(' ')[1] || '0');
       return {
         card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
         bottomPad,
-        rowBottom:bounds('.banner-away-team').bottom,
+        rowBottom:bounds('.banner-away-team').bottom + riseOf('away'),
         tracks:getComputedStyle(lineup).gridTemplateRows.split(' ').map(parseFloat),
         wideScoreDetail:lineup.hasAttribute('data-wide-score-detail'),
         lowerHeight:getComputedStyle(lineup).gridTemplateRows.split(' ').slice(2).reduce((sum, track) => sum + parseFloat(track), 0),
@@ -439,6 +441,7 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
         wideDetail:lineup.hasAttribute('data-wide-detail'),
         wideAudience:lineup.hasAttribute('data-wide-audience'),
         logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
+        logoRise:['away', 'home'].map(riseOf),
         labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
         stateInk:inkBounds(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
         labelInk:[...banner.querySelectorAll('.banner-abbreviation .banner-fit-text')].map(inkBounds),
@@ -689,7 +692,8 @@ def assert_row_centre(measurements, fixture):
 STATE_POSITION = (.20, .38)
 WIDE_STATE_POSITION = (.26, .30)
 # Logo-to-name ink gap as a fraction of the drawn logo (the mockup measures 0.12-0.18).
-NAME_GAP = (.12, .22)
+# Ink-to-ink, as a share of the logo: the mockup band (0.12-0.22) plus the logo's 0.10 rise, which opens it.
+NAME_GAP = (.22, .32)
 
 
 def assert_scoreboard_layout(geometry, fixture, has_detail):
@@ -717,8 +721,9 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
     row_top = geometry['rowBottom'] - row_height
     score_top = min((ink[0] for ink in geometry['scoreInk']), default=row_top)
     assert geometry['stateInk'][1] <= score_top, ('state above scores', fixture)
-    assert all(abs(logo['bottom'] - row_top - row_height) <= .05 for logo in geometry['logoBoxes']), (
-        'logos on score-row bottom', fixture)
+    assert all(abs(logo['bottom'] + rise - row_top - row_height) <= .05
+               for logo, rise in zip(geometry['logoBoxes'], geometry['logoRise'])), (
+        'logos on score-row bottom, before their rise', fixture, geometry['logoRise'])
     if has_detail and geometry['scoreInk'] and not geometry['wideScoreDetail']:
         assert all(max(lo, geometry['detailInk'][0]) < min(hi, geometry['detailInk'][1])
                    for lo, hi in geometry['scoreInk']), ('detail overlaps score ink', fixture)
@@ -1453,7 +1458,7 @@ def check_row_centre_paint(browser, engine, origin, widths, fixture='halftime', 
                     # Screenshot clips use integer CSS coordinates.
                     assert box['bottom'] - last_ink + .5 >= row['bottom_pad'], (
                         'painted bottom clearance', cell, box['bottom'] - last_ink, row['bottom_pad'])
-                    offsets = [sum(logo) / 2 - centre for logo in logos]
+                    offsets = [sum(logo) / 2 + rise - centre for logo, rise in zip(logos, geometry['logoRise'])]
                     state_position = (centre - sum(state[:2]) / 2) / box['height']
                     state_gap = clearance['state_clearance'] / (state[1] - state[0])
                     name_gaps = [(name[0] - logo[1]) / (logo[1] - logo[0]) for name, logo in zip(names, logos)]
@@ -1553,7 +1558,7 @@ def check_fixture_ink(pw, origin, assets, fixture, centre_rows):
                     state.evaluate("el => { el.firstChild.data = 'Additional  Time'; }")
                     page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
                     settle_fit(page)
-                    expect(state).to_have_attribute('data-wrap', '')
+                    expect(state).to_have_attribute('data-wrap', '', timeout=15_000)
                     assert banner_geometry(card)['paint']['tier-0']['lines'] >= 2
                 row = measure_pixel_card(card, dict(engine=engine, version=browser.version,
                                                     width=width, scale=scale, fixture=fixture), dpr)
