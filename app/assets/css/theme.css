@@ -468,6 +468,11 @@
   --banner-status-hero: clamp(0.875rem, 2.25vw, 2rem);
   --banner-logo: min(2.5rem, calc(var(--banner-score-size) * var(--banner-score-leading)));
   --banner-logo-hero: clamp(var(--banner-logo-hero-min), 9vw, var(--banner-logo-hero-max));
+  /* A scored hero keeps the pre-60c logo (8vw, 102.4px at 1280), capped on narrow screens with large text. */
+  --banner-logo-hero-mobile-cap: 14vw;
+  --banner-logo-hero-scored: clamp(min(var(--banner-logo-hero-min), var(--banner-logo-hero-mobile-cap)), 8vw, calc(var(--banner-logo-hero-max) * 8 / 9));
+  /* Score em per logo px on a scored hero. Digit ink is about 0.67em, so the ink is about 0.77 of the logo. */
+  --banner-hero-score-per-logo: 1.15;
   --banner-status-width: 36%;
   --banner-team-width: 20%;
   --banner-status-fit-width: 5rem;
@@ -482,7 +487,6 @@
   /* Tight leading keeps the logo and digits at comparable heights. */
   --banner-score-leading: 0.87;
   --banner-hero-score-leading: 0.73;
-  --banner-hero-scored-logo-inset: calc(var(--spacing-1) / 5);
   /* The timeline track: translucent white over the team field, so it reads on any team colour. */
   --banner-track: color-mix(in srgb, var(--banner-white) 36%, transparent);
   --banner-pad-inline: var(--spacing-2);
@@ -490,6 +494,10 @@
   --banner-hero-pad: var(--spacing-4);
   --banner-state-gap: 0.35em;
   --banner-state-ink-gap: 0.9;
+  /* Where a wide-detail card puts the state ink centre above the card centre, as a fraction of its height. */
+  --banner-state-position: 0.28;
+  /* Logo ink to name ink, as a fraction of the drawn logo. The half-leading above the caps is taken back out. */
+  --banner-name-gap: 0.17;
   --banner-track-height: var(--spacing-1);
   --banner-track-gap: var(--spacing-1);
 }
@@ -532,9 +540,11 @@
   align-items: center;
   /* Balance the fitted tracks on either side of the score row. */
   --banner-upper-block: calc(1lh + var(--banner-state-gap));
-  --banner-lower-block: calc(1lh + var(--banner-track-gap) + var(--banner-track-height));
+  --banner-lower-block: calc(1lh + var(--banner-name-offset) + var(--banner-track-gap) + var(--banner-track-height));
+  /* Declared here so the fit pass's drawn logo resolves; lh and cap resolve on the name itself. */
+  --banner-name-offset: calc(var(--banner-name-gap) * var(--banner-logo-drawn, var(--banner-logo)) - (1lh - 1cap) / 2);
   padding-block:
-    calc(var(--banner-pad-bottom) + max(0px, var(--banner-lower-block) - var(--banner-upper-block)))
+    calc(var(--banner-pad-bottom) + var(--banner-top-surplus, max(0px, var(--banner-lower-block) - var(--banner-upper-block))))
     calc(var(--banner-pad-bottom) + max(0px, var(--banner-upper-block) - var(--banner-lower-block)));
   padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
   font-size: var(--banner-status-size);
@@ -576,6 +586,7 @@
   grid-row: 4;
   align-self: start;
   min-width: 0;
+  margin-block-start: var(--banner-name-offset);
 }
 .banner-away-team, .banner-away-label { grid-column: 1; }
 .banner-home-team, .banner-home-label { grid-column: 5; }
@@ -608,6 +619,11 @@
 .banner-status-tier:nth-child(2) { grid-row: 2; }
 .banner-status-tier:nth-child(3) { grid-row: 4; }
 .banner-lineup:not([data-stacked]) .banner-status-tier:nth-child(3) { grid-column: 1 / -1; }
+/* Sharing the names' row, the audience shares their top edge too. */
+.banner-lineup:not([data-wide-score-detail], [data-wide-audience]) .banner-status-tier:nth-child(3) {
+  align-self: start;
+  margin-block-start: var(--banner-name-offset);
+}
 .banner-lineup[data-wide-detail]:not([data-stacked]) .banner-status-tier:nth-child(3) { grid-column: 2 / 5; }
 .banner-lineup[data-wide-score-detail] .banner-abbreviation { grid-row: 3; }
 .banner-lineup[data-wide-score-detail] .banner-status-tier:nth-child(2) { grid-row: 4; }
@@ -712,9 +728,10 @@
   height: auto;
 }
 
-/* Keep the logo inside the scored row across the hero scale. */
+/* A scored hero sizes its digits from the logo, not the logo from the digits. */
 .match-banner[data-scale="hero"]:has(.banner-score-slot) {
-  --banner-logo: calc(var(--banner-score-size) * var(--banner-score-leading) - var(--banner-hero-scored-logo-inset));
+  --banner-logo: var(--banner-logo-hero-scored);
+  --banner-score-size: calc(var(--banner-logo) * var(--banner-hero-score-per-logo));
 }
 
 /* Keep the existing wide sizing for heroes without a score. */

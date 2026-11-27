@@ -321,14 +321,29 @@ PARITY_CONTROL_FAIL_PCT = 90
 # Preserve the round-ten ratio floors on the listing content and edge pads. The centring
 # checks separately bound the added mirror space to the height of the actual lower tiers.
 RATIO_FLOOR = {320: 2.69, 390: 3.35, 640: 3.5, 768: 3.5, 1024: 3.5, 1280: 3.5, 1440: 3.5, 1920: 3.5, 2560: 3.5}
-# Cells where a detail word cannot fit the middle column at the floor and takes its row (measured).
+# Measured on the 60c fix-2 build; identical in all four theme/density cells, and asserted with equality.
+# Cells where the detail cannot share the score row at the fit floor and takes its own full-width track.
+_SCRIPTS_320_ROOT = {'matched-arabic', 'matched-emoji', 'matched-katakana', 'matched-lao', 'matched-mixed', 'matched-thai'}
 WIDE_DETAIL = {
-    (320, 'element'): {'matched-widest', 'matched-hangul-long-word'},
-    (320, 'root'): {'matched-widest', 'matched-hangul-long-word'},
-    (390, 'element'): {'matched-widest'},
-    (390, 'root'): {'matched-widest'},
-    (1024, 'element'): {'matched-widest'},
+    (320, 'normal'): {'matched-widest'},
+    (320, 'element'): {'matched-widest', 'matched-cjk', 'matched-hangul-long-word', 'matched-long-status'},
+    (320, 'root'): {'matched-widest', 'matched-cjk', 'matched-hangul-long-word', 'matched-long-status', *_SCRIPTS_320_ROOT},
+    (390, 'element'): {'matched-widest', 'matched-cjk', 'matched-hangul-long-word', 'matched-long-status'},
+    (390, 'root'): {'matched-widest', 'matched-cjk', 'matched-hangul-long-word', 'matched-long-status', 'matched-thai'},
+    (640, 'element'): {'matched-widest'},
+    (640, 'root'): {'matched-widest'},
+    (1024, 'element'): {'matched-widest', 'matched-cjk'},
     **{(width, 'element'): {'matched-widest'} for width in (1280, 1440, 1920, 2560)},
+}
+# Cells where the audience cannot keep a word gap from the names and takes its own row. Every
+# fixture whose detail shares the score row does this at 320 px with 200 % root text.
+WIDE_AUDIENCE = {
+    (320, 'element'): {'matched-final'},
+    (320, 'root'): {'matched-always-live', 'matched-bad-color', 'matched-bright', 'matched-devanagari',
+                    'matched-empty-abbr', 'matched-failed-logo', 'matched-final', 'matched-hangul-jamo',
+                    'matched-hangul-trailing', 'matched-khmer', 'matched-live', 'matched-missing-logo',
+                    'matched-no-color', 'matched-pre', 'matched-three-digit'},
+    (390, 'root'): {'matched-final'},
 }
 
 
@@ -415,6 +430,7 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
         // The first tier always sits in the middle column, also when detail and audience take a full row.
         middle:bounds('.banner-status-tier:first-child'),
         wideDetail:lineup.hasAttribute('data-wide-detail'),
+        wideAudience:lineup.hasAttribute('data-wide-audience'),
         logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
         labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
         stateInk:inkBounds(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
@@ -427,9 +443,8 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
         tiers:[...banner.querySelectorAll('.banner-status-tier')].map(n => rect((n.firstElementChild || n).getBoundingClientRect())),
         floor:parseFloat(lineup.style.getPropertyValue('--banner-fit-floor') || getComputedStyle(lineup).getPropertyValue('--banner-fit-floor')),
         compression:parseFloat(getComputedStyle(lineup).getPropertyValue('--banner-score-compression')),
-        gutter:parseFloat(lineup.hasAttribute('data-stacked')
-          ? 0
-          : getComputedStyle(banner.querySelector('.banner-score-slot') || lineup).paddingInlineEnd) || 0,
+        gutter:banner.querySelector('.banner-score-slot')
+          ? parseFloat(getComputedStyle(banner.querySelector('.banner-score-slot')).paddingInlineEnd) : 0,
         statusWidth:banner.querySelector('.banner-status-tier:first-child').getBoundingClientRect().width,
         stacked:lineup.hasAttribute('data-stacked'),
         fontSize:parseFloat(getComputedStyle(lineup).fontSize),
@@ -454,7 +469,14 @@ def banner_measurements(geometry):
     row_offset = row_top + row_height / 2 - centre(geometry['banner'])
     bottom_gap = box['bottom'] - max(item['bottom'] for item in (
         *geometry['labels'], geometry['tiers'][2], geometry['progress'] or geometry['labels'][0]))
+    state_position = (centre(geometry['banner']) - sum(geometry['stateInk']) / 2) / geometry['banner']['height']
+    name_gaps = [(ink[0] - logo['bottom']) / logo['height'] for ink, logo in zip(geometry['labelInk'], geometry['logoBoxes'])]
+    shares_row = 'tier-2' in paint and not geometry['wideAudience'] and not geometry['wideScoreDetail']
+    audience_gap = min(paint['tier-2']['left'] - paint['banner-away-label']['right'],
+                       paint['banner-home-label']['left'] - paint['tier-2']['right']) if shares_row else None
     return dict(row_offset=row_offset, bottom_gap=bottom_gap, bottom_pad=geometry['bottomPad'],
+                state_position=state_position, name_gaps=name_gaps, audience_gap=audience_gap,
+                wide_score_detail=geometry['wideScoreDetail'], wide_audience=geometry['wideAudience'],
                 ratio_without_centring=box['width'] / (box['height'] - abs(geometry['tracks'][0] - geometry['lowerHeight'])),
                 audience_lines=paint.get('tier-2', {}).get('lines', 0),
                 digit_fill=min(((bottom - top) / score['height'] for (top, bottom), score in
@@ -612,7 +634,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         lines = paint['tier-1']['lines'] if 'tier-1' in paint else 1
         # Only the fixtures wider than the feed allows may wrap further; the height bound still holds.
         assert lines <= 3 or allow_growth, geometry
-        assert box['height'] - abs(geometry['tracks'][0] - geometry['lowerHeight']) <= 145.2 + (4 + (lines - 1 + geometry['wideScoreDetail']) * 1.3) * geometry['fontSize'], (
+        assert box['height'] - abs(geometry['tracks'][0] - geometry['lowerHeight']) <= 145.2 + (4 + (lines - 1 + geometry['wideScoreDetail'] + geometry['wideAudience']) * 1.3) * geometry['fontSize'], (
             'disproportionate root-text row', geometry)
         if event['match']['detail'] == 'Halftime':
             assert paint['tier-1']['lines'] == 1, geometry
@@ -652,13 +674,32 @@ def assert_row_centre(measurements, fixture):
     assert abs(measurements['row_offset']) <= 2, ('score row off card centre', fixture, measurements['row_offset'])
 
 
+# State ink centre above the card centre, as a fraction of card height. Ordinary cards centre the row;
+# full-width tiers trim the band above the state instead, to --banner-state-position.
+STATE_POSITION = (.20, .38)
+# Logo-to-name ink gap as a fraction of the drawn logo (the mockup measures 0.12-0.18).
+NAME_GAP = (.12, .22)
+
+
 def assert_scoreboard_layout(geometry, fixture, has_detail):
     box, paint = geometry['card'], geometry['paint']
     middle = geometry['middle']
     state, detail, audience = geometry['tiers']
     labels = geometry['labels']
     measurements = banner_measurements(geometry)
-    assert_row_centre(measurements, fixture)
+    if geometry['wideDetail']:
+        # The row may sit above the centre, never below it; the state takes the mockup's position.
+        assert measurements['row_offset'] <= 2, ('wide-detail row below card centre', fixture, measurements['row_offset'])
+        assert STATE_POSITION[0] <= measurements['state_position'] <= STATE_POSITION[1], (
+            'wide-detail state position', fixture, measurements['state_position'])
+    else:
+        assert_row_centre(measurements, fixture)
+    # The model's cap ink is within a device pixel of paint; allow half of one at 2x.
+    assert NAME_GAP[0] - .01 <= min(measurements['name_gaps']) <= max(measurements['name_gaps']) <= NAME_GAP[1] + .01, (
+        'logo-to-name gap', fixture, measurements['name_gaps'])
+    if measurements['audience_gap'] is not None:
+        assert measurements['audience_gap'] >= geometry['trackGutter'] - .02, (
+            'names run into the audience', fixture, measurements['audience_gap'], geometry['trackGutter'])
     assert measurements['bottom_gap'] + .02 >= measurements['bottom_pad'], (
         'bottom tier clearance', fixture, measurements['bottom_gap'], measurements['bottom_pad'])
     _, row_height, *_ = geometry['tracks']
@@ -677,8 +718,11 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
         assert audience['top'] >= row_top + row_height - 1, ('audience below scores', fixture)
         if geometry['wideScoreDetail']:
             assert audience['top'] >= detail['bottom'] - .02, ('audience below full-width detail', fixture)
+        if geometry['wideAudience']:
+            assert audience['top'] >= max(label['bottom'] for label in labels) - .02, ('audience row below names', fixture)
     # Any wrapped status line is laid out at 100% / floor and drawn at the floor, which rounds.
-    column_tolerance = min(.05, .02 * geometry['rootSize'] / 16)
+    # A full-width status subgrid also snaps its centre track to the parent columns.
+    column_tolerance = min(.05, .02 * geometry['rootSize'] / 16 + .02)
     assert (middle['width'] > 0 and box['left'] <= middle['left'] <= state['left'] + column_tolerance
             and state['right'] <= middle['right'] + column_tolerance and middle['right'] <= box['right']), (
         'state outside middle column', fixture, state, middle, box)
@@ -701,7 +745,8 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
         assert box['top'] <= tier['top'] <= tier['bottom'] <= box['bottom'], (fixture, tier, box)
     for side, index in (('away', 0), ('home', 1)):
         logo = geometry['logoBoxes'][index]
-        assert logo['bottom'] <= labels[index]['top'], ('logo above abbreviation', fixture, side, geometry)
+        # The name margin removes the half-leading, so compare ink: the line box may reach into the row.
+        assert logo['bottom'] <= geometry['labelInk'][index][0], ('logo above abbreviation', fixture, side, geometry)
         if paint.get(f'banner-{side}-score'):
             score = paint[f'banner-{side}-score']
             team = geometry['logoBoxes'][index]
@@ -734,6 +779,13 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
     if measurements['score_gap'] is not None:
         assert measurements['score_gap'] >= gutter - .02, (
             'score-to-middle gap below gutter', fixture, measurements['score_gap'], gutter)
+    if has_detail and geometry['scoreInk']:
+        away, home, tier = paint['banner-away-score'], paint['banner-home-score'], paint['tier-1']
+        if geometry['wideScoreDetail']:
+            detail_gap = geometry['detailInk'][0] - max(ink[1] for ink in geometry['scoreInk'])
+        else:
+            detail_gap = min(tier['left'] - away['right'], home['left'] - tier['right'])
+        assert detail_gap >= gutter - .02, ('score-to-detail gap below gutter', fixture, detail_gap, gutter)
     return measurements
 
 def check_next_up(browser, origin, assets, dest, listing, events, oracle):
@@ -979,9 +1031,10 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
                                                                allow_growth=slug in growth_fixtures, root_text=mode == 'root')
                                 mono = ['tier-1'] if slug == 'matched-widest' and width in (320, 390) and mode != 'normal' else []
                                 assert geometry['monospace'] == mono, ('unexpected monospace', prefix, mode, slug, geometry)
-                                wide = WIDE_DETAIL.get((width, mode), set())
-                                assert slug not in wide or geometry['wide_detail'], (
-                                    'wide detail did not get a full-width track', prefix, mode, slug, geometry)
+                                wide = slug in WIDE_DETAIL.get((width, mode), set())
+                                assert geometry['wide_score_detail'] == wide, ('unexpected wide detail', prefix, mode, slug, geometry)
+                                wide = slug in WIDE_AUDIENCE.get((width, mode), set())
+                                assert geometry['wide_audience'] == wide, ('unexpected wide audience', prefix, mode, slug, geometry)
                                 if slug == 'matched-cjk' and width == 320 and mode == 'root':
                                     assert geometry['detail_lines'] > 1, ('Han detail did not wrap', prefix, geometry)
                                 if width == 1024:
@@ -1059,6 +1112,17 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
 
 
 def screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=False):
+    try:
+        return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
+    except AssertionError as error:
+        # WebKit occasionally serves a frame between a relayout and the image repaint.
+        if error.args[0][0] != 'no screenshot ink':
+            raise
+        line.page.wait_for_timeout(50)
+        return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
+
+
+def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=False):
     """Decode the element's painted pixels on the device grid, including ink outside its line box."""
     page = line.page
     box = line.bounding_box()
@@ -1162,12 +1226,14 @@ def score_ink_clearance(geometry, ink, cell, dpr):
     else:
         detail_gap = min(detail[2] - away[3], home[2] - detail[3])
     assert detail_gap + tolerance >= gutter, ('painted score-to-detail gap below gutter', cell, detail_gap, gutter)
-    # The tight score leading keeps the digits and logos aligned. Descenders
-    # and pixel rounding can carry score ink slightly beyond that line box.
+    # Half-leading centres the font's content area on the line box, and the digits stay inside that area.
+    # With leading below the content height, ink may pass each line-box edge by at most half the difference.
     overhang = max(0, *(max(box['top'] - score[0], score[1] - box['bottom'])
                         for score, box in zip((away, home), geometry['scoreBoxes'])))
-    assert overhang <= 2, ('painted score overhang exceeds 2px', cell, overhang)
-    return dict(state_clearance=state_gap, detail_clearance=detail_gap, score_overhang=overhang)
+    limit = max(0, *((geometry['paint'][f'banner-{side}-score']['height'] - box['height']) / 2
+                     for side, box in zip(('away', 'home'), geometry['scoreBoxes']))) + tolerance
+    assert overhang <= limit, ('painted score ink past the half-leading', cell, overhang, limit)
+    return dict(state_clearance=state_gap, detail_clearance=detail_gap, score_overhang=overhang, overhang_limit=limit)
 
 
 def measure_pixel_card(card, cell, dpr):
@@ -1316,7 +1382,12 @@ def assert_acumin_used(card, digits):
         session.detach()
 
 
-def check_row_centre_paint(browser, engine, origin, widths):
+# Hero digits about 0.77 of the logo (the owner's "a bit bigger" than production's 0.58, under the
+# mockup-relative extremes); listing digits stay where 60c put them. A stacked card may narrow its logo.
+SCORE_LOGO = {'hero': (.74, .81), 'listing': (.74, .80)}
+
+
+def check_row_centre_paint(browser, engine, origin, widths, fixture='halftime', control=True):
     # Use symmetric ink with transparent margins so the paint oracle measures the artwork,
     # independently of any asymmetry in a provider's logo asset.
     logo = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="white"/></svg>'
@@ -1337,7 +1408,9 @@ def check_row_centre_paint(browser, engine, origin, widths):
                     if mode == 'root':
                         page.evaluate("document.documentElement.style.setProperty('font-size', '200%', 'important')")
                     settle_fit(page)
-                    cell = (engine, width, density, scale, mode)
+                    # Larger text can push the card's lower ink past the viewport clip.
+                    card.scroll_into_view_if_needed()
+                    cell = (engine, fixture, width, density, scale, mode)
                     geometry = banner_geometry(card)
                     row = assert_scoreboard_layout(geometry, cell, True)
                     box = geometry['card']
@@ -1345,7 +1418,10 @@ def check_row_centre_paint(browser, engine, origin, widths):
                     logos = [screenshot_ink(img, 4) for img in card.locator('.banner-team img').all()]
                     scores = [screenshot_ink(score, 4, include_horizontal=True)
                               for score in card.locator('.banner-score').all()]
-                    names = [screenshot_ink(name, 4) for name in card.locator('.banner-abbreviation .banner-fit-text').all()]
+                    names = [screenshot_ink(name, 4, include_horizontal=True)
+                             for name in card.locator('.banner-abbreviation .banner-fit-text').all()]
+                    audience = screenshot_ink(card.locator('.banner-status-tier:nth-child(3) .banner-status-line'),
+                                              4, include_horizontal=True)
                     state = screenshot_ink(card.locator('.banner-status-tier:first-child .banner-status-line'),
                                            4, include_horizontal=True)
                     detail = screenshot_ink(card.locator('.banner-status-tier:nth-child(2) .banner-status-line'),
@@ -1361,15 +1437,25 @@ def check_row_centre_paint(browser, engine, origin, widths):
                     state_gap = clearance['state_clearance'] / (state[1] - state[0])
                     name_gaps = [(name[0] - logo[1]) / (logo[1] - logo[0]) for name, logo in zip(names, logos)]
                     ratios = [(score[1] - score[0]) / (logo[1] - logo[0]) for score, logo in zip(scores, logos)]
-                    assert max(map(abs, offsets)) <= 2, ('painted logos off card centre', cell, offsets)
-                    assert .20 <= state_position <= .38, ('painted state position', cell, state_position)
+                    if not geometry['wideDetail']:
+                        assert max(map(abs, offsets)) <= 2, ('painted logos off card centre', cell, offsets)
+                    assert STATE_POSITION[0] <= state_position <= STATE_POSITION[1], ('painted state position', cell, state_position)
                     assert .60 <= state_gap <= 1.20, ('painted state-to-score gap', cell, state_gap)
-                    assert 0 <= min(name_gaps) <= max(name_gaps) <= .30, ('painted logo-to-name gap', cell, name_gaps)
-                    assert min(ratios) >= (.90 if scale == 'hero' else .75), ('painted score-to-logo ratio', cell, ratios)
-                    row.update(engine=engine, viewport=width, density=density, scale=scale,
+                    assert NAME_GAP[0] <= min(name_gaps) <= max(name_gaps) <= NAME_GAP[1], ('painted logo-to-name gap', cell, name_gaps)
+                    low, high = SCORE_LOGO[scale]
+                    assert low <= min(ratios) and (geometry['stacked'] or max(ratios) <= high), (
+                        'painted score-to-logo ratio', cell, ratios)
+                    word_gap = None
+                    if max(audience[0], names[0][0]) < min(audience[1], names[0][1]):
+                        # Abbreviation ink to audience ink, one word gap at least, on whichever side is nearer.
+                        word_gap = min(audience[2] - names[0][3], names[1][2] - audience[3])
+                        assert word_gap + .25 >= geometry['trackGutter'], (
+                            'painted names run into the audience', cell, word_gap, geometry['trackGutter'])
+                    row.update(engine=engine, fixture=fixture, viewport=width, density=density, scale=scale,
                                mode=mode, logo_ink_offsets=offsets, state_position=state_position,
-                               state_gap=state_gap, name_gaps=name_gaps, score_logo_ratios=ratios, **clearance)
-                    if mode == 'normal' and width in (390, 1280):
+                               state_gap=state_gap, name_gaps=name_gaps, score_logo_ratios=ratios,
+                               audience_word_gap=word_gap, **clearance)
+                    if control and mode == 'normal' and width in (390, 1280):
                         control = page.add_style_tag(content="""
                           .banner-lineup { padding-block: var(--banner-pad-bottom) !important }
                           .banner-lineup .banner-status-tier:nth-child(1) { grid-row: 2; padding-block-end: 0 }
@@ -1386,6 +1472,8 @@ def check_row_centre_paint(browser, engine, origin, widths):
                             assert error.args[0][0] == 'score row off card centre', error
                         else:
                             raise AssertionError(('equal padding passed the centre assertion', cell, red))
+                        # The old order puts the tall lower stack under the row, which pulls the row up.
+                        assert red['row_offset'] < -2, ('old order did not pull the row up', cell, red['row_offset'])
                         row['equal_padding_offset'] = red['row_offset']
                         control.evaluate('el => el.remove()')
                     print('Row centre', json.dumps(row), flush=True)
@@ -1458,9 +1546,47 @@ def check_fixture_ink(pw, origin, assets, fixture, centre_rows):
     return results
 
 
+# Full-width tiers, stacking and long words, painted at the widths where they change the layout.
+WIDE_PAINT_FIXTURES = {
+    'widest': ('W' * 24, 148, 152, 'WWWWW', 'WWWWW'),
+    'long-status': ('End of 4th Quarter - OT1', 999, 999, 'WWWWW', 'MMMMM'),
+    'cjk': ('漢' * 24, 999, 999, 'WWWWW', 'WWWWW'),
+    'long-word': ('Wolverhampton Wanderers', 50, 97, 'CSU', 'ARIZ'),
+}
+WIDE_PAINT_WIDTHS = (320, 390, 1280)
+
+
+def check_wide_paint(pw, origin, assets):
+    asset = assets / 'fixtures/streams.json'
+    listing = json.loads(asset.read_text())
+    group = listing['streams'][0]
+    rows = []
+    for fixture, (detail, away_score, home_score, away_abbr, home_abbr) in WIDE_PAINT_FIXTURES.items():
+        now = int(time.time())
+        event = dict(group['streams'][0], id=9000, uri_name='basketball/matched-live',
+                     name='Colorado State Rams at Arizona Wildcats', viewers='62', always_live=0,
+                     starts_at=now - 3600, ends_at=now + 3600,
+                     match=dict(state='in', detail=detail,
+                                away=dict(name='Colorado State Rams', abbreviation=away_abbr, color='#1e4d2b',
+                                          logo='/icon-32.png', score=away_score),
+                                home=dict(name='Arizona Wildcats', abbreviation=home_abbr, color='#cc0033',
+                                          logo='/icon-48.png', score=home_score)))
+        asset.write_text(json.dumps(dict(listing, timestamp=now, streams=[dict(group, streams=[event])])))
+        for engine in ('chromium', 'webkit'):
+            browser = getattr(pw, engine).launch()
+            rows.extend(check_row_centre_paint(browser, engine, origin, WIDE_PAINT_WIDTHS, fixture, control=False))
+            browser.close()
+    asset.write_text(json.dumps(listing))
+    layouts = {(row['fixture'], row['stacked'], row['wide_detail']) for row in rows}
+    assert any(stacked for _, stacked, _ in layouts) and any(wide for *_, wide in layouts), (
+        'wide paint sweep missed stacked or wide-detail cells', layouts)
+    return rows
+
+
 def check_pixel_ink(pw, origin, assets, dest):
     centre_rows = []
     results = [row for fixture in PARITY_FIXTURES for row in check_fixture_ink(pw, origin, assets, fixture, centre_rows)]
+    centre_rows.extend(check_wide_paint(pw, origin, assets))
     (dest / 'row-centre-report.json').write_text(json.dumps(centre_rows, indent=2))
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
     summary = [summarize_parity(results, engine, dpr)
