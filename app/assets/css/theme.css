@@ -541,10 +541,11 @@
   /* Balance the fitted tracks on either side of the score row. */
   --banner-upper-block: calc(1lh + var(--banner-state-gap));
   --banner-lower-block: calc(1lh + var(--banner-name-offset) + var(--banner-track-gap) + var(--banner-track-height));
+  --banner-top-surplus: max(0px, var(--banner-lower-block) - var(--banner-upper-block));
   /* Declared here so the fit pass's drawn logo resolves; lh and cap resolve on the name itself. */
   --banner-name-offset: calc(var(--banner-name-gap) * var(--banner-logo-drawn, var(--banner-logo)) - (1lh - 1cap) / 2);
   padding-block:
-    calc(var(--banner-pad-bottom) + var(--banner-top-surplus, max(0px, var(--banner-lower-block) - var(--banner-upper-block))))
+    calc(var(--banner-pad-bottom) + var(--banner-top-surplus))
     calc(var(--banner-pad-bottom) + max(0px, var(--banner-upper-block) - var(--banner-lower-block)));
   padding-inline: clamp(calc(var(--banner-pad-inline) / 2), calc((100% - var(--banner-lineup-min, 0px)) / 2), var(--banner-pad-inline));
   font-size: var(--banner-status-size);

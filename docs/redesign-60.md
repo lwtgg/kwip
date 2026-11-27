@@ -727,8 +727,10 @@ caps it on narrow screens with large text. The digits are now sized from the
 logo: `--banner-hero-score-per-logo` is 1.15 em per logo px. Digit ink is about
 0.67 em, so the hero ink is 0.76–0.78× the logo on unstacked cards, against
 0.917–0.977 before this round and the owner's "a bit bigger" than production's
-0.58. The listing ratio is unchanged at 0.76–0.79×. A stacked card can still narrow
-its logo to the text size, so stacked cells are bounded below only.
+0.58. The listing ratio is unchanged at 0.76–0.79×. Stacking accommodates enlarged
+text at narrow widths. The layout can narrow the logo to make room for the text
+while the digits grow. Both stacked scales allow score ink up to 1.25× the drawn
+logo and keep their usual lower bounds.
 
 The 1280 px hero plate is 243 px tall for a plain hero, and 303 px with a
 creative line above it: 359 px at `06566fd` and 220 px at `f3918fc`, before the
@@ -759,7 +761,7 @@ trims that top padding (`--banner-top-surplus`). It stops when the state ink
 centre sits at `--banner-state-position` (0.28 of the card height above centre,
 the mockup's value) or when the padding is gone. The state keeps its gap to the
 row. The row then sits at or above the card centre. On these cards the layout
-test asserts that, instead of the ±2 px row centre, together with the state band.
+test asserts that, together with a state band of 0.26–0.30 of the card height.
 The trim is computed in one step for a card at its content height. A card
 stretched by its grid row gets one measured correction step.
 
@@ -791,7 +793,7 @@ unchanged.
 - The score overhang limit is derived. Half-leading centres the font's content
   area on the line box, and the digits stay inside it, so the ink can pass each
   edge by at most half of (content height − line box), plus a device pixel.
-  This replaces the 2 px tripwire.
+  The empirical 2 px cap keeps this check sensitive to excess digit overhang.
 - The mockup score-centre band still runs only for Halftime and long-status. The
   three-digit and five-letter fixtures widen the middle column. Every other
   scored wide listing is held by the stronger gutter-anchor check (|gap − gutter| ≤ 1).

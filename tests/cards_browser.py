@@ -677,6 +677,7 @@ def assert_row_centre(measurements, fixture):
 # State ink centre above the card centre, as a fraction of card height. Ordinary cards centre the row;
 # full-width tiers trim the band above the state instead, to --banner-state-position.
 STATE_POSITION = (.20, .38)
+WIDE_STATE_POSITION = (.26, .30)
 # Logo-to-name ink gap as a fraction of the drawn logo (the mockup measures 0.12-0.18).
 NAME_GAP = (.12, .22)
 
@@ -690,7 +691,7 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
     if geometry['wideDetail']:
         # The row may sit above the centre, never below it; the state takes the mockup's position.
         assert measurements['row_offset'] <= 2, ('wide-detail row below card centre', fixture, measurements['row_offset'])
-        assert STATE_POSITION[0] <= measurements['state_position'] <= STATE_POSITION[1], (
+        assert WIDE_STATE_POSITION[0] <= measurements['state_position'] <= WIDE_STATE_POSITION[1], (
             'wide-detail state position', fixture, measurements['state_position'])
     else:
         assert_row_centre(measurements, fixture)
@@ -1230,9 +1231,11 @@ def score_ink_clearance(geometry, ink, cell, dpr):
     # With leading below the content height, ink may pass each line-box edge by at most half the difference.
     overhang = max(0, *(max(box['top'] - score[0], score[1] - box['bottom'])
                         for score, box in zip((away, home), geometry['scoreBoxes'])))
-    limit = max(0, *((geometry['paint'][f'banner-{side}-score']['height'] - box['height']) / 2
-                     for side, box in zip(('away', 'home'), geometry['scoreBoxes']))) + tolerance
-    assert overhang <= limit, ('painted score ink past the half-leading', cell, overhang, limit)
+    half_leading = max(0, *((geometry['paint'][f'banner-{side}-score']['height'] - box['height']) / 2
+                            for side, box in zip(('away', 'home'), geometry['scoreBoxes'])))
+    # Cap the theoretical allowance at the empirical limit for painted digits.
+    limit = min(half_leading + tolerance, 2)
+    assert overhang <= limit, ('painted score ink past the overhang limit', cell, overhang, limit)
     return dict(state_clearance=state_gap, detail_clearance=detail_gap, score_overhang=overhang, overhang_limit=limit)
 
 
@@ -1384,7 +1387,8 @@ def assert_acumin_used(card, digits):
 
 # Hero digits about 0.77 of the logo (the owner's "a bit bigger" than production's 0.58, under the
 # mockup-relative extremes); listing digits stay where 60c put them. A stacked card may narrow its logo.
-SCORE_LOGO = {'hero': (.74, .81), 'listing': (.74, .80)}
+SCORE_LOGO = {'hero': (.75, .80), 'listing': (.74, .80)}
+STACKED_SCORE_LOGO_MAX = 1.25
 
 
 def check_row_centre_paint(browser, engine, origin, widths, fixture='halftime', control=True):
@@ -1439,11 +1443,14 @@ def check_row_centre_paint(browser, engine, origin, widths, fixture='halftime', 
                     ratios = [(score[1] - score[0]) / (logo[1] - logo[0]) for score, logo in zip(scores, logos)]
                     if not geometry['wideDetail']:
                         assert max(map(abs, offsets)) <= 2, ('painted logos off card centre', cell, offsets)
-                    assert STATE_POSITION[0] <= state_position <= STATE_POSITION[1], ('painted state position', cell, state_position)
+                    state_low, state_high = WIDE_STATE_POSITION if geometry['wideDetail'] else STATE_POSITION
+                    assert state_low <= state_position <= state_high, ('painted state position', cell, state_position)
                     assert .60 <= state_gap <= 1.20, ('painted state-to-score gap', cell, state_gap)
                     assert NAME_GAP[0] <= min(name_gaps) <= max(name_gaps) <= NAME_GAP[1], ('painted logo-to-name gap', cell, name_gaps)
                     low, high = SCORE_LOGO[scale]
-                    assert low <= min(ratios) and (geometry['stacked'] or max(ratios) <= high), (
+                    if geometry['stacked']:
+                        high = STACKED_SCORE_LOGO_MAX
+                    assert low <= min(ratios) <= max(ratios) <= high, (
                         'painted score-to-logo ratio', cell, ratios)
                     word_gap = None
                     if max(audience[0], names[0][0]) < min(audience[1], names[0][1]):
