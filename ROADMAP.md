@@ -199,6 +199,15 @@ forever with a stuck "Upcoming" pill; the opening alarm ignores `document.hidden
 `visibilitychange`; the retry test passes regardless of `retry()`'s branch; the server picks a related category by
 containment while the client matches `category_name` slugs.
 
+**Recorded 2026-11-27, upstream.** `ppv.cx` stopped resolving: `api.ppv.cx` and the apex both answer NXDOMAIN at
+Cloudflare DoH and `1.1.1.1`'s records are stale cache, and the IPs Cloudflare still hands back abort the TLS
+handshake with alert 40 for SNI `api.ppv.cx` (both 104.21.69.111 and 172.67.207.188, while `kwip.fyi` on the same
+IP is a clean 200). A manual `publish:feed --bucket kwip-feed-prod` fails with `fetch failed` after one provider
+request. Production keeps serving the last snapshot and, correctly, marks it: the freshness notice and
+"Unconfirmed · Last listed" on every card. So an end-to-end proof that a live digit moves on a publish boundary is
+blocked on their DNS, not on us. Separately, the stale notice reads "more than 20 minutes ago" while the cut is
+ten — copy bug, fix with the padded-logo round.
+
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting
 high (4 px above vs 8 px under; 23.6 vs 35.6 on the 1280 hero). Two reviews refuted the first diagnosis — Acumin's
