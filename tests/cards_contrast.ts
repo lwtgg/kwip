@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { bannerColor, bannerScrim, mixBannerColor } from '../app/composables/matchBanner.ts'
-import { tintField, fieldContrast, hexRGB } from '../app/composables/cardTint.ts'
+import { tintField, fieldContrast, hexRGB, type RGB } from '../app/composables/cardTint.ts'
 
 const css = readFileSync(new URL('../app/assets/css/theme.css', import.meta.url), 'utf8')
 const listing = JSON.parse(readFileSync(process.argv[3] ?? new URL('../public/fixtures/streams.json', import.meta.url), 'utf8'))
@@ -44,7 +44,7 @@ const banners = (['dark', 'light'] as const).flatMap(theme => (['listing', 'hero
       ? mixBannerColor(color, base, Number(token('banner-unplayed-alpha')))
       : bannerColor(color, base))
     const scrim = bannerScrim(pair, Number(token('card-text-contrast')) + Number(token('banner-contrast-headroom')))
-    const rgb = pair.map(color => hexRGB(color)!.map(channel => channel * (1 - scrim)))
+    const rgb = pair.map(color => hexRGB(color)!.map(channel => channel * (1 - scrim)) as RGB)
     const contrast = fieldContrast(rgb[0]!, rgb[1]!, hexRGB(token('banner-white'))!)
     assert.ok(contrast >= 4.5, JSON.stringify({ theme, scale, state, pair, contrast }))
     return { theme, scale, state, seeds, pair, scrim, contrast }
@@ -56,7 +56,7 @@ if (process.argv[2]) writeFileSync(process.argv[2], JSON.stringify(report, null,
 console.log(JSON.stringify(results.map(({ theme, scale, minimum }) => ({ theme, scale, minimum })), null, 2))
 
 if (process.argv[4]) {
-  const rendered = JSON.parse(readFileSync(process.argv[4], 'utf8'))
+  const rendered = JSON.parse(readFileSync(process.argv[4], 'utf8')) as { contrast: number }[]
   assert.ok(rendered.length > 0)
   for (const banner of rendered) assert.ok(banner.contrast >= 4.5, JSON.stringify(banner))
   console.log('Rendered banner minimum', Math.min(...rendered.map(banner => banner.contrast)))

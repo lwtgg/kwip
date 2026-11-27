@@ -41,19 +41,19 @@ test('successful status confirms liveness and unavailable status stays unknown',
   const urls = ['1080p', '720p', '720p-alt', '540p'].map(variant => `https://strmfree.st/embed/hou-mia${variant}`)
   const payload = { streams: [{
     ...stream,
-    iframe: urls[0] + '#player',
+    iframe: urls[0]! + '#player',
     additional_sources: urls.slice(1).map(url => ({ url })),
   }] }
-  const cases = [
+  const cases: { entries?: any; liveUrls: string[]; status?: number; invalidJson?: boolean }[] = [
     { entries: [
-      { url: urls[0], live: false },
+      { url: urls[0]!, live: false },
       { url: 'https://strmfree.pk/embed/basketball/hou-mia720p?autoplay=1#player', live: true },
-      { url: urls[3], live: 'true' },
+      { url: urls[3]!, live: 'true' },
       { live: true },
-    ], liveUrls: [urls[1]] },
-    { entries: [{ url: urls[0], live: true }], liveUrls: [urls[0] + '#player'] },
+    ], liveUrls: [urls[1]!] },
+    { entries: [{ url: urls[0]!, live: true }], liveUrls: [urls[0]! + '#player'] },
     { entries: [], liveUrls: [] },
-    { entries: [{ url: urls[1], live: true }], status: 503, liveUrls: [] },
+    { entries: [{ url: urls[1]!, live: true }], status: 503, liveUrls: [] },
     { entries: {}, liveUrls: [] },
     { invalidJson: true, liveUrls: [] },
     { entries: null, liveUrls: [] },

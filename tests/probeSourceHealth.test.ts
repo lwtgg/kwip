@@ -57,7 +57,7 @@ const _0x = ${JSON.stringify({ [name]: { _t: 'test', _e: 1 } })};
 
   const names = ['markers', 'missing', 'invalid', 'frozen', 'advancing', 'bad-second']
   const results = await Promise.all(names.map(name => probeSource(embed(name))))
-  assert.deepEqual(results.map(result => [result?.embedOk, result?.manifestOk, result?.sequence, result?.error]), [
+  assert.deepEqual(results.map(result => [result?.embedOk, result?.manifestOk, result?.sequence, (result as any)?.error]), [
     [false, false, 'unknown', 'embed-markers'],
     [false, false, 'unknown', 'embed-404'],
     [true, false, 'unknown', 'manifest-invalid'],

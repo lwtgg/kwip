@@ -4,14 +4,14 @@ import { enrichScoreboards, normalizeTeam, leaguePaths } from '../scripts/scoreb
 
 const date = '2026-11-24T20:00:00Z'
 const start = Date.parse(date) / 1000
-const item = (extra = {}) => ({ name: 'Away FC vs. Home FC', tag: 'Premier League', always_live: 0, starts_at: start, ...extra })
-const competitor = (homeAway, name, extra = {}) => ({ homeAway, score: '12', team: {
+const item = (extra: any = {}): any => ({ name: 'Away FC vs. Home FC', tag: 'Premier League', always_live: 0, starts_at: start, ...extra })
+const competitor = (homeAway: any, name: any, extra: any = {}) => ({ homeAway, score: '12', team: {
   displayName: name, abbreviation: name?.slice(0, 3) ?? '', color: 'ABC123', logo: 'https://a.espncdn.com/logo.png', ...extra,
 } })
-const competition = (extra = {}) => ({ date, competitors: [competitor('home', 'Home FC'), competitor('away', 'Away FC')],
+const competition = (extra: any = {}): any => ({ date, competitors: [competitor('home', 'Home FC'), competitor('away', 'Away FC')],
   status: { type: { state: 'in', description: 'In Progress' }, period: 3, displayClock: '7:42' }, ...extra })
 const response = (competitions = [competition()]) => new Response(JSON.stringify({ events: [{ id: '1', competitions }] }))
-const run = (items, fetcher = async () => response(), extra = {}) => enrichScoreboards(items, { fetcher, ...extra })
+const run = (items: any[], fetcher: any = async () => response(), extra: any = {}) => enrichScoreboards(items, { fetcher, ...extra })
 
 test('normalization strips diacritics, punctuation, spaces and soccer club affixes only', () => {
   assert.equal(normalizeTeam('  AFC São-Paulo FC ', true), 'sao paulo')
@@ -71,7 +71,7 @@ test('404, malformed JSON and network errors leave items untouched and continue 
   for (const failure of [() => new Response('', { status: 404 }), () => new Response('{'), () => { throw Error('offline') }]) {
     const events = [item(), item({ tag: 'NBA' })]
     const before = structuredClone(events[0])
-    const summary = await run(events, async url => url.includes('/soccer/') ? failure() : response())
+    const summary = await run(events, async (url: string) => url.includes('/soccer/') ? failure() : response())
     assert.deepEqual(events[0], before)
     assert.equal(summary.requests, 2)
     assert.equal(summary.matched, 1)
@@ -82,8 +82,8 @@ test('one request per eligible league, no channels or unsupported sports; at mos
   const events = Object.keys(leaguePaths).flatMap(tag => [item({ tag }), item({ tag })])
   events.push(item({ always_live: 1 }), item({ tag: 'Cricket' }), item({ name: 'Channel' }))
   let active = 0, peak = 0
-  const urls = []
-  const summary = await run(events, async url => {
+  const urls: string[] = []
+  const summary = await run(events, async (url: string) => {
     urls.push(url); active++; peak = Math.max(peak, active)
     await new Promise(resolve => setTimeout(resolve, 2))
     active--; return response([])
@@ -95,7 +95,7 @@ test('one request per eligible league, no channels or unsupported sports; at mos
 
 test('expired budget makes no requests; slow league aborts without failing enrichment', async () => {
   assert.equal((await run([item()], () => { throw Error('must not fetch') }, { deadline: performance.now() - 1 })).requests, 0)
-  const summary = await run([item()], async (_url, { signal }) => new Promise((_resolve, reject) => {
+  const summary = await run([item()], async (_url: string, { signal }: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
     const timer = setTimeout(() => reject(Error('test guard')), 100)
     signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason) })
   }), { deadline: performance.now() + 10 })

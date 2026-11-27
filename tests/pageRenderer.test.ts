@@ -45,7 +45,8 @@ const hooks: {
   'render:before'?: (input: { event: H3Event }) => void
   beforeResponse?: (event: H3Event, response: { body: unknown }) => Promise<void>
 } = {}
-cachePlugin({ hooks: { hook: <K extends keyof typeof hooks>(name: K, fn: (typeof hooks)[K]) => { hooks[name] = fn } } })
+const hook = ((name: string, fn: (typeof hooks)[keyof typeof hooks]) => { (hooks as Record<string, unknown>)[name] = fn }) as any
+cachePlugin({ hooks: { hook } } as unknown as Parameters<typeof cachePlugin>[0])
 
 const vods = JSON.stringify({ success: true, vods: [] })
 const streams = JSON.stringify({ success: true, streams: [] })
@@ -64,7 +65,11 @@ const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 
 function setup(
   context: TestContext,
-  { lateCache = false, pendingMatch }: { lateCache?: boolean; pendingMatch?: Promise<Response> } = {},
+  { lateCache = false, pendingMatch, seed = { name: 'Bundled replay' } }: {
+    lateCache?: boolean
+    pendingMatch?: Promise<Response>
+    seed?: object
+  } = {},
 ) {
   context.mock.timers.enable({ apis: ['setTimeout'] })
   let now = Date.parse(stamp)
@@ -91,8 +96,8 @@ function setup(
       put,
     } },
   })
-  context.after(() => { delete globalThis.caches })
-  const assets = context.mock.fn(async () => Response.json({ success: true, data: { name: 'Bundled replay' } }))
+  context.after(() => { delete (globalThis as { caches?: unknown }).caches })
+  const assets = context.mock.fn(async () => Response.json({ success: true, data: seed }))
   const generation = (event: H3Event) => getFeedGeneration(event, config.feedSnapshotBinding, config.public, new URL('https://kwip.fyi' + event.path))
   async function run(path: string, render: (event: H3Event) => unknown) {
     const req = new IncomingMessage(new Socket())
@@ -154,7 +159,7 @@ for (const fallback of ['cache', 'seed', '503', 'authoritative omission'] as con
       renderEvent = event
       if (fallback === '503') await generation(event)
       if (fallback === 'seed' || fallback === 'cache') {
-        event.context[Symbol.for('kwip.feedGeneration')] = stalled
+        (event.context as any)[Symbol.for('kwip.feedGeneration')] = stalled
       }
       return stalled
     })
@@ -205,6 +210,33 @@ for (const fallback of ['cache', 'seed', '503', 'authoritative omission'] as con
     assert.equal(put.mock.callCount(), 0)
   })
 }
+
+test('a seed timeout fallback takes the away-first match order', async context => {
+  const { run, advance, moveClock } = setup(context, {
+    seed: {
+      name: 'Juventus vs. Omonia Nicosia',
+      match: { away: { name: 'Omonia Nicosia' }, home: { name: 'Juventus' } },
+    },
+  })
+  let resolveRender!: (value: string) => void
+  const render = new Promise<string>(resolve => { resolveRender = resolve })
+  const pending = run('/vods/replay', () => render)
+  await tick()
+  advance(250)
+  await tick()
+  advance(200)
+  await tick()
+  advance(7_000)
+  await tick()
+  moveClock(650)
+  resolveRender('late success')
+  const { body } = await pending
+  assert.ok(body instanceof Response)
+  assert.equal(body.status, 200)
+  const html = await body.text()
+  assert.match(html, /<title>Omonia Nicosia vs\. Juventus<\/title>/)
+  assert.match(html, /<h1>Omonia Nicosia vs\. Juventus<\/h1>/)
+})
 
 test('Nuxt payload requests bypass page logging', async context => {
   const { run, logs } = setup(context)

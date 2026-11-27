@@ -8,6 +8,7 @@ import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
 import { playerShieldSandbox, sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
+import { matchBannerContent } from '~/composables/matchBanner'
 import { slugifyCategory } from '~/utils/supplementMatch'
 import { formatViewersExact } from '~/utils/viewers'
 import { canClickUnder, isClickUnderEligible, openClickUnder } from '~/utils/clickUnder'
@@ -80,9 +81,17 @@ function humanizeUri(uri: string): string {
 }
 
 // Review #11: every state (loading, error, empty, content) renders the page `h1`.
-const pageHeading = computed(
-  () => detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value),
-)
+const pageHeading = computed(() => {
+  const match = detail.value?.match ?? matchingListItem.value?.match
+  return match
+    ? `${match.away.name} vs. ${match.home.name}`
+    : detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value)
+})
+
+const heroMatchContent = computed(() => {
+  const event = detail.value
+  if (event?.match) return matchBannerContent(event.match, event.viewers, 'viewers', isStale.value)
+})
 
 type SupplementState =
   | { status: 'idle' | 'loading' | 'none' | 'error' }
@@ -577,7 +586,7 @@ const canonicalPageUrl = computed(() => `https://${canonicalHost}/live/${uriName
 const seoTitle = computed(() => pageHeading.value)
 const seoDescription = computed(() =>
   detail.value
-    ? `Watch ${detail.value.name} (${detail.value.category_name}) via available player sources on ${siteName}.`
+    ? `Watch ${pageHeading.value} (${detail.value.category_name}) via available player sources on ${siteName}.`
     : `Live sports event player page on ${siteName}.`,
 )
 
@@ -609,7 +618,7 @@ const sportsEventJsonLd = computed(() => {
   const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'SportsEvent',
-    name: d.name,
+    name: pageHeading.value,
     url: canonicalPageUrl.value,
     eventAttendanceMode: 'https://schema.org/OnlineEventAttendanceMode',
     eventStatus: 'https://schema.org/EventScheduled',
@@ -627,7 +636,9 @@ const sportsEventJsonLd = computed(() => {
   if (!is24x7 && d.ends_at > 0) {
     ld.endDate = new Date(d.ends_at * 1000).toISOString()
   }
-  const competitors = parseMatchupCompetitors(d.name)
+  const competitors = d.match
+    ? [d.match.away, d.match.home].map(side => ({ '@type': 'SportsTeam', name: side.name }))
+    : parseMatchupCompetitors(d.name)
   if (competitors.length > 0) {
     ld.competitor = competitors
   }
@@ -762,6 +773,7 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             :always-live="detail.always_live"
             :now="nowSeconds"
             :stale="isStale"
+            :match-state="detail.match?.state"
           />
           <NuxtLink
             v-if="categorySlug"
@@ -771,10 +783,14 @@ watch([uriName, () => route.query.source, sources, mounted, supplement], ([uri, 
             {{ detail.category_name }}
           </NuxtLink>
           <span v-if="detail.tag">· {{ detail.tag }}</span>
-          <span class="listing-numeric">· {{ formatViewersExact(detail.viewers) }} viewers</span>
+          <span v-if="!heroMatchContent" class="listing-numeric">· {{ formatViewersExact(detail.viewers) }} viewers</span>
+        </div>
+        <div v-if="detail && heroMatchContent" class="rounded-row">
+          <span class="sr-only">{{ heroMatchContent.label }}</span>
+          <MatchBanner :stream="detail" :now="nowSeconds" :stale="isStale" scale="hero" :content="heroMatchContent" />
         </div>
         <LiveProgress
-          v-if="detail && !isStale"
+          v-else-if="detail && !isStale"
           :starts-at="detail.starts_at"
           :ends-at="detail.ends_at"
           :always-live="detail.always_live"

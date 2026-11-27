@@ -60,7 +60,7 @@ test('normalizes zlive URLs before ranking and framing', () => {
     ['https://zlive.st/embed/TSN4/', 'https://zlive.st/embed/TSN4'],
     ['https://user:secret@zlive.st/embed/TSN4', 'https://zlive.st/embed/TSN4'],
   ]
-  for (const [source, expected] of candidates) {
+  for (const [source = '', expected = ''] of candidates) {
     const event = { ...popular, viewers: '62', iframe: source }
     assert.equal(isZliveEmbed(source), true)
     assert.equal(resolveHeroEmbed(event), expected)

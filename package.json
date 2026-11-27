@@ -9,6 +9,9 @@
     "preview": "wrangler dev .output/server/index.mjs --assets .output/public",
     "deploy": "pnpm snapshot && pnpm build && wrangler deploy",
     "test": "node --test tests/*.test.ts",
+    "typecheck": "nuxt typecheck",
+    "lint": "oxlint app server scripts tests worker-cron",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && wrangler deploy --dry-run --outdir /tmp/kwip-dry",
     "postinstall": "nuxt prepare",
     "publish:feed": "node scripts/collect-publish-feed.mjs",
     "snapshot": "node scripts/snapshot-feed.mjs"
@@ -18,9 +21,12 @@
     "vue": "^3.5.40",
     "vue-router": "^5.2.0"
   },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.3.5",
+  "devDependencies": {    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^26.6.11",
+    "oxlint": "^1.95.0",
     "tailwindcss": "^4.3.5",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.14",
     "wrangler": "^4.163.0"
   }
 }

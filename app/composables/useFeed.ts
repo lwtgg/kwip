@@ -145,6 +145,11 @@ export interface FeedVodDetailResponse {
 }
 
 const FEED_CACHE_WINDOW_MS = 60_000
+/** A detail page opened this long before kickoff starts polling for its own match (rule 30). */
+const DETAIL_POLL_MARGIN_SECONDS = 120
+
+/** `true` polls now; `{ resumeAt }` (seconds) wakes once at that instant; `false` stops. */
+type FeedPoll = boolean | { resumeAt: number }
 
 function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
   const nuxtApp = useNuxtApp()
@@ -164,15 +169,18 @@ function useSixtySecondCacheKey(prefix: MaybeRefOrGetter<string>) {
 function useFeedEndpoint<T extends { success: boolean }>(
   keyPrefix: MaybeRefOrGetter<string>,
   resolveEndpoint: () => FeedEndpoint,
+  hasLiveMatch?: (payload: T | undefined) => FeedPoll,
 ) {
   const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
-  const fetcher = useRequestFetch()
+  // `useRequestFetch()` narrows to an event-bound variant during SSR; the feed
+  // helpers only pass a URL and options, which both call signatures accept.
+  const fetcher = useRequestFetch() as unknown as typeof $fetch
   const requestUrl = useRequestURL()
   const event = import.meta.server ? useRequestEvent() : undefined
   const now = import.meta.server ? useState('feed-initial-now', () => Math.floor(Date.now() / 1000)) : undefined
   const cacheKey = useSixtySecondCacheKey(keyPrefix)
-  const browserRefresh = import.meta.client
+  const crossOrigin = import.meta.client
     && isCrossOriginFeed(config.public.feedBase, requestUrl, resolveEndpoint())
   const feed = useAsyncData<T & FeedProvenance>(
     cacheKey,
@@ -185,7 +193,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
       const serverError = import.meta.client ? nuxtApp.payload._errors[key] : undefined
       if (isSnapshotOmitted(serverError)) throw serverError
       try {
-        if (browserRefresh) {
+        if (crossOrigin) {
           return await fetchBrowserFeed<T>(fetcher, config.public, requestUrl, endpoint)
         }
         const generation = import.meta.server && endpoint.kind !== 'ping'
@@ -212,7 +220,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
       } catch (error) {
         if (signal.aborted || key !== cacheKey.value || isSnapshotOmitted(error)) throw error
         if (previous) return { ...previous, fromCache: true }
-        if (browserRefresh && endpoint.kind !== 'ping') {
+        if (crossOrigin && endpoint.kind !== 'ping') {
           return fetchFeedSnapshot<T>(fetcher, requestUrl, endpoint, requestUrl.host).catch(() => {
             throw error
           })
@@ -230,13 +238,43 @@ function useFeedEndpoint<T extends { success: boolean }>(
     },
   )
 
-  if (browserRefresh && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
+  if (crossOrigin && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
     // Keep the SSR payload in place until Nuxt has finished hydrating.
     onNuxtReady(() => {
-      if (!isSnapshotOmitted(feed.error.value) && (!feed.data.value || feed.data.value.fromCache)) {
+      if (!isSnapshotOmitted(feed.error.value) && (!feed.data.value || ('fromCache' in feed.data.value && feed.data.value.fromCache))) {
         void feed.refresh({ dedupe: 'defer' })
       }
     })
+  }
+
+  if (import.meta.client && hasLiveMatch) {
+    let timer: ReturnType<typeof setInterval> | undefined
+    let alarm: ReturnType<typeof setTimeout> | undefined
+    const stopPolling = () => {
+      clearInterval(timer)
+      clearTimeout(alarm)
+      timer = undefined
+      alarm = undefined
+    }
+    const startPolling = () => {
+      timer = setInterval(() => {
+        if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
+      }, FEED_CACHE_WINDOW_MS)
+    }
+    const schedule = (poll: FeedPoll | undefined) => {
+      stopPolling()
+      if (!poll) return
+      if (poll === true) return startPolling()
+      alarm = setTimeout(() => {
+        alarm = undefined
+        void feed.refresh({ dedupe: 'defer' })
+        startPolling()
+      }, Math.min(Math.max(0, poll.resumeAt * 1000 - Date.now()), 2_147_483_647))
+    }
+    onMounted(() => {
+      watch(() => hasLiveMatch(feed.data.value as T | undefined), schedule, { immediate: true })
+    })
+    onScopeDispose(stopPolling)
   }
 
   return feed
@@ -257,8 +295,14 @@ export function usePing() {
   return useFeedEndpoint<FeedPingResponse>('feed:ping', () => ({ kind: 'ping' }))
 }
 
-export function useStreams() {
-  return useFeedEndpoint<FeedStreamsResponse>('feed:streams', () => ({ kind: 'streams' }))
+export function useStreams(pollLive = true) {
+  return useFeedEndpoint<FeedStreamsResponse>(
+    'feed:streams',
+    () => ({ kind: 'streams' }),
+    pollLive ? payload => !!payload?.streams.some(category =>
+      category.streams.some(stream => stream.match?.state === 'in'),
+    ) : undefined,
+  )
 }
 
 type RawStreamDetail = Omit<FeedStreamDetail,
@@ -287,6 +331,16 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
   const feed = useFeedEndpoint<{ success: true; data: RawStreamDetail }>(
     () => `feed:stream:${toValue(uriName)}`,
     () => ({ kind: 'stream', uriName: toValue(uriName) }),
+    (payload): FeedPoll => {
+      const item = payload?.data
+      if (!item || (item.uri_name ?? item.uri) !== toValue(uriName)) return false
+      if (item.match?.state === 'in') return true
+      if (item.match?.state !== 'pre') return false
+      const start = Number(item.starts_at ?? item.start_timestamp)
+      if (!Number.isFinite(start) || start <= 0) return false
+      const opensAt = start - DETAIL_POLL_MARGIN_SECONDS
+      return Math.floor(Date.now() / 1000) >= opensAt ? true : { resumeAt: opensAt }
+    },
   )
   let adopted: { uri: string; id: string; generation: string } | undefined
   const publishedDetail = shallowRef<{

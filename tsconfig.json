@@ -1,4 +1,12 @@
 {
   // https://nuxt.com/docs/guide/concepts/typescript
-  "extends": "./.nuxt/tsconfig.json"
+  "extends": "./.nuxt/tsconfig.json",
+  "compilerOptions": {
+    // Tests and scripts import with explicit .ts extensions (node --test).
+    "allowImportingTsExtensions": true,
+    // .nuxt/tsconfig.json pins types to [] which hides node:test / node:fs from tests.
+    "types": ["node"]
+  },
+  // public/fixtures/replay-*.ts are MPEG-TS segments, not TypeScript sources
+  "exclude": ["dist", ".data", "node_modules", ".output", "public/fixtures/**"]
 }

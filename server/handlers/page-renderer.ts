@@ -49,13 +49,21 @@ export default defineEventHandler(async event => {
 
         const endpoint: FeedEndpoint = collection === 'streams' ? { kind: 'stream', uriName: uri } : { kind: 'vod', slug: uri }
         const assets = getFeedAssets(event)
-        const seed = await fetchFeedSnapshot<{ success: true; data?: { name?: string } }>(
+        const seed = await fetchFeedSnapshot<{
+          success: true
+          data?: { name?: string; match?: { away?: { name?: string }; home?: { name?: string } } }
+        }>(
           // The node-server preset serves the seed via its local asset handler.
-          assets ? $fetch : (input, options) => event.$fetch(new URL(String(input)).pathname, options),
+          assets ? $fetch : ((input, options) => event.$fetch(new URL(String(input)).pathname, options)) as typeof $fetch,
           url, endpoint, url.host, assets,
         )
-        if (typeof seed.data?.name === 'string' && seed.data.name) {
-          return fallbackDocument(canonical, seed.data.name, 'Saved event details are available. The full page took too long to load.')
+        const away = seed.data?.match?.away?.name
+        const home = seed.data?.match?.home?.name
+        const heading = typeof away === 'string' && typeof home === 'string'
+          ? `${away} vs. ${home}`
+          : seed.data?.name
+        if (typeof heading === 'string' && heading) {
+          return fallbackDocument(canonical, heading, 'Saved event details are available. The full page took too long to load.')
         }
       },
       seed => {
