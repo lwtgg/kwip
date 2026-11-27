@@ -1586,7 +1586,7 @@ def check_wide_paint(pw, origin, assets):
                                           logo='/icon-32.png', score=away_score),
                                 home=dict(name='Arizona Wildcats', abbreviation=home_abbr, color='#cc0033',
                                           logo='/icon-48.png', score=home_score)))
-        asset.write_text(json.dumps(dict(listing, timestamp=now, streams=[dict(group, streams=[event])])))
+        asset.write_text(json.dumps(dict(listing, timestamp=now + FRESH_TIMESTAMP_OFFSET, streams=[dict(group, streams=[event])])))
         for engine in ('chromium', 'webkit'):
             browser = getattr(pw, engine).launch()
             rows.extend(check_row_centre_paint(browser, engine, origin, WIDE_PAINT_WIDTHS, fixture, control=False))
