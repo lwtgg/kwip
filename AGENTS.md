@@ -37,4 +37,5 @@ Two or more rows apply: read all of them. Say which you read at the top of your 
 - Tokens live in `app/assets/css/theme.css`; no magic colours, radii or spacing values in components.
 - Every page keeps a canonical link and an absolute `og:url` on the canonical host; mirrors are never linked internally.
 - `pnpm build`, `pnpm test` and `wrangler deploy --dry-run` must pass before a task is called done, and the reply must say what was actually checked.
+- A review verdict cites the CI run URL or its uploaded `verify-log` artifact for the commit it graded. No artifact, no merge: "the gate passed" without one is a claim, not a gate.
 - Never run `wrangler dev` while a build is writing `.output/`.
