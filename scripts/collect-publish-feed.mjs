@@ -157,7 +157,7 @@ async function collectFeed(base, directory, current, result, deadline, fixture) 
   for (const collection of ['streams', 'vods']) {
     const { payload } = await read(collection)
     if (collection === 'streams') streamListing = { payload, entry: entries.at(-1) }
-    const { timestamp, performance, ...content } = payload
+    const { timestamp: _timestamp, performance: _performance, ...content } = payload
     hashes[collection] = sha256(canonical(content))
     if (!Array.isArray(payload[collection])) throw new Error(`Invalid ${collection} list`)
     const count = details.size

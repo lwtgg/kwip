@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import { createSnapshotReader, type SnapshotBucket } from '../server/utils/snapshot.ts'
 import { FEED_DEADLINES_MS, fetchFeed, getFeedCacheIdentity, getFeedFallback, getFeedGeneration, readFeedGeneration } from '../server/utils/feed.ts'
 
@@ -102,27 +102,27 @@ test('reads optional health only for the selected generation', async () => {
 
 test('request consumers share the whole batch and keep origin and cache provenance', async () => {
   const { bucket, calls } = fixture()
-  const event = { context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } }
+  const event = { context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } } as never
   const read = () => getFeedGeneration(event, 'FEED_SNAPSHOTS', {
     feedBase: 'https://upstream.example', feedMirrorBase: '', canonicalHost: requestUrl.host,
   }, requestUrl)
   assert.equal(read(), read())
-  const generation = await read()
-  assert.equal(generation.get(endpoints[0]).timestamp, 123)
+  const generation = (await read())!
+  assert.equal(generation.get(endpoints[0])!.timestamp, 123)
   assert.equal(generation.get({ kind: 'vods' }), undefined)
   assert.equal(calls.length, 3)
-  assert.deepEqual(generation.get(endpoints[0]).streams[0].streams[0], {
+  assert.deepEqual(generation.get(endpoints[0])!.streams[0].streams[0], {
     id: 1, uri_name: 'sport/example', name: 'Example', hero_embed: 'https://example.com/player',
   })
-  assert.equal(generation.get(endpoints[1]).fromCache, true)
-  assert.equal(generation.get(endpoints[1]).data.sources[0].data, 'https://example.com/?host=kwip.fyi')
+  assert.equal(generation.get(endpoints[1])!.fromCache, true)
+  assert.equal(generation.get(endpoints[1])!.data.sources[0].data, 'https://example.com/?host=kwip.fyi')
   assert.equal(calls.filter(key => key === 'current.json').length, 1)
 })
 
 test('an invalid optional hero embed leaves the generation readable', async () => {
   const streams = structuredClone(channels)
-  Object.assign(streams.streams[0].streams[0], { hero_embed: 'javascript:alert(1)' })
-  Object.assign(streams.streams[0].streams[1], { hero_embed: 42 })
+  Object.assign(streams.streams[0]!.streams[0]!, { hero_embed: 'javascript:alert(1)' })
+  Object.assign(streams.streams[0]!.streams[1]!, { hero_embed: 42 })
   const { bucket } = fixture(true, detail, false, 'sport/example', true, streams)
   const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
   assert.equal(generation.readable, true)
@@ -305,7 +305,7 @@ test('an authoritative omission leaves the generation readable', async () => {
   const { bucket } = fixture(false)
   const generation = await readFeedGeneration(bucket, requestUrl, requestUrl.host, [...endpoints])
   assert.equal(generation.readable, true)
-  assert.equal(generation.get(endpoints[0]).fromCache, true)
+  assert.equal(generation.get(endpoints[0])!.fromCache, true)
   assert.equal(generation.get(endpoints[1]), undefined)
 })
 
@@ -326,15 +326,15 @@ const invalid: Record<string, (manifest: Manifest) => void> = {
   payloadIdentity: m => { m.payloadKey = m.payloadKey.replace('01234567', '00000000') },
   size: m => { m.size++ },
   sizeLimit: m => { m.size = 40 * 1024 ** 2 },
-  firstOffset: m => { m.endpoints[0].offset = 1 },
-  offsetGap: m => { m.endpoints[1].offset++ },
-  offsetOverlap: m => { m.endpoints[1].offset-- },
-  emptyLength: m => { m.endpoints[1].length = 0 },
-  fractionalLength: m => { m.endpoints[1].length = 1.5 },
-  invalidPath: m => { m.endpoints[1].path = 'streams/../vods' },
-  nestedVod: m => { m.endpoints[1].path = 'vods/a/b' },
-  unknownPath: m => { m.endpoints[1].path = 'ping' },
-  duplicatePath: m => { m.endpoints[1].path = 'streams' },
+  firstOffset: m => { m.endpoints[0]!.offset = 1 },
+  offsetGap: m => { m.endpoints[1]!.offset++ },
+  offsetOverlap: m => { m.endpoints[1]!.offset-- },
+  emptyLength: m => { m.endpoints[1]!.length = 0 },
+  fractionalLength: m => { m.endpoints[1]!.length = 1.5 },
+  invalidPath: m => { m.endpoints[1]!.path = 'streams/../vods' },
+  nestedVod: m => { m.endpoints[1]!.path = 'vods/a/b' },
+  unknownPath: m => { m.endpoints[1]!.path = 'ping' },
+  duplicatePath: m => { m.endpoints[1]!.path = 'streams' },
   publishedAt: m => { m.publishedAt = 'invalid' },
   listsVerifiedAt: m => { m.listsVerifiedAt = 'invalid' },
   detailsVerifiedAt: m => { m.detailsVerifiedAt = 'invalid' },
@@ -387,7 +387,7 @@ test('new requests reuse decoded ranges across unchanged publications', async ()
 test('sitemap omits a detail missing from the pinned manifest', async () => {
   const { bucket } = fixture()
   Object.assign(globalThis, {
-    defineEventHandler: handler => handler,
+    defineEventHandler: (handler: unknown) => handler,
     canonicalOrigin: () => requestUrl.origin,
     useRuntimeConfig: () => ({
       feedSnapshotBinding: 'FEED_SNAPSHOTS',
@@ -399,7 +399,7 @@ test('sitemap omits a detail missing from the pinned manifest', async () => {
     $fetch: unreachable,
   })
   const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
-  const xml = await sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } })
+  const xml = await sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } } as never)
   assert.match(xml, /<loc>https:\/\/kwip\.fyi\/live\/sport\/example<\/loc>/)
   assert.doesNotMatch(xml, /\/live\/missing/)
 
@@ -408,7 +408,7 @@ test('sitemap omits a detail missing from the pinned manifest', async () => {
     ASSETS: { fetch: async (request: Request) => Response.json(
       new URL(request.url).pathname.endsWith('/streams.json') ? channels : { success: true, vods: [] },
     ) },
-  } } } })
+  } } } } as never)
   assert.match(seed, /\/live\/sport\/example/)
   assert.doesNotMatch(seed, /\/live\/missing/)
 })
@@ -419,7 +419,7 @@ const deadlineConfig = {
 const never = () => new Promise<never>(() => {})
 const nextTurn = () => new Promise<void>(resolve => setImmediate(resolve))
 
-function trackTimeouts(context) {
+function trackTimeouts(context: TestContext) {
   context.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
   return context.mock.method(console, 'warn', () => {})
 }
@@ -428,7 +428,7 @@ test('a hung primary is aborted and logs once before the mirror and bundled snap
   const warnings = trackTimeouts(context)
   const calls: string[] = []
   let primarySignal: AbortSignal | undefined
-  const result = fetchFeed(async (url, options) => {
+  const fetcher = (async (url: string, options: any) => {
     calls.push(url)
     if (url.startsWith(deadlineConfig.feedBase)) {
       primarySignal = options.signal
@@ -436,7 +436,8 @@ test('a hung primary is aborted and logs once before the mirror and bundled snap
     }
     if (url.startsWith(deadlineConfig.feedMirrorBase)) throw new Error('Mirror unreachable')
     return channels
-  }, deadlineConfig, requestUrl, endpoints[0])
+  }) as unknown as typeof $fetch
+  const result = fetchFeed(fetcher, deadlineConfig, requestUrl, endpoints[0])
 
   context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
   assert.deepEqual(await result, { ...channels, fromCache: true })
@@ -452,14 +453,15 @@ test('a hung primary is aborted and logs once before the mirror and bundled snap
 test('fast network errors retain failover order without timeout logs', async (context) => {
   const warnings = trackTimeouts(context)
   const calls: string[] = []
-  const result = await fetchFeed(async (url, options) => {
+  const fetcher = (async (url: string, options: any) => {
     calls.push(url)
     if (calls.length < 3) {
       options.onRequestError?.()
       throw new Error('Network failure')
     }
     return channels
-  }, deadlineConfig, requestUrl, endpoints[0])
+  }) as unknown as typeof $fetch
+  const result = await fetchFeed(fetcher, deadlineConfig, requestUrl, endpoints[0])
   assert.deepEqual(result, { ...channels, fromCache: true })
   assert.deepEqual(calls, [
     'https://primary.example/streams', 'https://mirror.example/streams', 'https://kwip.fyi/feed-cache/streams.json',
@@ -471,16 +473,17 @@ test('fast network errors retain failover order without timeout logs', async (co
 test('the mirror and bundled assets get their own budgets after a primary timeout', async (context) => {
   const warnings = trackTimeouts(context)
   const signals: AbortSignal[] = []
-  const result = fetchFeed(async (_url, options) => {
+  const fetcher = (async (_url: string, options: any) => {
     signals.push(options.signal)
     return never()
-  }, deadlineConfig, requestUrl, endpoints[0], { async fetch() { return never() } })
+  }) as unknown as typeof $fetch
+  const result = fetchFeed(fetcher, deadlineConfig, requestUrl, endpoints[0], { async fetch() { return never() } })
   context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
   await nextTurn()
-  assert.equal(signals[1].aborted, false)
+  assert.equal(signals[1]!.aborted, false)
   context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
   await nextTurn()
-  assert.equal(signals[1].aborted, true)
+  assert.equal(signals[1]!.aborted, true)
   assert.equal(warnings.mock.callCount(), 2)
   context.mock.timers.tick(FEED_DEADLINES_MS.seed)
   await assert.rejects(result, { name: 'FeedTimeoutError', message: 'Feed deadline exceeded at seed' })
@@ -493,15 +496,15 @@ test('a stalled R2 identity is shared by cache lookup and SSR, which leaves the 
   const event = { context: { cloudflare: { env: {
     FEED_SNAPSHOTS: { get() { opens++; return never() } },
     ASSETS: { async fetch() { return Response.json({ ...channels, timestamp: 42 }) } },
-  } } } }
+  } } } } as never
   const url = new URL('/', requestUrl)
   const identity = getFeedCacheIdentity(event, 'FEED_SNAPSHOTS', deadlineConfig, url)
   context.mock.timers.tick(FEED_DEADLINES_MS.identity)
   assert.equal(await identity, undefined)
   const generation = await getFeedGeneration(event, 'FEED_SNAPSHOTS', deadlineConfig, url)
-  assert.equal(generation.cacheIdentity, undefined)
-  assert.equal(generation.readable, false)
-  assert.equal(generation.get(endpoints[0]), undefined)
+  assert.equal(generation!.cacheIdentity, undefined)
+  assert.equal(generation!.readable, false)
+  assert.equal(generation!.get(endpoints[0]), undefined)
   assert.equal(opens, 1)
   assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
     event: 'feed_timeout', endpoint: 'streams', stage: 'identity', elapsedMs: FEED_DEADLINES_MS.identity,
@@ -517,8 +520,8 @@ test('stalled R2 ranges leave the batch unusable and uncacheable', async (contex
   await nextTurn()
   context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
   const generation = await result
-  assert.equal(generation.cacheIdentity, undefined)
-  assert.equal(generation.readable, false)
+  assert.equal(generation!.cacheIdentity, undefined)
+  assert.equal(generation!.readable, false)
   assert.equal(generation.get(endpoints[0]), undefined)
   assert.equal(generation.get(endpoints[1]), undefined)
   assert.deepEqual(warnings.mock.calls.map(call => JSON.parse(call.arguments[0])), [{
@@ -532,15 +535,15 @@ for (const mode of ['readable', 'omitted', 'stalled'] as const) {
     const { bucket } = fixture(mode !== 'omitted')
     const calls: string[] = []
     const event = { context: { cloudflare: { env: { FEED_SNAPSHOTS: {
-      get(key, options) {
+      get(key: string, options: any) {
         calls.push(options ? 'range' : 'identity')
         return options && mode === 'stalled' ? never() : bucket.get(key, options)
       },
-    } } } } }
-    const result = fetchFeed(async url => {
+    } } } } } as never
+    const result = fetchFeed((async (url: string) => {
       calls.push(new URL(url).hostname)
       return never()
-    }, deadlineConfig, requestUrl, endpoints[1], {
+    }) as unknown as typeof $fetch, deadlineConfig, requestUrl, endpoints[1], {
       async fetch() {
         calls.push('seed')
         return Response.json({ ...detail, data: { ...detail.data, name: 'Bundled' } })
@@ -560,7 +563,7 @@ for (const mode of ['readable', 'omitted', 'stalled'] as const) {
       assert.deepEqual(calls, ['primary.example', 'mirror.example', 'identity', 'range', 'range'])
       context.mock.timers.tick(FEED_DEADLINES_MS.snapshot)
     }
-    const payload = await expected
+    const payload = (await expected) as any
     assert.deepEqual(calls, [
       'primary.example', 'mirror.example', 'identity',
       ...(mode === 'omitted' ? [] : ['range', 'range']),
@@ -581,18 +584,18 @@ test('sitemap direct-feed fallback uses R2 coverage after both upstreams time ou
   trackTimeouts(context)
   const { bucket } = fixture()
   const attempts: string[] = []
-  context.mock.method(globalThis, '$fetch', url => {
+  context.mock.method(globalThis, '$fetch', (url: string) => {
     attempts.push(url)
     return never()
   })
-  context.mock.method(globalThis, 'useRuntimeConfig', () => ({
+  context.mock.method(globalThis as any, 'useRuntimeConfig', () => ({
     feedSnapshotBinding: 'FEED_SNAPSHOTS',
     seedDetailPaths: ['streams/missing'],
     // An absolute fixture base uses the direct feed path and still has an R2 binding.
     public: { ...deadlineConfig, feedBase: deadlineConfig.feedBase + '/fixtures' },
   }))
   const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
-  const result = sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } })
+  const result = sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } } as never)
   await nextTurn()
   context.mock.timers.tick(FEED_DEADLINES_MS.upstream)
   await nextTurn()
@@ -609,14 +612,14 @@ test('one healthy upstream endpoint cannot mix with seed data in the sitemap', a
   const { bucket, manifest } = fixture()
   let opens = 0
   const calls: string[] = []
-  context.mock.method(globalThis, '$fetch', url => {
+  context.mock.method(globalThis, '$fetch', (url: string) => {
     calls.push(new URL(url).hostname)
     if (new URL(url).pathname === '/streams') return { success: true, streams: [{
       category: 'Sports', streams: [{ id: 9, uri_name: 'upstream-only', name: 'Upstream' }],
     }] }
     return never()
   })
-  context.mock.method(globalThis, 'useRuntimeConfig', () => ({
+  context.mock.method(globalThis as any, 'useRuntimeConfig', () => ({
     feedSnapshotBinding: 'FEED_SNAPSHOTS',
     seedDetailPaths: ['streams/missing', 'vods/seed-replay'],
     public: deadlineConfig,
@@ -624,11 +627,11 @@ test('one healthy upstream endpoint cannot mix with seed data in the sitemap', a
   const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
   const result = sitemap({ context: { cloudflare: { env: {
     FEED_SNAPSHOTS: {
-      get(key, options) {
+      get(key: string, options: any) {
         if (!options) {
           opens++
           calls.push('manifest')
-        } else if (opens === 1 || options.range.offset === manifest.endpoints[1].offset) {
+        } else if (opens === 1 || options.range.offset === manifest.endpoints[1]!.offset) {
           return never()
         }
         return bucket.get(key, options)
@@ -643,7 +646,7 @@ test('one healthy upstream endpoint cannot mix with seed data in the sitemap', a
         })
       },
     },
-  } } } })
+  } } } } as never)
   await nextTurn()
   for (const budget of [FEED_DEADLINES_MS.snapshot, FEED_DEADLINES_MS.fallbackUpstream, FEED_DEADLINES_MS.fallbackUpstream]) {
     context.mock.timers.tick(budget)
@@ -662,19 +665,19 @@ test('one healthy upstream endpoint cannot mix with seed data in the sitemap', a
 
 test('sitemap respects an omitted listing in a readable generation', async (context) => {
   const { bucket } = fixture(false, detail, false, 'sport/example', false)
-  const upstream = context.mock.method(globalThis, '$fetch', unreachable)
+  const upstream = context.mock.method(globalThis, '$fetch', unreachable as unknown as typeof $fetch)
   const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
-  const xml = await sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } })
+  const xml = await sitemap({ context: { cloudflare: { env: { FEED_SNAPSHOTS: bucket } } } } as never)
   assert.doesNotMatch(xml, /\/vods\//)
   assert.equal(upstream.mock.callCount(), 0)
 })
 
 test('healthy sitemap ignores upstream listings without uri_name', async (context) => {
-  context.mock.method(globalThis, '$fetch', async url =>
+  context.mock.method(globalThis, '$fetch', async (url: string) =>
     new URL(url).pathname.endsWith('/streams') ? channels : { success: true, vods: [] },
   )
   const { default: sitemap } = await import('../server/routes/sitemap.xml.ts')
-  const xml = await sitemap({ context: { cloudflare: { env: {} } } })
+  const xml = await sitemap({ context: { cloudflare: { env: {} } } } as never)
   assert.doesNotMatch(xml, /\/live\/sport\/example/)
   assert.match(xml, /\/live\/missing/)
 })
@@ -689,8 +692,8 @@ test('seed fallback keeps its listing when the requested live detail is absent f
         return path.endsWith('/streams.json') ? Response.json(channels) : new Response(null, { status: 404 })
       },
     },
-  } } } }
-  const seed = await getFeedFallback(event, 'FEED_SNAPSHOTS', unreachable, deadlineConfig, requestUrl, [])
+  } } } } as never
+  const seed = await getFeedFallback(event, 'FEED_SNAPSHOTS', unreachable as unknown as typeof $fetch, deadlineConfig, requestUrl, [])
   assert.equal(seed?.get(endpoints[0])?.fromCache, true)
   assert.equal(seed?.get(endpoints[1]), undefined)
   assert.deepEqual(calls, ['/feed-cache/streams.json'])
@@ -708,8 +711,8 @@ test('score matches survive list and detail compaction and invalid match fields 
       .read(['streams', 'streams/sport/example'])
   }
   const result = await check(match)
-  assert.deepEqual(result.payloads.get('streams')?.payload.streams[0].streams[0].match, match)
-  assert.deepEqual(result.payloads.get('streams/sport/example')?.payload.data.match, match)
+  assert.deepEqual((result.payloads.get('streams')!.payload as any).streams[0].streams[0].match, match)
+  assert.deepEqual((result.payloads.get('streams/sport/example')!.payload as any).data.match, match)
   for (const value of [null, [], { ...match, state: 'live' }, { ...match, detail: 'x'.repeat(25) },
     { ...match, away: null }, ...[
       { name: 'x'.repeat(61) }, { name: 1 }, { abbreviation: 'TOOLONG' }, { abbreviation: null },
@@ -739,8 +742,9 @@ test('same-origin feed route reads ranges and replaces host tokens without proxy
   const response = await serveFeedPath(event, 'streams/sport/example', (() => { throw Error('proxy') }) as never, localConfig, requestUrl)
   assert.equal(response.status, 200)
   assert.equal(response.headers['cache-control'], 'no-store')
-  assert.equal(response.body.data.sources[0].data, 'https://example.com/?host=kwip.fyi')
-  assert.equal(response.body.detailGeneration, commitId)
+  const body = response.body as any
+  assert.equal(body.data.sources[0].data, 'https://example.com/?host=kwip.fyi')
+  assert.equal(body.detailGeneration, commitId)
   assert.equal(calls.length, 3)
   assert.equal(isCrossOriginFeed('/api/feed', requestUrl, { kind: 'streams' }), false)
 })
@@ -795,7 +799,7 @@ test('same-origin SSR falls through provider, mirror and whole seed in order', a
 test('same-origin browser leaves authoritative API errors intact and never tries mirror or seed', async () => {
   const calls: string[] = []
   const error = Object.assign(new Error('Not found'), { data: { snapshotOmitted: true } })
-  await assert.rejects(fetchFeed(async (url) => { calls.push(url); throw error }, localConfig.public,
+  await assert.rejects(fetchFeed((async (url: string) => { calls.push(url); throw error }) as unknown as typeof $fetch, localConfig.public,
     requestUrl, { kind: 'stream', uriName: 'missing' }), candidate => candidate === error)
   assert.deepEqual(calls, ['https://kwip.fyi/api/feed/streams/missing'])
 })

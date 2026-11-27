@@ -173,7 +173,9 @@ function useFeedEndpoint<T extends { success: boolean }>(
 ) {
   const nuxtApp = useNuxtApp()
   const config = useRuntimeConfig()
-  const fetcher = useRequestFetch()
+  // `useRequestFetch()` narrows to an event-bound variant during SSR; the feed
+  // helpers only pass a URL and options, which both call signatures accept.
+  const fetcher = useRequestFetch() as unknown as typeof $fetch
   const requestUrl = useRequestURL()
   const event = import.meta.server ? useRequestEvent() : undefined
   const now = import.meta.server ? useState('feed-initial-now', () => Math.floor(Date.now() / 1000)) : undefined
@@ -239,7 +241,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
   if (crossOrigin && nuxtApp.isHydrating && resolveEndpoint().kind !== 'ping') {
     // Keep the SSR payload in place until Nuxt has finished hydrating.
     onNuxtReady(() => {
-      if (!isSnapshotOmitted(feed.error.value) && (!feed.data.value || feed.data.value.fromCache)) {
+      if (!isSnapshotOmitted(feed.error.value) && (!feed.data.value || ('fromCache' in feed.data.value && feed.data.value.fromCache))) {
         void feed.refresh({ dedupe: 'defer' })
       }
     })
@@ -270,7 +272,7 @@ function useFeedEndpoint<T extends { success: boolean }>(
       }, Math.min(Math.max(0, poll.resumeAt * 1000 - Date.now()), 2_147_483_647))
     }
     onMounted(() => {
-      watch(() => hasLiveMatch(feed.data.value ?? undefined), schedule, { immediate: true })
+      watch(() => hasLiveMatch(feed.data.value as T | undefined), schedule, { immediate: true })
     })
     onScopeDispose(stopPolling)
   }

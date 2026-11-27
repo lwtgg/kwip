@@ -18,7 +18,7 @@ test('the contrast guard preserves dark colours and protects bright and interior
   assert.equal(bannerScrim(['#192f23', '#361f24'], 4.5), 0)
   for (const colors of [['#fff', '#ff0'], ['#0f0', '#f00'], ['#123', '#456']]) {
     const scrim = bannerScrim(colors, 4.5)
-    const pair = colors.map(color => hexRGB(color)!.map(channel => channel * (1 - scrim)))
+    const pair = colors.map(color => hexRGB(color)!.map(channel => channel * (1 - scrim)) as RGB)
     assert.ok(fieldContrast(pair[0]!, pair[1]!, hexRGB('#fff')!) >= 4.5)
   }
 })

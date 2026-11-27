@@ -45,7 +45,8 @@ const hooks: {
   'render:before'?: (input: { event: H3Event }) => void
   beforeResponse?: (event: H3Event, response: { body: unknown }) => Promise<void>
 } = {}
-cachePlugin({ hooks: { hook: <K extends keyof typeof hooks>(name: K, fn: (typeof hooks)[K]) => { hooks[name] = fn } } })
+const hook = ((name: string, fn: (typeof hooks)[keyof typeof hooks]) => { (hooks as Record<string, unknown>)[name] = fn }) as any
+cachePlugin({ hooks: { hook } } as unknown as Parameters<typeof cachePlugin>[0])
 
 const vods = JSON.stringify({ success: true, vods: [] })
 const streams = JSON.stringify({ success: true, streams: [] })
@@ -95,7 +96,7 @@ function setup(
       put,
     } },
   })
-  context.after(() => { delete globalThis.caches })
+  context.after(() => { delete (globalThis as { caches?: unknown }).caches })
   const assets = context.mock.fn(async () => Response.json({ success: true, data: seed }))
   const generation = (event: H3Event) => getFeedGeneration(event, config.feedSnapshotBinding, config.public, new URL('https://kwip.fyi' + event.path))
   async function run(path: string, render: (event: H3Event) => unknown) {
@@ -158,7 +159,7 @@ for (const fallback of ['cache', 'seed', '503', 'authoritative omission'] as con
       renderEvent = event
       if (fallback === '503') await generation(event)
       if (fallback === 'seed' || fallback === 'cache') {
-        event.context[Symbol.for('kwip.feedGeneration')] = stalled
+        (event.context as any)[Symbol.for('kwip.feedGeneration')] = stalled
       }
       return stalled
     })

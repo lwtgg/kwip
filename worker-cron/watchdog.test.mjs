@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { alertBudget, alertKey, decideAlert, decideIssue } from './watchdog.mjs'
-import { runTick, runWatchdogTick } from './index.mjs'
+import { runWatchdogTick } from './index.mjs'
 
 const minute = 60_000
 const now = Date.parse('2026-11-23T12:00:00.000Z')

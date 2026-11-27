@@ -520,7 +520,7 @@ export async function readFeedGeneration(
       streamPath ? relatedScoreBoundary(payloads.get('streams'), streamPath, now) : Infinity,
     ),
     cacheIdentity: paths.every(path => payloads.has(path)) ? identity : undefined,
-    get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
+    get<T extends { success: boolean } = Record<string, any> & { success: true } & FeedProvenance>(endpoint: FeedEndpoint) {
       return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
     },
     hasDetail,
@@ -572,7 +572,7 @@ async function readFeedFallback(
     const payloads = new Map(paths.map((path, index) => [path, batch[index]!.value]))
     return {
       hasDetail: (_path: string) => true,
-      get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
+      get<T extends { success: boolean } = Record<string, any> & { success: true } & FeedProvenance>(endpoint: FeedEndpoint) {
         return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
       },
     }
@@ -602,7 +602,7 @@ async function readFeedFallback(
     }
     const streamPath = paths.find(path => path.startsWith('streams/'))
     if (streamPath) {
-      const replayPath = endedReplayPath(liveDetailWindow(payloads, streamPath), streamPath, now)
+      const replayPath = endedReplayPath(liveDetailWindow(payloads, streamPath, now), streamPath, now)
       if (replayPath && coverage.has(replayPath)) {
         const vods = await fetchFeedSnapshot<SnapshotPayload>(fetcher, requestUrl, { kind: 'vods' }, host, assets)
           .then(payload => compactSnapshotPayload('vods', payload))
@@ -618,7 +618,7 @@ async function readFeedFallback(
   }
   return {
     hasDetail: (path: string) => coverage.has(path),
-    get<T extends { success: boolean }>(endpoint: FeedEndpoint) {
+    get<T extends { success: boolean } = Record<string, any> & { success: true } & FeedProvenance>(endpoint: FeedEndpoint) {
       return payloads.get(snapshotPath(endpoint)) as (T & FeedProvenance) | undefined
     },
   }
