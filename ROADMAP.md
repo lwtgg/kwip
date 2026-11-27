@@ -224,6 +224,14 @@ stays the lever if the padded-logo round does not land.
 The full pixel sweep died once at the 845th cell on a 30 s `Page.screenshot` timeout with no assertion failure.
 `screenshot_ink` now retries a screenshot timeout once, the same way it already retries an empty WebKit frame.
 
+**Fixed 2026-11-27. A detail page that opens inside the pre-kickoff margin now polls at once.** The predicate
+returned a bare `true` once the margin had opened, so the page sat a full 60 s cadence before its first fetch and a
+page opened after kickoff could wait a minute for anything. It now always returns `{ resumeAt }`; a past instant
+clamps to a zero-delay alarm, which refreshes immediately and then starts the interval. Because the predicate builds
+a fresh object per evaluation, `schedule` also remembers the armed decision and leaves an armed timer alone — without
+that, a zero-delay alarm re-armed itself from its own refresh and looped (742 requests in one case). `detail_poll_browser`
+is green with sane counts: nothing before the margin, one poll when a past-kickoff `pre` page opens, one at the final.
+
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting
 high (4 px above vs 8 px under; 23.6 vs 35.6 on the 1280 hero). Two reviews refuted the first diagnosis — Acumin's

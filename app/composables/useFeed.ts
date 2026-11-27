@@ -261,7 +261,14 @@ function useFeedEndpoint<T extends { success: boolean }>(
         if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
       }, FEED_CACHE_WINDOW_MS)
     }
+    // The predicate builds a fresh object per evaluation, so the watch fires on every payload even
+    // when the decision is unchanged. Remember the armed decision and leave the armed timer alone.
+    let armed: boolean | number | undefined
+    const decision = (poll: FeedPoll | undefined) => poll === true ? true : poll ? poll.resumeAt : undefined
     const schedule = (poll: FeedPoll | undefined) => {
+      const next = decision(poll)
+      if (next === armed) return
+      armed = next
       stopPolling()
       if (!poll) return
       if (poll === true) return startPolling()
@@ -338,8 +345,9 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       if (item.match?.state !== 'pre') return false
       const start = Number(item.starts_at ?? item.start_timestamp)
       if (!Number.isFinite(start) || start <= 0) return false
-      const opensAt = start - DETAIL_POLL_MARGIN_SECONDS
-      return Math.floor(Date.now() / 1000) >= opensAt ? true : { resumeAt: opensAt }
+      // Always an alarm, even when the margin has already opened: a zero delay polls at once, and a
+      // page that mounts inside the margin is not left waiting a full cadence for its first fetch.
+      return { resumeAt: start - DETAIL_POLL_MARGIN_SECONDS }
     },
   )
   let adopted: { uri: string; id: string; generation: string } | undefined
