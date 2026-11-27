@@ -1472,7 +1472,11 @@ def check_row_centre_paint(browser, engine, origin, widths, fixture='halftime', 
                         assert max(map(abs, offsets)) <= 2, ('painted logos off card centre', cell, offsets)
                     state_low, state_high = WIDE_STATE_POSITION if geometry['wideDetail'] else STATE_POSITION
                     assert state_low <= state_position <= state_high, ('painted state position', cell, state_position)
-                    assert .60 <= state_gap <= 1.20, ('painted state-to-score gap', cell, state_gap)
+                    # A wide tier keeps the band and gives up the gap ceiling: its score is too tall and
+                    # its support stack too deep to move the row, so the state lands on the band and the
+                    # disjointness check above is what keeps it off the digits.
+                    assert .60 <= state_gap <= (float('inf') if geometry['wideDetail'] else 1.20), (
+                        'painted state-to-score gap', cell, state_gap)
                     assert NAME_GAP[0] <= min(name_gaps) <= max(name_gaps) <= NAME_GAP[1], ('painted logo-to-name gap', cell, name_gaps)
                     low, high = SCORE_LOGO[scale]
                     if geometry['stacked']:

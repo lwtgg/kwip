@@ -3,6 +3,7 @@ import type { FeedStreamItem } from './useFeed.ts'
 import { formatViewersCompact, formatViewersExact } from '../utils/viewers.ts'
 
 const stateLabels = { pre: 'Upcoming', in: 'Live', post: 'Final' } as const
+const delayedState = 'Delayed'
 
 type Match = NonNullable<FeedStreamItem['match']>
 
@@ -16,10 +17,22 @@ export function bannerAbbreviation(side: Match['away']): string {
   return side.abbreviation.trim() || teamInitials(side.name, 3)
 }
 
-export function matchBannerContent(match: Match, viewers: string | number, metric: 'viewers' | 'views', stale: boolean) {
-  const state = stateLabels[match.state]
+/** A provider clock only moves on a publish; a bare soccer minute would otherwise sit still for minutes. */
+export function matchMinute(detail: string, state: Match['state'], startsAt?: number, now?: number) {
+  const shown = /^(\d+)'$/.exec(detail)
+  if (!shown || state !== 'in' || !startsAt || !now || now <= startsAt) return detail
+  const elapsed = Math.floor((now - startsAt) / 60)
+  // The interval is not match time, so take its fifteen minutes back out once play has restarted.
+  const minute = elapsed <= 45 ? elapsed : elapsed <= 60 ? 45 : Math.min(elapsed - 15, 90)
+  return minute > Number(shown[1]) ? `${minute}'` : detail
+}
+
+export function matchBannerContent(match: Match, viewers: string | number, metric: 'viewers' | 'views', stale: boolean,
+  delayed = false, clock: { startsAt?: number; now?: number } = {}) {
+  const state = delayed && match.state === 'pre' ? delayedState : stateLabels[match.state]
   const hasScores = match.away.score !== null && match.home.score !== null
-  const detail = match.state === 'pre' && !hasScores ? 'vs' : match.detail === state ? '' : match.detail
+  const shown = matchMinute(match.detail, match.state, clock.startsAt, clock.now)
+  const detail = match.state === 'pre' && !hasScores ? 'vs' : shown === state ? '' : shown
   const exact = formatViewersExact(viewers)
   const unit = exact === '1' ? metric.slice(0, -1) : metric
   const compact = formatViewersCompact(viewers)
@@ -30,7 +43,8 @@ export function matchBannerContent(match: Match, viewers: string | number, metri
     ? `${match.away.name} ${match.away.score}, ${match.home.name} ${match.home.score}`
     : `${match.away.name} vs ${match.home.name}`
   const spoken = audience && (exact === compact ? audience : `${audience} (${exact})`)
-  const label = [teams, state, detail === 'vs' ? '' : detail, spoken].filter(Boolean).join('. ') + '.'
+  const spokenState = delayed && match.state === 'pre' ? 'Kickoff delayed' : state
+  const label = [teams, spokenState, detail === 'vs' ? '' : detail, spoken].filter(Boolean).join('. ') + '.'
   return { hasScores, tiers: [state, detail, audience], label }
 }
 

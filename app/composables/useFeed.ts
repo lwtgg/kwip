@@ -261,6 +261,9 @@ function useFeedEndpoint<T extends { success: boolean }>(
         if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
       }, FEED_CACHE_WINDOW_MS)
     }
+    const onVisible = () => {
+      if (!document.hidden && armed === true) void feed.refresh({ dedupe: 'defer' })
+    }
     // The predicate builds a fresh object per evaluation, so the watch fires on every payload even
     // when the decision is unchanged. Remember the armed decision and leave the armed timer alone.
     let armed: boolean | number | undefined
@@ -280,8 +283,13 @@ function useFeedEndpoint<T extends { success: boolean }>(
     }
     onMounted(() => {
       watch(() => hasLiveMatch(feed.data.value as T | undefined), schedule, { immediate: true })
+      // A hidden tab skips its beats; catch up the moment it is looked at again.
+      document.addEventListener('visibilitychange', onVisible)
     })
-    onScopeDispose(stopPolling)
+    onScopeDispose(() => {
+      document.removeEventListener('visibilitychange', onVisible)
+      stopPolling()
+    })
   }
 
   return feed

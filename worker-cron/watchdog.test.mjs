@@ -63,7 +63,8 @@ export function simulation() {
   const objects = new Map()
   const issues = []
   const calls = []
-  let generationAt = now - 11 * minute
+  // Inside the four-minute dispatch threshold: the pinger has nothing to do.
+  let generationAt = now - 3 * minute
   let etag = 0
   let fail
   let beforeClaim

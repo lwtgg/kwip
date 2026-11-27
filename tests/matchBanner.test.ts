@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bannerAbbreviation, bannerColor, bannerScrim, matchBannerContent, mixBannerColor, teamInitials } from '../app/composables/matchBanner.ts'
+import { bannerAbbreviation, bannerColor, bannerScrim, matchBannerContent, matchMinute, mixBannerColor, teamInitials } from '../app/composables/matchBanner.ts'
 import { hexRGB, fieldContrast } from '../app/composables/cardTint.ts'
 
 test('unplayed colours are independently mixed at twelve percent in sRGB', () => {
@@ -51,6 +51,24 @@ test('final and stale banners retain their tiers without repeating the state or 
   assert.deepEqual(matchBannerContent(final, '250', 'views', true).tiers, ['Final', '', ''])
 })
 
+test('a bare soccer minute keeps moving between publishes and stops at full time', () => {
+  const kickoff = 1_000_000
+  const at = (minutes: number) => kickoff + minutes * 60
+  // Only the two clean halves and the interval are the app's business; stoppage stays the provider's.
+  assert.equal(matchMinute("2'", 'in', kickoff, at(2.4)), "2'")
+  assert.equal(matchMinute("2'", 'in', kickoff, at(23)), "23'")
+  assert.equal(matchMinute("44'", 'in', kickoff, at(50)), "45'")
+  assert.equal(matchMinute("46'", 'in', kickoff, at(70)), "55'")
+  assert.equal(matchMinute("89'", 'in', kickoff, at(140)), "90'")
+  // A detail the shape check does not own is untouched.
+  assert.equal(matchMinute('Q2 05:12', 'in', kickoff, at(40)), 'Q2 05:12')
+  assert.equal(matchMinute("2'", 'post', kickoff, at(140)), "2'")
+  assert.equal(matchMinute("2'", 'in', undefined, at(40)), "2'")
+  // A stale beat still has the ticked minute in it: the flag, not the clock, marks it unconfirmed.
+  const live = { state: 'in', detail: "2'", away, home } as const
+  assert.deepEqual(matchBannerContent(live, '1', 'viewers', true, false, { startsAt: kickoff, now: at(23) }).tiers, ['Live', "23'", ''])
+})
+
 test('the name carries the visible state, detail and audience in the banner\'s words, separated', () => {
   const live = { state: 'in', detail: 'Halftime', away: { ...away, score: 50 }, home: { ...home, score: 97 } } as const
   assert.equal(matchBannerContent(live, '62', 'viewers', false).label, 'Colorado State Rams 50, Arizona Wildcats 97. Live. Halftime. 62 Viewers.')
@@ -75,4 +93,13 @@ test('an empty abbreviation falls back to the name so nothing under a logo is bl
   assert.equal(bannerAbbreviation({ ...home, abbreviation: '  ' }), 'AW')
   assert.equal(teamInitials('west washington'), 'WW')
   assert.equal(teamInitials('Colorado State Rams'), 'CS')
+})
+
+test('a pre match well past kickoff reads as delayed, on screen and in the name', () => {
+  const late = { state: 'pre', detail: 'Scheduled', away: { ...away, score: null }, home } as const
+  const content = matchBannerContent(late, '1', 'viewers', false, true)
+  assert.deepEqual(content.tiers, ['Delayed', 'vs', '1 Viewer'])
+  assert.equal(content.label, 'Colorado State Rams vs Arizona Wildcats. Kickoff delayed. 1 Viewer.')
+  const finished = { state: 'post', detail: 'Final', away, home } as const
+  assert.equal(matchBannerContent(finished, '1', 'viewers', false, true).tiers[0], 'Final')
 })

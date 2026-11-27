@@ -39,6 +39,13 @@ function relativeLabel(prefix: string, delta: number, suffix = '') {
   }
 }
 
+/** A `pre` match this far past its kickoff reads as delayed rather than Upcoming. */
+export const KICKOFF_GRACE_SECONDS = 15 * 60
+
+export function kickoffDelayed(state: string | undefined, startsAt: number | undefined, now: number | undefined) {
+  return state === 'pre' && !!startsAt && now !== undefined && now >= startsAt + KICKOFF_GRACE_SECONDS
+}
+
 export function windowLabel({ startsAt, endsAt, alwaysLive, now }: EventWindow) {
   if (alwaysLive === 1) return { text: '24/7', aria: 'Live 24 hours a day, 7 days a week' }
   if (startsAt === 0) return { text: 'Event', aria: 'Event' }

@@ -9,6 +9,7 @@ import { playerShieldSandbox, sourceHost, sourceKey, sourceLabel } from '~/utils
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
 import { matchBannerContent } from '~/composables/matchBanner'
+import { kickoffDelayed } from '~/composables/useEventWindow'
 import { slugifyCategory } from '~/utils/supplementMatch'
 import { formatViewersExact } from '~/utils/viewers'
 import { canClickUnder, isClickUnderEligible, openClickUnder } from '~/utils/clickUnder'
@@ -90,7 +91,9 @@ const pageHeading = computed(() => {
 
 const heroMatchContent = computed(() => {
   const event = detail.value
-  if (event?.match) return matchBannerContent(event.match, event.viewers, 'viewers', isStale.value)
+  if (event?.match) return matchBannerContent(event.match, event.viewers, 'viewers', isStale.value,
+    kickoffDelayed(event.match.state, event.starts_at, nowSeconds.value),
+    { startsAt: event.starts_at, now: nowSeconds.value })
 })
 
 type SupplementState =

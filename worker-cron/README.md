@@ -2,7 +2,9 @@
 
 The scheduled Worker runs every five minutes and requests a feed refresh on
 `main` when `current.json` has no `listsVerifiedAt` or the timestamp is more
-than twelve minutes old. GitHub's workflow schedule remains enabled.
+than four minutes old. A publish run takes about two minutes, so a live score
+is at most ~6 minutes behind the provider instead of a quarter of an hour.
+GitHub's workflow schedule remains enabled.
 
 Each dispatch first claims a conditional reservation in R2. A manifest
 timestamp later than the reservation's attempt time clears it, even when

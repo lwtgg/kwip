@@ -21,9 +21,9 @@ Numbered and settled. Change one only by adding a new entry that supersedes it.
 17. **Design borrows patterns, not code.** `DESIGN.md` is the reference set and its ranking is the order of work. Tokens only, dark first, nothing that needs a dependency without rule 9 sign-off.
 
 18. **Workers Paid is required.** Free gives 10 ms CPU per request; SSR here costs 65–240 ms and dies with `error code: 1102`. Paid is $5/month and holds 30 M CPU-ms. Cold renders are still worth keeping cheap, and a route that can be served without rendering should be.
-19. **Freshness does not depend on a deploy.** A GitHub Actions workflow publishes a packed, validated generation to private R2 every 15 minutes; the Worker reads ranges of the newest one and falls back to the bundled seed only when the generation is unreadable. The publisher lives in `scripts/` with its own lockfile, so nothing runner-only reaches the Worker bundle.
+19. **Freshness does not depend on a deploy.** A GitHub Actions workflow publishes a packed, validated generation to private R2 on the pinger's four-minute beat; the Worker reads ranges of the newest one and falls back to the bundled seed only when the generation is unreadable. The publisher lives in `scripts/` with its own lockfile, so nothing runner-only reaches the Worker bundle.
 20. **A missing path in a valid generation is authoritative.** Never back-fill one hole from the seed; render the normal unavailable state. Retry the seed only for the whole response, and only when the generation itself cannot be read.
-21. **The refresh is triggered from outside GitHub.** GitHub's scheduler has never fired a `schedule` event for this repository, so `kwip-feed-cron` (a scheduled-only Worker on a five-minute trigger) dispatches the workflow when the manifest is missing or older than twelve minutes, skipping while a run is queued. The GitHub `schedule:` trigger stays in place so both converge if it recovers; duplicate dispatches queue behind the workflow's concurrency group rather than publishing twice. The pinger is a trigger, not a monitor. Superseded in part by rule 23: alerting moves into the pinger;
+21. **The refresh is triggered from outside GitHub.** GitHub's scheduler has never fired a `schedule` event for this repository, so `kwip-feed-cron` (a scheduled-only Worker on a five-minute trigger) dispatches the workflow when the manifest is missing or older than four minutes, skipping while a run is queued. The GitHub `schedule:` trigger stays in place so both converge if it recovers; duplicate dispatches queue behind the workflow's concurrency group rather than publishing twice. The pinger is a trigger, not a monitor. Superseded in part by rule 23: alerting moves into the pinger;
 thresholds stay where the manifest age is already known.
 22. **Money is our own click-under plus reserved banner slots.** The first qualifying source click per session opens an advertiser in a new tab through our own `/go/<placement>` redirect while the stream still loads in ours; 24/7 channels are excluded. Banners sit in fixed-dimension slots so nothing reflows, and never above the player. A homepage redirect is never taken — the event page is the product. Both sit behind `runtimeConfig.public.ads` and everything must still work with an ad blocker on. Ads are the only third-party runtime allowed on the page, which means v1 is no longer anonymous-by-default, and copy must stop claiming ad-free once the flag is on. Supersedes rule 6.
 23. **The refresh alarm lives in the pinger, not in the thing it reports on.** `kwip-feed-cron` already reads
@@ -88,9 +88,9 @@ frozen: the snapshot only changes when a publish run lands, and the page's cache
 event clock, so a live page could be served for a quarter of an hour while the card still said "Live". A selected
 stream with `match.state === 'in'` therefore clamps its own cache boundary to 60 s, the same-origin
 `/api/feed/streams` is refetched in an open tab on the same 60 s beat, and the freshness notice appears at ten
-minutes, not twenty. Ten and not two, because the notice *replaces* the listing: the publish runs every five
-minutes, so a two-minute cut would hide the page on most visits. Ten is two publish cadences and still under the
-twelve-minute watchdog. The event clock still governs non-live pages.
+minutes, not twenty. Ten and not two, because the notice *replaces* the listing and a publish run takes about
+two minutes, so a two-minute cut would hide the page on most visits. Ten is more than two publish runs and still
+clear of the four-minute watchdog. The event clock still governs non-live pages.
 
 The client poll, not the clamp, is what moves a score: the edge key already carries the generation, so a re-render
 of the same generation yields the same digits and only the clock-derived text changes. The clamp is kept for that
@@ -103,8 +103,11 @@ the payload and was unused, so a final event page showed "Live" and no score. Th
 `MatchBanner`, and that hero keeps moving: the item is polled while its match is `in`, and also while it is `pre`
 and the window has opened, so a page opened a minute before kickoff cannot stay frozen on "Upcoming". The pill
 maps `match.state` — `post` to Final, `in` to Live, `pre` to Upcoming while the window is open — instead of
-comparing `now` to `endsAt`. The page title and `<h1>` take the same away-first order as the banner, in the
+comparing `now` to `endsAt`. A `pre` match more than fifteen minutes past its kickoff says **Delayed** instead, on
+the pill and in the banner state, while it keeps polling: the provider lag is real and "Upcoming" beside a kickoff
+that has gone is the contradiction. The page title and `<h1>` take the same away-first order as the banner, in the
 heading fallback and the seed document too, so the title and the digits can never read the result opposite ways.
+A hidden tab skips its beats; on becoming visible it refreshes once so the first thing seen is current.
 
 
 ## Deferred (do not build, just note)

@@ -8,6 +8,16 @@ The Worker cannot reach the provider, so the directory only refreshes on deploy.
 
 **Shipped.** The [freshness design](docs/freshness-design.md) recommended a five-minute GitHub Actions pilot that publishes complete feed snapshots to private Cloudflare R2 independently of Worker deploys. The Worker keeps the bundled snapshot as a fallback and the browser continues to refresh directly. The pilot is running from GitHub Actions every 15 minutes against the production bucket, with the Worker serving the newest generation and an edge cache keyed to it. Still owed: an independent alert for a missed or `paused` refresh, and a provider answer on the permitted interval.
 
+**Fixed 2026-11-27. A live score stops being a quarter-hour old.** The owner saw 0-0 at 2' on a Chelsea match that
+was 1-0 at 23'. The ESPN scoreboard enrichment was right; the generation under it was twenty minutes old, because
+the pinger only dispatched once the manifest passed twelve minutes and a run takes about two. The pinger now
+refreshes at four minutes, so a live score is at most roughly six minutes behind the provider and the ten-minute
+"Unconfirmed" notice should only appear when a publish actually fails. The provider stripped every `match` from its
+own listing that evening, so publish-time enrichment is currently the only score path — per-request enrichment of
+live matches, already queued, is the durable fix. A bare soccer minute also ticks locally between publishes, derived
+from kickoff with the interval taken back out, so a card is never frozen on the provider's last word; halftime,
+stoppage and every other sport's clock stay exactly as the provider wrote them.
+
 ## 2. Sourcing
 
 Today's provider is the best found so far, but it is one provider with one failure mode and one CDN. Goals:
@@ -231,6 +241,24 @@ clamps to a zero-delay alarm, which refreshes immediately and then starts the in
 a fresh object per evaluation, `schedule` also remembers the armed decision and leaves an armed timer alone — without
 that, a zero-delay alarm re-armed itself from its own refresh and looped (742 requests in one case). `detail_poll_browser`
 is green with sane counts: nothing before the margin, one poll when a past-kickoff `pre` page opens, one at the final.
+
+**Fixed 2026-11-27. Live updates keep running when the tab is not being watched.** A hidden tab already skipped its
+beats but nothing refreshed on return, so the first thing a returning reader saw could be a minute old. `useFeed` now
+refreshes once on `visibilitychange` to visible whenever a beat is armed. Alongside it, a `pre` match more than fifteen
+minutes past kickoff reads **Delayed** on the pill and as the banner state (`kickoffDelayed`, rule 30) instead of a
+stuck "Upcoming"; it keeps polling and the provider's own state still wins the moment it changes.
+
+**Fixed 2026-11-27. The banner state sits on the live band whatever the card carries.** The state hangs a fixed
+ink gap above the score ink, and two things broke that: a card with no score (pre or final) has no ink to hang from
+and sat about 5 px high (0.323 against the live 0.279), and a listing row stretched by a taller neighbour pushed the
+whole grid down while the state stayed put. The fit pass now measures a hidden zero in the score row for the gap when
+there are no digits, then lands the state itself on `--banner-state-position` from its painted centre. The solve is a
+transform only, so it cannot move the centred row, change any card's height, or add shift (a padding solve made the
+hero's player jump 91 px when the state word changed), and it re-reads on the second pass and on resize. The moved
+baseline lands on the device grid so WebKit cannot paint it a device pixel off. Two ink bounds keep the band honest:
+never closer to the digits than the gutter, never more than a line's clearance (a wide tier, whose score is drawn too
+large for that ceiling, keeps only the gutter). Production reads 0.28 on live and
+upcoming cards at 1440, 1280 and 390.
 
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting

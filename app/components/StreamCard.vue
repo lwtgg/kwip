@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 import { matchBannerContent } from '~/composables/matchBanner'
+import { kickoffDelayed } from '~/composables/useEventWindow'
 import { cardTintStyle } from '~/composables/useCardTint'
 import type { FeedStreamItem } from '~/composables/useFeed'
 import { playerShieldSandbox } from '~/utils/sourceIdentity'
@@ -44,7 +45,9 @@ const targetHref = computed(() => {
 const matchContent = computed(() => {
   const stream = props.stream
   if (!stream?.match) return undefined
-  return matchBannerContent(stream.match, stream.viewers ?? 0, props.metricLabel, !!props.stale)
+  return matchBannerContent(stream.match, stream.viewers ?? 0, props.metricLabel, !!props.stale,
+    kickoffDelayed(stream.match.state, stream.starts_at, props.now),
+    { startsAt: stream.starts_at, now: props.now })
 })
 
 const compact = computed(() => formatViewersCompact(props.stream?.viewers ?? 0))

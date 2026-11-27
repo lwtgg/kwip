@@ -169,6 +169,18 @@ def pill_contradictions(browser, origin, fixtures, failures, evidence):
     finally:
         page.close()
 
+    fixtures.write('pre', None, None, '', t0 - 1200, t0 + 7200)
+    page = DetailPage(browser, origin, t0, fixtures.assets)
+    try:
+        expect(page.hero).to_be_visible()
+        check(failures, 'pre long past kickoff: hero reads Delayed', 'Delayed' in page.tiers(), page.tiers())
+        check(failures, 'pre long past kickoff: pill reads Delayed', page.pill.inner_text() == 'Delayed', page.pill.inner_text())
+        page.tick(61)
+        check(failures, 'pre long past kickoff: item polled', page.requests[ITEM] == 1, dict(page.requests))
+        evidence['pre long past kickoff (61 s)'] = dict(page.requests)
+    finally:
+        page.close()
+
     fixtures.write('in', 3, 3, 'OT', t0 - 9000, t0 - 60)
     page = DetailPage(browser, origin, t0, fixtures.assets)
     try:

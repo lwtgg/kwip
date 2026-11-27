@@ -104,7 +104,6 @@ function fitText() {
   delete lineup.dataset.wideScoreDetail
   delete lineup.dataset.wideAudience
   lineup.style.removeProperty('--banner-lineup-min')
-  lineup.style.removeProperty('--banner-top-surplus')
   const preferredRoom = room(lineup)
   // Reserve the full width to read the minimum padding resolved by the CSS clamp.
   lineup.style.setProperty('--banner-lineup-min', '100%')
@@ -216,9 +215,11 @@ function fitText() {
   const stateInk = inkBounds(stateLine, context)
   if (!stateInk) return
   let offset = 0
-  let anchored = 0
   const digits = scores.flatMap(score => inkBounds(score, context) ?? [])
-  if (digits.length) {
+  // The state hangs a fixed ink gap above the score ink. A card without a score has none, so place
+  // the state where a zero would paint instead, keeping pre and final cards on the live rhythm.
+  const tailored = digits.length ? Math.min(...digits.map(ink => ink.top)) : digitRowAnchor(lineup)
+  if (tailored !== undefined) {
     // A wrapped state still leaves one line's worth of clearance.
     const lineInkHeight = (stateInk.bottom - stateInk.top) / stateInk.lineCount
     const gap = Number(style.getPropertyValue('--banner-state-ink-gap')) * lineInkHeight
@@ -226,44 +227,85 @@ function fitText() {
     // fractional translate up, so an off-grid baseline can paint a device pixel away from layout.
     const dpr = window.devicePixelRatio || 1
     const baseline = stateInk.baseline + window.scrollY
-    const raw = Math.min(...digits.map(ink => ink.top)) - gap - stateInk.bottom
-    anchored = raw
+    const raw = tailored - gap - stateInk.bottom
     offset = Math.round((baseline + raw) * dpr) / dpr - baseline
     stateLine.style.setProperty('--banner-ink-offset', `${offset.toFixed(4)}px`)
   }
-  // A full-width lower tier makes the stack below the row much taller than the state above it.
-  // Centring the row would leave an empty band over the state, so trim that band until the state
-  // sits where it does on an ordinary card. The state keeps its gap to the digits. Use the unsnapped
-  // position, so identical cards trim identically wherever they sit on the page.
-  if (lineup.hasAttribute('data-wide-detail')) placeState(lineup, stateLine, (stateInk.top + stateInk.bottom) / 2 + anchored)
+  // Lower tiers make the stack below the row taller than the state above it, a stretched listing
+  // row adds height again, and the hero's player must not move when a word changes. A transform
+  // moves only the state and leaves the row and the card's height exactly where layout put them.
+  placeState(lineup, stateLine, stateInk.baseline)
+  // A very tall score draws into the band's target, so the ink gap keeps its own bounds: at least
+  // the gutter above the digits, and no more than a line's clearance. Ink is engine independent. A
+  // wide tier cannot also hold that ceiling (its score is too large and its support stack too deep
+  // to move the row), so it keeps the band and gives up the ceiling.
+  if (digits.length) {
+    const top = Math.min(...digits.map(ink => ink.top))
+    const inkHeight = (stateInk.bottom - stateInk.top) / stateInk.lineCount
+    // Two extra pixels cover the raster's rounding against the metric ink.
+    const lowest = top - resolveLength(lineup, 'var(--banner-gutter)') - 2 - stateInk.bottom
+    const placed = Number.parseFloat(stateLine.style.getPropertyValue('--banner-ink-offset')) || 0
+    // The ceiling applies to ordinary cards; a wide tier's score is too large for it to fit.
+    const highest = lineup.hasAttribute('data-wide-detail')
+      ? -Infinity
+      : top - 1.18 * inkHeight - stateInk.bottom
+    const bounded = Math.min(Math.max(placed, highest), lowest)
+    if (bounded !== placed) {
+      stateLine.style.setProperty('--banner-ink-offset', `${snapOffset(stateInk.baseline, bounded).toFixed(2)}px`)
+    }
+  }
 }
 
-function placeState(lineup: HTMLElement, stateLine: HTMLElement, stateCentre: number) {
+/** Where a digit's ink would start in the score row: the glyph centred in the row's own box. */
+function digitRowAnchor(lineup: HTMLElement) {
+  const style = getComputedStyle(lineup)
+  const [first, row] = style.gridTemplateRows.split(' ').map(parseFloat)
+  // Positioned against the banner, which is already relative; the lineup must not become a
+  // containing block, or the fit pass's padding arithmetic shifts.
+  const bannerTop = lineup.closest('.match-banner')!.getBoundingClientRect().top
+  const top = lineup.getBoundingClientRect().top + parseFloat(style.paddingTop) + first! - bannerTop
+  const cell = document.createElement('span')
+  cell.style.cssText = `visibility:hidden;pointer-events:none;position:absolute;left:0;display:grid;`
+    + `place-items:center;width:8ch;height:${row}px;top:${top}px`
+  const probe = document.createElement('span')
+  probe.className = 'banner-score'
+  probe.textContent = '0'
+  probe.style.display = 'block'
+  cell.append(probe)
+  lineup.append(cell)
+  const box = cell.getBoundingClientRect()
+  const s = getComputedStyle(probe)
+  const context = document.createElement('canvas').getContext('2d')!
+  context.font = `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`
+  const metrics = context.measureText('0')
+  const anchor = box.top + (box.height - (metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent)) / 2
+  cell.remove()
+  return anchor
+}
+
+/** Land an offset on the device grid: engines snap text there, and an off-grid baseline can paint a
+    device pixel away from layout, which the parity oracle reads as a model error. */
+function snapOffset(baseline: number, wanted: number) {
+  const dpr = window.devicePixelRatio || 1
+  const local = baseline + window.scrollY
+  return Math.round((local + wanted) * dpr) / dpr - local
+}
+
+function placeState(lineup: HTMLElement, stateLine: HTMLElement, baseline: number) {
+  // Transform never changes layout, so this cannot add shift. Read the painted centre each time:
+  // the pass runs before and after web fonts, and the second read sees the first move.
   const target = cssNumber(getComputedStyle(lineup), '--banner-state-position', 0.28)
-  const surplus = parseFloat(getComputedStyle(lineup).paddingTop) - resolveLength(lineup, 'var(--banner-pad-bottom)')
-  if (!(surplus > 0)) return
-  const anchor = stateLine.getBoundingClientRect().top
-  const position = (trim: number) => {
-    // Layout units are 1/64 px; quantising keeps twin cards at exactly the same height.
-    lineup.style.setProperty('--banner-top-surplus', `${Math.round((surplus - trim) * 64) / 64}px`)
+  for (let attempt = 0; attempt < 2; attempt++) {
     const box = lineup.getBoundingClientRect()
-    const centre = stateCentre + stateLine.getBoundingClientRect().top - anchor
-    return (box.top + box.height / 2 - centre) / box.height
-  }
-  const start = position(0)
-  if (start >= target) {
-    lineup.style.removeProperty('--banner-top-surplus')
-    return
-  }
-  // Exact when the card takes its content height; a stretched grid cell needs the measured step.
-  const box = lineup.getBoundingClientRect()
-  let trim = Math.min(surplus, (stateCentre - box.top - box.height * (0.5 - target)) / (0.5 + target))
-  const reached = position(trim)
-  if (trim < surplus && Math.abs(reached - target) > 0.002 && reached !== start) {
-    trim = Math.min(surplus, trim * (target - start) / (reached - start))
-    position(trim)
+    const line = stateLine.getBoundingClientRect()
+    const current = (box.top + box.height / 2 - (line.top + line.bottom) / 2) / box.height
+    if (Math.abs(current - target) <= 0.0015) return
+    const applied = Number.parseFloat(stateLine.style.getPropertyValue('--banner-ink-offset')) || 0
+    // A larger offset paints the state lower, so a state above the target needs a larger offset.
+    stateLine.style.setProperty('--banner-ink-offset', `${snapOffset(baseline, applied + (current - target) * box.height).toFixed(2)}px`)
   }
 }
+
 let observer: ResizeObserver | undefined
 onMounted(() => {
   for (const [index, side] of [match.value.away, match.value.home].entries()) {
