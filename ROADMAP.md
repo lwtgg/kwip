@@ -208,6 +208,21 @@ manual `publish:feed --bucket kwip-feed-prod` failed with `fetch failed` after o
 serving the last snapshot and marked it with the notice and "Unconfirmed · Last listed" on every card. Separately,
 the stale notice reads "more than 20 minutes ago" while the cut is ten — copy bug, fix with the padded-logo round.
 
+**Shipped 2026-11-27. The logo rise.** `6a748af`, merged `1f62b71` (CI run 45958063504, artifact
+`verify-log-ff15dcfb06b3b00066dab07afa2e49f2a24f0d0a`), deployed `2e8bb488`. `--banner-logo-rise: 0.1` lifts
+`.banner-team` by a tenth of the drawn logo with `translate` while the names stay put, so the paint rises and the
+ink gap narrows without moving the layout row. `NAME_GAP` moved to (.22, .32) to hold the mockup band plus the
+rise. Local gate on the branch: tests 208/208, top-event and full card matrix green, dry run clean, row centre
+-0.0078 px. Production at 1440/1280/390, logo paint against the card centre: -0.20 / -0.20 / -0.45 px; rise 4 px
+on a 40 px mark; state ink 0.285 / 0.285 / 0.288 of card height; score ink 1.14-1.23 x the paint. Measured with a
+white plate and dark-ink threshold for logos, because production marks are dark navy and the harness's black plate
+and 0.5 min-channel threshold return nothing for them. Painted logo-to-name gap on real ESPN padding is 0.57-0.65
+of the mark (0.71-0.79 before the rise); the mockup's 0.47-0.56 is a box-relative fraction, so the two are not yet
+directly comparable — that is the padded-logo round below.
+
+The full pixel sweep died once at the 845th cell on a 30 s `Page.screenshot` timeout with no assertion failure.
+`screenshot_ink` now retries a screenshot timeout once, the same way it already retries an empty WebKit frame.
+
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting
 high (4 px above vs 8 px under; 23.6 vs 35.6 on the 1280 hero). Two reviews refuted the first diagnosis — Acumin's

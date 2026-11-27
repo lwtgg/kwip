@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 import tempfile
 import time
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout, expect, sync_playwright
 from click_under_browser import worker, CLS_OBSERVER, CLS_SCORE
 
 
@@ -1135,14 +1135,19 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
 
 
 def screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=False):
-    try:
-        return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
-    except AssertionError as error:
-        # WebKit occasionally serves a frame between a relayout and the image repaint.
-        if error.args[0][0] != 'no screenshot ink':
-            raise
-        line.page.wait_for_timeout(50)
-        return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
+    for attempt in range(2):
+        try:
+            return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
+        except PlaywrightTimeout:
+            # A loaded box can stall the compositor past the screenshot timeout; one retry usually paints.
+            if attempt:
+                raise
+            line.page.wait_for_timeout(100)
+        except AssertionError as error:
+            # WebKit occasionally serves a frame between a relayout and the image repaint.
+            if error.args[0][0] != 'no screenshot ink' or attempt:
+                raise
+            line.page.wait_for_timeout(50)
 
 
 def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=False):
