@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bannerAbbreviation, bannerColor, bannerScrim, matchBannerContent, matchMinute, mixBannerColor, teamInitials } from '../app/composables/matchBanner.ts'
+import {
+  bannerAbbreviation, bannerColor, bannerScrim, detailClock, matchBannerContent, matchMinute, mixBannerColor, teamInitials,
+} from '../app/composables/matchBanner.ts'
 import { hexRGB, fieldContrast } from '../app/composables/cardTint.ts'
 
 test('unplayed colours are independently mixed at twelve percent in sRGB', () => {
@@ -51,22 +53,31 @@ test('final and stale banners retain their tiers without repeating the state or 
   assert.deepEqual(matchBannerContent(final, '250', 'views', true).tiers, ['Final', '', ''])
 })
 
-test('a bare soccer minute keeps moving between publishes and stops at full time', () => {
-  const kickoff = 1_000_000
-  const at = (minutes: number) => kickoff + minutes * 60
-  // Only the two clean halves and the interval are the app's business; stoppage stays the provider's.
-  assert.equal(matchMinute("2'", 'in', kickoff, at(2.4)), "2'")
-  assert.equal(matchMinute("2'", 'in', kickoff, at(23)), "23'")
-  assert.equal(matchMinute("44'", 'in', kickoff, at(50)), "45'")
-  assert.equal(matchMinute("46'", 'in', kickoff, at(70)), "55'")
-  assert.equal(matchMinute("89'", 'in', kickoff, at(140)), "90'")
-  // A detail the shape check does not own is untouched.
-  assert.equal(matchMinute('Q2 05:12', 'in', kickoff, at(40)), 'Q2 05:12')
-  assert.equal(matchMinute("2'", 'post', kickoff, at(140)), "2'")
+test('a bare minute advances from when the provider showed it, and only while the match is live', () => {
+  const shownAt = 1_000_000
+  const at = (minutes: number) => shownAt + minutes * 60
+  // Counted from the provider's own number, so a late kickoff needs no correction.
+  assert.equal(matchMinute("2'", 'in', shownAt, at(.4)), "2'")
+  assert.equal(matchMinute("2'", 'in', shownAt, at(23)), "25'")
+  // Stoppage keeps a stoppage minute: 45+2 becomes 45+3, never 48.
+  assert.equal(matchMinute("45+2'", 'in', shownAt, at(1)), "45+3'")
+  assert.equal(matchMinute("90+1'", 'in', shownAt, at(3)), "90+4'")
+  assert.equal(matchMinute('Halftime', 'in', shownAt, at(5)), 'Halftime')
+  assert.equal(matchMinute('Q2 05:12', 'in', shownAt, at(40)), 'Q2 05:12')
+  assert.equal(matchMinute("2'", 'post', shownAt, at(140)), "2'")
   assert.equal(matchMinute("2'", 'in', undefined, at(40)), "2'")
   // A stale beat still has the ticked minute in it: the flag, not the clock, marks it unconfirmed.
   const live = { state: 'in', detail: "2'", away, home } as const
-  assert.deepEqual(matchBannerContent(live, '1', 'viewers', true, false, { startsAt: kickoff, now: at(23) }).tiers, ['Live', "23'", ''])
+  assert.deepEqual(matchBannerContent(live, '1', 'viewers', true, false,
+    { observedAt: shownAt, now: at(23) }).tiers, ['Live', "25'", ''])
+})
+
+test('the detail clock only restarts when the provider says something new', () => {
+  const clock = detailClock()
+  assert.equal(clock("2'", 1000), 1000)
+  assert.equal(clock("2'", 1060), 1000)
+  assert.equal(clock("3'", 1120), 1120)
+  assert.equal(clock("", 1180), 1180)
 })
 
 test('the name carries the visible state, detail and audience in the banner\'s words, separated', () => {

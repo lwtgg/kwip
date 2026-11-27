@@ -72,6 +72,9 @@ class DetailPage:
         self.page.goto(f'{origin}/live/{URI}', wait_until='networkidle')
         self.hero = self.page.locator('.match-banner[data-scale=hero]')
         self.pill = self.page.locator('h1 + div > span').first
+        # The zero-delay arm fires during load, so it is already spent by the time goto returns;
+        # keep that count or the assertion after it only ever proves the interval.
+        self.loaded = self.requests[ITEM]
         self.requests.clear()
 
     def _count(self, request):
@@ -119,6 +122,7 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'pre: hero reads Upcoming', 'Upcoming' in page.tiers(), page.tiers())
         check(failures, 'pre: pill reads Upcoming', page.pill.inner_text().startswith('Upcoming'), page.pill.inner_text())
+        check(failures, 'pre, outside the margin: item not fetched on load', page.loaded == 0, page.loaded)
 
         page.tick(61)  # t0+61: the 120 s margin opens at t0+80
         check(failures, 'pre, before the margin: item not polled', page.requests[ITEM] == 0, dict(page.requests))
@@ -163,8 +167,17 @@ def pill_contradictions(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'pre past kickoff: hero reads Upcoming', 'Upcoming' in page.tiers(), page.tiers())
         check(failures, 'pre past kickoff: pill reads Upcoming, not Live', page.pill.inner_text() == 'Upcoming', page.pill.inner_text())
+        # Well under the 60 s cadence, so this is the zero-delay arm and not a beat. Wait for it
+        # rather than sampling once: the arm is set after hydration, which races `networkidle`.
+        page.page.wait_for_timeout(500)
+        for _ in range(20):
+            if page.loaded + page.requests[ITEM]:
+                break
+            page.page.wait_for_timeout(100)
+        check(failures, 'pre past kickoff: item fetched at once', page.loaded + page.requests[ITEM] >= 1,
+              page.loaded + page.requests[ITEM])
         page.tick(61)
-        check(failures, 'pre past kickoff: item polled', page.requests[ITEM] == 1, dict(page.requests))
+        check(failures, 'pre past kickoff: item keeps polling', page.requests[ITEM] >= 1, dict(page.requests))
         evidence['pre past kickoff (61 s)'] = dict(page.requests)
     finally:
         page.close()
@@ -175,8 +188,17 @@ def pill_contradictions(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'pre long past kickoff: hero reads Delayed', 'Delayed' in page.tiers(), page.tiers())
         check(failures, 'pre long past kickoff: pill reads Delayed', page.pill.inner_text() == 'Delayed', page.pill.inner_text())
+        # Well under the 60 s cadence, so this is the zero-delay arm and not a beat. Wait for it
+        # rather than sampling once: the arm is set after hydration, which races `networkidle`.
+        page.page.wait_for_timeout(500)
+        for _ in range(20):
+            if page.loaded + page.requests[ITEM]:
+                break
+            page.page.wait_for_timeout(100)
+        check(failures, 'pre long past kickoff: item fetched at once', page.loaded + page.requests[ITEM] >= 1,
+              page.loaded + page.requests[ITEM])
         page.tick(61)
-        check(failures, 'pre long past kickoff: item polled', page.requests[ITEM] == 1, dict(page.requests))
+        check(failures, 'pre long past kickoff: item keeps polling', page.requests[ITEM] >= 1, dict(page.requests))
         evidence['pre long past kickoff (61 s)'] = dict(page.requests)
     finally:
         page.close()
@@ -187,8 +209,9 @@ def pill_contradictions(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'in past the window: hero reads Live', 'Live' in page.tiers(), page.tiers())
         check(failures, 'in past the window: pill reads Live, not Ended', page.pill.inner_text() == 'Live', page.pill.inner_text())
+        # Already live: polling starts on mount and the first beat is the cadence, not a zero-delay arm.
         page.tick(61)
-        check(failures, 'in past the window: item polled', page.requests[ITEM] == 1, dict(page.requests))
+        check(failures, 'in past the window: item polls on the cadence', page.requests[ITEM] == 1, dict(page.requests))
         evidence['in past the window (61 s)'] = dict(page.requests)
     finally:
         page.close()

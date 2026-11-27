@@ -11,8 +11,9 @@ The Worker cannot reach the provider, so the directory only refreshes on deploy.
 **Fixed 2026-11-27. A live score stops being a quarter-hour old.** The owner saw 0-0 at 2' on a Chelsea match that
 was 1-0 at 23'. The ESPN scoreboard enrichment was right; the generation under it was twenty minutes old, because
 the pinger only dispatched once the manifest passed twelve minutes and a run takes about two. The pinger now
-refreshes at four minutes, so a live score is at most roughly six minutes behind the provider and the ten-minute
-"Unconfirmed" notice should only appear when a publish actually fails. The provider stripped every `match` from its
+refreshes at four minutes, so a live score is at most roughly seven to eleven minutes behind the provider. The
+"Unconfirmed" notice moved from ten to fifteen minutes for the same reason: at ten it fired on healthy publishes,
+and fifteen is the pinger's own alert grace. The provider stripped every `match` from its
 own listing that evening, so publish-time enrichment is currently the only score path — per-request enrichment of
 live matches, already queued, is the durable fix. A bare soccer minute also ticks locally between publishes, derived
 from kickoff with the interval taken back out, so a card is never frozen on the provider's last word; halftime,

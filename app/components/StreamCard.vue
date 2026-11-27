@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { watch } from 'vue'
-import { matchBannerContent } from '~/composables/matchBanner'
+import { detailClock, matchBannerContent } from '~/composables/matchBanner'
 import { kickoffDelayed } from '~/composables/useEventWindow'
 import { cardTintStyle } from '~/composables/useCardTint'
 import type { FeedStreamItem } from '~/composables/useFeed'
@@ -42,12 +42,16 @@ const targetHref = computed(() => {
   return props.stream ? `/live/${props.stream.uri_name}` : '/'
 })
 
+// The minute is all the banner's content needs from the clock; a per-second dependency would re-run the
+// fit pass once a second for a number that changes once a minute.
+const clock = computed(() => props.now === undefined ? undefined : Math.floor(props.now / 60) * 60)
+const seen = detailClock()
 const matchContent = computed(() => {
   const stream = props.stream
   if (!stream?.match) return undefined
   return matchBannerContent(stream.match, stream.viewers ?? 0, props.metricLabel, !!props.stale,
-    kickoffDelayed(stream.match.state, stream.starts_at, props.now),
-    { startsAt: stream.starts_at, now: props.now })
+    kickoffDelayed(stream.match.state, stream.starts_at, clock.value),
+    { observedAt: seen(stream.match.detail, clock.value), now: clock.value })
 })
 
 const compact = computed(() => formatViewersCompact(props.stream?.viewers ?? 0))

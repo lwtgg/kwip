@@ -87,10 +87,11 @@ scores in the wild. They are not mapped wrong — every rendered digit matched t
 frozen: the snapshot only changes when a publish run lands, and the page's cache boundary was derived from the
 event clock, so a live page could be served for a quarter of an hour while the card still said "Live". A selected
 stream with `match.state === 'in'` therefore clamps its own cache boundary to 60 s, the same-origin
-`/api/feed/streams` is refetched in an open tab on the same 60 s beat, and the freshness notice appears at ten
-minutes, not twenty. Ten and not two, because the notice *replaces* the listing and a publish run takes about
-two minutes, so a two-minute cut would hide the page on most visits. Ten is more than two publish runs and still
-clear of the four-minute watchdog. The event clock still governs non-live pages.
+`/api/feed/streams` is refetched in an open tab on the same 60 s beat, and the freshness notice appears at fifteen
+minutes, not twenty. Fifteen and not two, because the notice *replaces* the listing: the pinger ticks
+every five minutes and a publish takes about two, so a healthy generation is seven to eleven minutes old and ten
+fired on healthy publishes. Fifteen is the watchdog's own alert grace, so the notice now means what the alarm means.
+The event clock still governs non-live pages.
 
 The client poll, not the clamp, is what moves a score: the edge key already carries the generation, so a re-render
 of the same generation yields the same digits and only the clock-derived text changes. The clamp is kept for that

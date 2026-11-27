@@ -14,7 +14,7 @@ Object.assign(globalThis, {
 
 const publishedAt = 1_800_000_000
 
-for (const [age, stale] of [[599, false], [600, true]] as const) {
+for (const [age, stale] of [[899, false], [900, true]] as const) {
   test(`a snapshot aged ${age} seconds is ${stale ? 'stale' : 'fresh'}`, (context) => {
     context.mock.method(Date, 'now', () => (publishedAt + age) * 1_000)
 
@@ -25,7 +25,7 @@ for (const [age, stale] of [[599, false], [600, true]] as const) {
 }
 
 test('a successful retry acknowledges a stale snapshot with an unchanged origin', async (context) => {
-  const completedAt = publishedAt + 601
+  const completedAt = publishedAt + 901
   context.mock.method(Date, 'now', () => completedAt * 1_000)
   const freshAt = ref<number | null>(null)
   const { isStale, retry } = useFeedFreshness(publishedAt, freshAt, ref(null))
@@ -41,7 +41,7 @@ test('a successful retry acknowledges a stale snapshot with an unchanged origin'
 })
 
 test('a retry answer with a newer timestamp clears the notice even from cache', async (context) => {
-  const completedAt = publishedAt + 601
+  const completedAt = publishedAt + 901
   context.mock.method(Date, 'now', () => completedAt * 1_000)
   const origin = ref<number | null>(publishedAt)
   const { isStale, retry } = useFeedFreshness(origin, ref(null), ref(null))

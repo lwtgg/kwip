@@ -37,6 +37,10 @@ for (const [label, result, previous, hold, action, reason] of [
   ['unknown first observation', stale(null, { reason: 'invalid-r2-credentials' }), {}, {}, 'none', 'invalid-r2-credentials'],
   ['unknown sustained', stale(null, { reason: 'invalid-r2-credentials' }), { since: now - 15 * minute }, {}, 'notify', 'invalid-r2-credentials'],
   ['healthy recovery', { ageMs: minute, decision: 'fresh' }, { issue: 7 }, {}, 'close'],
+  // The pinger dispatches past four minutes, so a five-minute-old manifest is no longer "healthy".
+  ['recovery still inside the dispatch band', { ageMs: 5 * minute, decision: 'fresh' }, { issue: 7 }, {}, 'close'],
+  ['recovered but not yet fresh', { ageMs: 6 * minute, decision: 'dispatch' },
+    { issue: 7 }, { publisherHeld: true, heldUntil: now + minute }, 'none'],
 ]) {
   test(`alert decision: ${label}`, () => {
     const decision = decideAlert(result, previous, now, hold)

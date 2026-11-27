@@ -8,7 +8,7 @@ import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
 import { playerShieldSandbox, sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
-import { matchBannerContent } from '~/composables/matchBanner'
+import { detailClock, matchBannerContent } from '~/composables/matchBanner'
 import { kickoffDelayed } from '~/composables/useEventWindow'
 import { slugifyCategory } from '~/utils/supplementMatch'
 import { formatViewersExact } from '~/utils/viewers'
@@ -89,11 +89,14 @@ const pageHeading = computed(() => {
     : detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value)
 })
 
+// One tick a minute is all the banner needs from the clock; the player's own beats stay per second.
+const minute = computed(() => Math.floor(nowSeconds.value / 60) * 60)
+const seenDetail = detailClock()
 const heroMatchContent = computed(() => {
   const event = detail.value
   if (event?.match) return matchBannerContent(event.match, event.viewers, 'viewers', isStale.value,
-    kickoffDelayed(event.match.state, event.starts_at, nowSeconds.value),
-    { startsAt: event.starts_at, now: nowSeconds.value })
+    kickoffDelayed(event.match.state, event.starts_at, minute.value),
+    { observedAt: seenDetail(event.match.detail, minute.value), now: minute.value })
 })
 
 type SupplementState =

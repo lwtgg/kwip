@@ -25,9 +25,15 @@ jobs:
         with:
           version: '10.11.0'
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir worker-cron install --frozen-lockfile
+      # `bash -e` does not inherit the pipeline's status: without pipefail a red suite still
+      # concludes green, which happened on PR #13.
       - name: Verify
-        run: pnpm verify 2>&1 | tee "$RUNNER_TEMP/verify.log"
+        run: |
+          set -o pipefail
+          pnpm verify 2>&1 | tee "$RUNNER_TEMP/verify.log"
       - name: Upload verify log
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

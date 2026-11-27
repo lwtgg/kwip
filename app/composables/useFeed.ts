@@ -250,19 +250,24 @@ function useFeedEndpoint<T extends { success: boolean }>(
   if (import.meta.client && hasLiveMatch) {
     let timer: ReturnType<typeof setInterval> | undefined
     let alarm: ReturnType<typeof setTimeout> | undefined
+    let running = false
     const stopPolling = () => {
       clearInterval(timer)
       clearTimeout(alarm)
       timer = undefined
       alarm = undefined
+      running = false
     }
     const startPolling = () => {
+      running = true
       timer = setInterval(() => {
         if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
       }, FEED_CACHE_WINDOW_MS)
     }
     const onVisible = () => {
-      if (!document.hidden && armed === true) void feed.refresh({ dedupe: 'defer' })
+      // Also covers a pre-margin page whose alarm already became an interval: `armed` stays the past
+      // instant, so it alone would miss exactly the case rule 30 is about.
+      if (!document.hidden && (running || armed === true)) void feed.refresh({ dedupe: 'defer' })
     }
     // The predicate builds a fresh object per evaluation, so the watch fires on every payload even
     // when the decision is unchanged. Remember the armed decision and leave the armed timer alone.

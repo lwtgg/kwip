@@ -17,21 +17,34 @@ export function bannerAbbreviation(side: Match['away']): string {
   return side.abbreviation.trim() || teamInitials(side.name, 3)
 }
 
-/** A provider clock only moves on a publish; a bare soccer minute would otherwise sit still for minutes. */
-export function matchMinute(detail: string, state: Match['state'], startsAt?: number, now?: number) {
-  const shown = /^(\d+)'$/.exec(detail)
-  if (!shown || state !== 'in' || !startsAt || !now || now <= startsAt) return detail
-  const elapsed = Math.floor((now - startsAt) / 60)
-  // The interval is not match time, so take its fifteen minutes back out once play has restarted.
-  const minute = elapsed <= 45 ? elapsed : elapsed <= 60 ? 45 : Math.min(elapsed - 15, 90)
-  return minute > Number(shown[1]) ? `${minute}'` : detail
+/**
+ * A provider clock only moves on a publish, so a bare minute would sit still until the next one. Advance
+ * the provider's own number by the time since it showed, which is right for a late kickoff and for
+ * stoppage (45+2 becomes 45+3) without assuming an exact kickoff or a fixed interval.
+ */
+export function matchMinute(detail: string, state: Match['state'], observedAt?: number, now?: number) {
+  const shown = /^(\d+)(?:\+(\d+))?'$/.exec(detail)
+  if (!shown || state !== 'in' || !observedAt || !now || now < observedAt) return detail
+  const advance = Math.floor((now - observedAt) / 60)
+  if (!advance) return detail
+  if (shown[2] === undefined) return `${Number(shown[1]) + advance}'`
+  return `${shown[1]}+${Number(shown[2]) + advance}'`
+}
+
+/** Remembers when a detail first appeared on a card, so `matchMinute` can count from it. */
+export function detailClock() {
+  let seen = { detail: '', at: 0 }
+  return (detail: string, now?: number) => {
+    if (detail !== seen.detail) seen = { detail, at: now ?? 0 }
+    return seen.at
+  }
 }
 
 export function matchBannerContent(match: Match, viewers: string | number, metric: 'viewers' | 'views', stale: boolean,
-  delayed = false, clock: { startsAt?: number; now?: number } = {}) {
+  delayed = false, clock: { observedAt?: number; now?: number } = {}) {
   const state = delayed && match.state === 'pre' ? delayedState : stateLabels[match.state]
   const hasScores = match.away.score !== null && match.home.score !== null
-  const shown = matchMinute(match.detail, match.state, clock.startsAt, clock.now)
+  const shown = matchMinute(match.detail, match.state, clock.observedAt, clock.now)
   const detail = match.state === 'pre' && !hasScores ? 'vs' : shown === state ? '' : shown
   const exact = formatViewersExact(viewers)
   const unit = exact === '1' ? metric.slice(0, -1) : metric

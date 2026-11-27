@@ -218,7 +218,7 @@ function fitText() {
   const digits = scores.flatMap(score => inkBounds(score, context) ?? [])
   // The state hangs a fixed ink gap above the score ink. A card without a score has none, so place
   // the state where a zero would paint instead, keeping pre and final cards on the live rhythm.
-  const tailored = digits.length ? Math.min(...digits.map(ink => ink.top)) : digitRowAnchor(lineup)
+  const tailored = digits.length ? Math.min(...digits.map(ink => ink.top)) : digitRowAnchor(lineup, context)
   if (tailored !== undefined) {
     // A wrapped state still leaves one line's worth of clearance.
     const lineInkHeight = (stateInk.bottom - stateInk.top) / stateInk.lineCount
@@ -257,7 +257,7 @@ function fitText() {
 }
 
 /** Where a digit's ink would start in the score row: the glyph centred in the row's own box. */
-function digitRowAnchor(lineup: HTMLElement) {
+function digitRowAnchor(lineup: HTMLElement, context: CanvasRenderingContext2D) {
   const style = getComputedStyle(lineup)
   const [first, row] = style.gridTemplateRows.split(' ').map(parseFloat)
   // Positioned against the banner, which is already relative; the lineup must not become a
@@ -275,7 +275,6 @@ function digitRowAnchor(lineup: HTMLElement) {
   lineup.append(cell)
   const box = cell.getBoundingClientRect()
   const s = getComputedStyle(probe)
-  const context = document.createElement('canvas').getContext('2d')!
   context.font = `${s.fontWeight} ${s.fontSize} ${s.fontFamily}`
   const metrics = context.measureText('0')
   const anchor = box.top + (box.height - (metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent)) / 2
