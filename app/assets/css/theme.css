@@ -460,6 +460,11 @@
   --banner-logo-halo-ink: #000000;
   --banner-logo-halo-paper: #ffffff;
   --banner-logo-halo-contrast: 4;
+  /* Four offset copies stack on one pixel, so the ring paints this many times the opacity asked for;
+     the solve is on that rendered value. `pre` fields run to the base, so the mark stands on a mix. */
+  --banner-logo-halo-gain: 1;
+  --banner-logo-halo-width: max(1px, calc(var(--banner-logo) * 0.03));
+  --banner-logo-halo-pre-ground: 0.45;
   --banner-away-stop: 30%;
   --banner-home-stop: 71%;
   --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
@@ -587,9 +592,13 @@
   height: auto;
   object-fit: contain;
   /* Two radii so the halo reads as an outline at the silhouette, not a single soft glow. */
+  /* Four offset copies draw a hard ring at the silhouette, where a blur would only reach a fraction of
+     the opacity asked for. The ring scales with the mark so a hero crest keeps the same edge. */
   filter:
-    drop-shadow(0 0 calc(var(--banner-logo) * 0.06) var(--banner-logo-halo))
-    drop-shadow(0 0 calc(var(--banner-logo) * 0.14) var(--banner-logo-halo));
+    drop-shadow(var(--banner-logo-halo-width) 0 0 var(--banner-logo-halo))
+    drop-shadow(calc(-1 * var(--banner-logo-halo-width)) 0 0 var(--banner-logo-halo))
+    drop-shadow(0 var(--banner-logo-halo-width) 0 var(--banner-logo-halo))
+    drop-shadow(0 calc(-1 * var(--banner-logo-halo-width)) 0 var(--banner-logo-halo));
 }
 .banner-away-team :is(img, .banner-initials) { --banner-logo-halo: var(--banner-away-logo-halo); }
 .banner-home-team :is(img, .banner-initials) { --banner-logo-halo: var(--banner-home-logo-halo); }

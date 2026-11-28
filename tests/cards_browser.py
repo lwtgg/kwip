@@ -1623,10 +1623,79 @@ def check_wide_paint(pw, origin, assets):
     return rows
 
 
+LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="white"/></svg>'
+
+
+def check_halo_paint(pw, origin, assets):
+    """A crest in its own team colour would vanish on that end of the field; the halo is the fix, so
+    read the painted ring against the plate on both a dark green and a crimson ground."""
+    asset = assets / 'fixtures/streams.json'
+    listing = json.loads(asset.read_text())
+    group = listing['streams'][0]
+    now = int(time.time())
+    event = dict(group['streams'][0], id=9000, uri_name='basketball/matched-live',
+                 name='Colorado State Rams at Arizona Wildcats', viewers='62', always_live=0,
+                 starts_at=now - 3600, ends_at=now + 3600,
+                 match=dict(state='in', detail="2'",
+                            away=dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b',
+                                      logo='/icon-32.png', score=1),
+                            home=dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033',
+                                      logo='/icon-48.png', score=0)))
+    asset.write_text(json.dumps(dict(listing, timestamp=now + FRESH_TIMESTAMP_OFFSET, streams=[dict(group, streams=[event])])))
+    browser = pw.chromium.launch()
+    try:
+        context = browser.new_context(viewport={'width': 1280, 'height': 900}, device_scale_factor=1)
+        context.route(re.compile(r'/icon-(32|48)\.png$'),
+                      lambda route: route.fulfill(content_type='image/svg+xml', body=LOGO_SVG))
+        page = context.new_page()
+        assert page.goto(origin + '/', wait_until='networkidle').ok
+        card = page.locator('a.event-card:has(.banner-score)').first
+        card.scroll_into_view_if_needed()
+        page.wait_for_timeout(600)
+        banner = card.locator('.match-banner').bounding_box()
+        boxes = []
+        for side in ('away', 'home'):
+            box = card.locator(f'.banner-{side}-team img').bounding_box()
+            boxes.append((box['x'] - banner['x'], box['y'] - banner['y'], box['width'], box['height']))
+        shot = page.screenshot(clip=banner)
+        ratios = page.evaluate("""async ({shot, boxes}) => {
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          const bytes = Uint8Array.from(atob(shot), value => value.charCodeAt(0));
+          const image = await createImageBitmap(new Blob([bytes], {type: 'image/png'}));
+          canvas.width = image.width;
+          canvas.height = image.height;
+          context.drawImage(image, 0, 0);
+          const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          const pixel = (x, y) => [...data.slice((Math.round(y) * canvas.width + Math.round(x)) * 4, (Math.round(y) * canvas.width + Math.round(x)) * 4 + 3)];
+          const lum = rgb => rgb.map(v => (v / 255) <= 0.04045 ? (v / 255) / 12.92 : (((v / 255) + 0.055) / 1.055) ** 2.4)
+            .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+          return boxes.map(([x, y, w, h]) => {
+            const plate = pixel(x - 8, y + h / 2);
+            // The ring is a band, not one pixel: take its peak within three.
+            const near = [1, 2, 3].map(out => pixel(x - out, y + h / 2));
+            return Math.max(...near.map(ring => {
+              const [a, b] = [lum(plate), lum(ring)];
+              return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+            }));
+          });
+        }""", dict(shot=b64encode(shot).decode('ascii'), boxes=boxes))
+        target = 4
+        assert len(ratios) == 2, ratios
+        for side, ratio in zip(('away', 'home'), ratios):
+            assert ratio >= target - 0.1, (f'{side} logo halo only clears {ratio:.2f}', boxes)
+        context.close()
+        return ratios
+    finally:
+        asset.write_text(json.dumps(listing))
+        browser.close()
+
+
 def check_pixel_ink(pw, origin, assets, dest):
     centre_rows = []
     results = [row for fixture in PARITY_FIXTURES for row in check_fixture_ink(pw, origin, assets, fixture, centre_rows)]
     centre_rows.extend(check_wide_paint(pw, origin, assets))
+    print('Logo halo ring vs plate:', [round(ratio, 2) for ratio in check_halo_paint(pw, origin, assets)], flush=True)
     (dest / 'row-centre-report.json').write_text(json.dumps(centre_rows, indent=2))
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
     summary = [summarize_parity(results, engine, dpr)

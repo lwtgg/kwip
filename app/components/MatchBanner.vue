@@ -312,6 +312,11 @@ function placeState(lineup: HTMLElement, stateLine: HTMLElement, baseline: numbe
 }
 
 let observer: ResizeObserver | undefined
+/** A score's entrance is a `translate`, which the ink rects see: the fit that ran on the change measured
+ *  the raised box, so the state band has to be placed again once the digit has settled. */
+function refitAfterScore(event: AnimationEvent) {
+  if (event.animationName === 'banner-score-in') fitText()
+}
 onMounted(() => {
   for (const [index, side] of [match.value.away, match.value.home].entries()) {
     const image = logoImages[index]
@@ -320,10 +325,16 @@ onMounted(() => {
   fitText()
   observer = new ResizeObserver(fitText)
   if (lineupElement.value) observer.observe(lineupElement.value)
+  lineupElement.value?.addEventListener('animationend', refitAfterScore)
+  lineupElement.value?.addEventListener('animationcancel', refitAfterScore)
   void document.fonts.ready.then(fitText)
 })
 watch([match, () => props.content, failed], fitText, { flush: 'post', deep: true })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  lineupElement.value?.removeEventListener('animationend', refitAfterScore)
+  lineupElement.value?.removeEventListener('animationcancel', refitAfterScore)
+})
 </script>
 
 <template>

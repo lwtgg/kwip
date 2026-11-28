@@ -28,24 +28,24 @@ test('the contrast guard preserves dark colours and protects bright and interior
 
 
 test('a crest on its own colour gets a halo that clears the field, in whichever polarity does', () => {
+  // The browser composites the shadow channel-wise in sRGB, and the offset shadows stack; the solve
+  // must hold on that rendered value, not on a luminance mix.
   const halo = (field: string, target: number) => {
-    const css = logoHalo(field, '#000', '#fff', target)
-    const [, r, g, b, alpha] = /rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)/.exec(css)!
-    // The composable mixes channel-wise in sRGB, then compares luminance.
-    const end = luminance([r, g, b].map(v => Number(v) / 255) as RGB)
-    return { alpha: Number(alpha), css, at: end }
+    const ground = hexRGB(field)!
+    const css = logoHalo(ground, [0, 0, 0], [1, 1, 1], target, 1)
+    const [, r, , , alpha] = /rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)/.exec(css)!
+    const rendered = ground.map((c, i) => c + ((Number(r) / 255) - c) * Math.min(1, Number(alpha) * 1)) as RGB
+    const [a, b] = [luminance(rendered), luminance(ground)]
+    return { css, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
   }
-  // The TEX card: orange ink on an orange plate. Either polarity is fine (an orange mark is mid-tone),
-  // so long as the ring clears the field. A mid plate gets one too; the darkest gets a light ring.
-  for (const field of ['#a95935', '#7a7a7a', '#101010']) {
-    const { at, alpha } = halo(field, 4)
-    const ground = luminance(hexRGB(field)!)
-    const mixed = ground + (at - ground) * alpha
-    assert.ok((Math.max(mixed, ground) + 0.05) / (Math.min(mixed, ground) + 0.05) >= 4 - 1e-9)
+  // The TEX plate (orange on orange), a dark plate, a mid plate and near-black all clear the target.
+  for (const field of ['#a95935', '#0b1020', '#7a7a7a', '#101010', '#ffffff']) {
+    const { ratio } = halo(field, 4)
+    assert.ok(ratio >= 4 - 1e-9, `${field} halo is only ${ratio.toFixed(2)}`)
   }
-  // A field no ring can rescue at the requested ratio falls back to a nearly solid one.
-  assert.ok(halo('#7a7a7a', 30).alpha >= 0.9)
+  // A dark plate takes the light ink and a light plate the dark one.
   assert.ok(halo('#101010', 4).css.startsWith('rgb(255 255 255'))
+  assert.ok(halo('#f2f2f2', 4).css.startsWith('rgb(0 0 0'))
 })
 
 const away = { name: 'Colorado State Rams', abbreviation: 'CSU', score: 150, color: null, logo: null }

@@ -107,6 +107,23 @@ class DetailPage:
         self.page.wait_for_load_state('networkidle')
         self.page.wait_for_timeout(100)
 
+    def tick_until(self, predicate, seconds):
+        """Advance in sub-second steps so a change is seen mid-animation, not after it settled."""
+        for _ in range(seconds * 4):
+            self.page.clock.run_for(250)
+            self.page.wait_for_timeout(25)
+            if predicate():
+                return True
+        return False
+
+    def state_ratio(self):
+        """The state line's centre as a share of the banner's height, which is what the fit targets."""
+        return self.hero.evaluate("""b => {
+          const line = b.querySelector('.banner-status-tier:first-child .banner-status-line');
+          const box = b.getBoundingClientRect(), lb = line.getBoundingClientRect();
+          return (lb.top + lb.height / 2 - (box.top + box.height / 2)) / box.height;
+        }""")
+
     def scores(self):
         return self.hero.locator('.banner-score').all_inner_texts()
 
@@ -154,11 +171,26 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         check(failures, 'pre -> in: item polled from the margin', page.requests[ITEM] == 3, dict(page.requests))
         page.requests.clear()
 
+        page.page.wait_for_timeout(400)
+        placed = page.state_ratio()
         fixtures.write('post', 2, 1, 'Final', starts, ends)
-        page.tick(60)  # t0+265: tick at t0+260 reads the final
+        # t0+265: tick at t0+260 reads the final; stop as soon as the digits swap so the band is
+        # sampled while the entrance is still running.
+        assert page.tick_until(lambda: page.scores() == ['2', '1'], 70), page.scores()
+        raised = page.state_ratio()
+        page.tick(2)
+        page.page.wait_for_timeout(600)
         check(failures, 'in -> post: hero reads Final', 'Final' in page.tiers(), page.tiers())
         check(failures, 'in -> post: hero score moved', page.scores() == ['2', '1'], page.scores())
         check(failures, 'in -> post: pill reads Final', page.pill.inner_text() == 'Final', page.pill.inner_text())
+        # The score's entrance is a translate, so the fit that ran on the change saw a raised digit;
+        # the band has to come back to where it was once the animation settles.
+        check(failures, 'in -> post: the score entrance moves the band', raised != placed,
+              (round(placed, 3), round(raised, 3)))
+        # The state lands 0.28 of the banner above the centre; a raised digit must not keep it elsewhere.
+        check(failures, 'in -> post: state band settles after the score animation',
+              abs(page.state_ratio() + 0.28) <= 0.02,
+              (round(placed, 3), round(raised, 3), round(page.state_ratio(), 3)))
         evidence['in -> post, the final tick (60 s)'] = dict(page.requests)
         page.requests.clear()
 
