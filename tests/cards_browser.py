@@ -766,9 +766,11 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
         if paint.get(f'banner-{side}-score'):
             score = paint[f'banner-{side}-score']
             team = geometry['logoBoxes'][index]
-            # Home sits on the left, so its digit is left of its logo.
+            # Home sits on the left, so its digit is left of its logo. At the narrowest widths the fit
+            # floor lets the box overflow its slot either way; a fraction of a pixel of box overlap is
+            # rounding, and the painted ink has its own clearance check.
             gap = score['left'] - team['right'] if side == 'home' else team['left'] - score['right']
-            assert gap >= 0, ('score touches logo', fixture, side, gap, geometry)
+            assert gap >= -1, ('score touches logo', fixture, side, gap, geometry)
     if progress := geometry['progress']:
         # A visible track in the bottom row, between the abbreviations, above the card's edge.
         assert progress['height'] >= 4 and progress['width'] >= progress['height'] * 4, (fixture, progress)
@@ -1661,7 +1663,7 @@ def check_halo_paint(pw, origin, assets):
             box = card.locator(f'.banner-{side}-team img').bounding_box()
             boxes.append((box['x'] - banner['x'], box['y'] - banner['y'], box['width'], box['height']))
         shot = page.screenshot(clip=banner)
-        ratios = page.evaluate("""async ({shot, boxes}) => {
+        shot_result = page.evaluate("""async ({shot, boxes}) => {
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
           const bytes = Uint8Array.from(atob(shot), value => value.charCodeAt(0));
@@ -1673,7 +1675,12 @@ def check_halo_paint(pw, origin, assets):
           const pixel = (x, y) => [...data.slice((Math.round(y) * canvas.width + Math.round(x)) * 4, (Math.round(y) * canvas.width + Math.round(x)) * 4 + 3)];
           const lum = rgb => rgb.map(v => (v / 255) <= 0.04045 ? (v / 255) / 12.92 : (((v / 255) + 0.055) / 1.055) ** 2.4)
             .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
-          return boxes.map(([x, y, w, h]) => {
+          // The field runs home to away across the card; the ends must be the two colours and the
+          // middle a blend of them, not one colour flat across most of the banner. The bottom pad is
+          // below every line of text, so the sample rows only see the field and the scrim.
+          const row = canvas.height - 4;
+          const ends = [0.05, 0.5, 0.95].map(share => pixel(canvas.width * share, row));
+          return { ends, ratios: boxes.map(([x, y, w, h]) => {
             const plate = pixel(x - 8, y + h / 2);
             // The ring is a band, not one pixel: take its peak within three.
             const near = [1, 2, 3].map(out => pixel(x - out, y + h / 2));
@@ -1681,12 +1688,21 @@ def check_halo_paint(pw, origin, assets):
               const [a, b] = [lum(plate), lum(ring)];
               return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
             }));
-          });
+          }) };
         }""", dict(shot=b64encode(shot).decode('ascii'), boxes=boxes))
+        ratios = shot_result['ratios']
         target = 4
         assert len(ratios) == 2, ratios
-        for side, ratio in zip(('away', 'home'), ratios):
+        for side, ratio in zip(('home', 'away'), ratios):
             assert ratio >= target - 0.1, (f'{side} logo halo only clears {ratio:.2f}', boxes)
+        # Home (#cc0033) is the left end and away (#1e4d2b) the right; a clamped or unswapped stop
+        # pair paints one of them flat across the banner.
+        left, middle, right = shot_result['ends']
+        toward = lambda rgb, channel: rgb[channel] - rgb[{0: 1, 1: 0}[channel]]
+        assert toward(left, 0) > 0, ('home colour not at the left end', left, middle, right)
+        assert toward(right, 1) > 0, ('away colour not at the right end', left, middle, right)
+        assert max(abs(a - b) for a, b in zip(left, middle)) > 8 and max(abs(a - b) for a, b in zip(right, middle)) > 8, (
+            'field is not a blend', left, middle, right)
         context.close()
         return ratios
     finally:

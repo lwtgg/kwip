@@ -465,8 +465,9 @@
   --banner-logo-halo-gain: 1;
   --banner-logo-halo-width: max(1px, calc(var(--banner-logo) * 0.03));
   --banner-logo-halo-pre-ground: 0.45;
-  --banner-away-stop: 30%;
-  --banner-home-stop: 71%;
+  /* Home is the left end, so it reaches its stop early and away takes the far one. */
+  --banner-home-stop: 30%;
+  --banner-away-stop: 71%;
   --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
   --banner-score-size: min(2.875rem, var(--banner-score-mobile-cap));
   --banner-score-mobile-cap: 15vw;

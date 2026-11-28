@@ -14,10 +14,11 @@ const match = computed(() => props.stream.match!)
 const initialNow = useState('ui:card-now', () => Math.floor(Date.now() / 1000))
 const art = computed(() => matchBannerStyle(match.value, props.scale))
 // A score is remounted when it changes so its entrance replays; the count keeps the first paint quiet.
+// The template draws home first, so its count is the first one.
 const scoreEpoch = ref([0, 0])
 watch(() => [match.value.away.score, match.value.home.score], ([away, home], [oldAway, oldHome]) => {
-  if (away !== oldAway && oldAway !== undefined) scoreEpoch.value[0]!++
-  if (home !== oldHome && oldHome !== undefined) scoreEpoch.value[1]!++
+  if (home !== oldHome && oldHome !== undefined) scoreEpoch.value[0]!++
+  if (away !== oldAway && oldAway !== undefined) scoreEpoch.value[1]!++
 })
 const cssNumber = (style: CSSStyleDeclaration, name: string, fallback: number) => Number.parseFloat(style.getPropertyValue(name)) || fallback
 /** Width available inside a slot, excluding its gutters. */
@@ -196,9 +197,9 @@ function fitText() {
   }
   // The names and the audience share a row only while a word gap separates their text.
   if (audienceLine && !lineup.hasAttribute('data-wide-score-detail') && !wideAudience) {
-    const [away, home] = labels.map(label => label.getBoundingClientRect())
+    const [home, away] = labels.map(label => label.getBoundingClientRect())
     const audience = audienceLine.getBoundingClientRect()
-    if (Math.min(audience.left - away!.right, home!.left - audience.right) < resolveLength(lineup, 'var(--banner-gutter)')) {
+    if (Math.min(audience.left - home!.right, away!.left - audience.right) < resolveLength(lineup, 'var(--banner-gutter)')) {
       lineup.dataset.wideDetail = ''
       lineup.dataset.wideAudience = ''
       fitLine(audienceLine)
