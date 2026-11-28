@@ -1659,7 +1659,7 @@ def check_halo_paint(pw, origin, assets):
         page.wait_for_timeout(600)
         banner = card.locator('.match-banner').bounding_box()
         boxes = []
-        for side in ('away', 'home'):
+        for side in ('home', 'away'):
             box = card.locator(f'.banner-{side}-team img').bounding_box()
             boxes.append((box['x'] - banner['x'], box['y'] - banner['y'], box['width'], box['height']))
         shot = page.screenshot(clip=banner)
