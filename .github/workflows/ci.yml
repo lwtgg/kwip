@@ -25,9 +25,13 @@ jobs:
         with:
           version: '10.11.0'
       - name: Install
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir worker-cron install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
+      # The cron is its own project with its own lockfile. `--dir worker-cron` is not enough: from
+      # inside the workspace root pnpm 10 resolves the root as the only project and installs nothing
+      # for the cron, so its suite and its dry-run failed on a missing `aws4fetch`.
+      - name: Install the cron project
+        working-directory: worker-cron
+        run: pnpm install --frozen-lockfile --ignore-workspace
       # `bash -e` does not inherit the pipeline's status: without pipefail a red suite still
       # concludes green, which happened on PR #13.
       - name: Verify
