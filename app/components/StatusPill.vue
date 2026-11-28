@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { endedLabel, formatRelative, windowLabel } from '~/composables/useEventWindow'
+import { endedLabel, formatRelative, kickoffDelayed, windowLabel } from '~/composables/useEventWindow'
 
 const props = defineProps<{
   startsAt: number
@@ -25,8 +25,12 @@ const status = computed(() => {
 
   if (alwaysLive === 1) return { ...label, state: 'always-live' }
   if (startsAt === 0) return { ...label, state: 'event' }
-  // A `pre` match past kickoff is still Upcoming: the state comes from the match, not the clock.
-  if (matchState === 'pre' && now >= startsAt) return { text: 'Upcoming', aria: 'Upcoming', state: 'upcoming' }
+  // A `pre` match keeps Upcoming past kickoff until the provider catches up; well past it, say so.
+  if (matchState === 'pre' && now >= startsAt) {
+    return kickoffDelayed(matchState, startsAt, now)
+      ? { text: 'Delayed', aria: 'Kickoff delayed', state: 'upcoming' }
+      : { text: 'Upcoming', aria: 'Upcoming', state: 'upcoming' }
+  }
   if (now < startsAt) return { ...label, state: 'upcoming', timestamp: startsAt }
   if (now < endsAt) {
     if (props.stale) return { text: 'Listed live', aria: 'Listed live', state: 'live' }
@@ -40,7 +44,9 @@ const status = computed(() => {
 const shortText = computed(() => {
   const now = props.now ?? initialNow.value
   if (status.value.state === 'upcoming') {
-    if (props.matchState === 'pre' && now >= props.startsAt) return 'Upcoming'
+    if (props.matchState === 'pre' && now >= props.startsAt) {
+      return kickoffDelayed(props.matchState, props.startsAt, now) ? 'Delayed' : 'Upcoming'
+    }
     return `In ${formatRelative(props.startsAt - now)}`
   }
   if (status.value.state === 'ended' && now > props.endsAt) return `${formatRelative(now - props.endsAt)} ago`

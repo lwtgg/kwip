@@ -8,7 +8,8 @@ export function alertBudget(ageMs, recovering = false, observingFailure = false)
 }
 
 export function decideAlert(result, previous = {}, now, hold = {}) {
-  const healthy = result.ageMs !== null && result.ageMs <= 12 * minute && result.decision === 'fresh'
+  // A dispatch threshold of four minutes: past five the pinger has visibly failed to act.
+  const healthy = result.ageMs !== null && result.ageMs <= 5 * minute && result.decision === 'fresh'
   const state = { ...previous }
   if (healthy) {
     const action = positive(previous.issue) || previous.pendingCreate || previous.recovering
@@ -65,7 +66,7 @@ function object(value) {
 
 // All alert failures are contained here. No provider response or credential is logged.
 export async function runAlerts(env, now, result, context, request) {
-  const healthy = result.decision === 'fresh' && result.ageMs <= 12 * minute
+  const healthy = result.decision === 'fresh' && result.ageMs <= 5 * minute
   const observedSince = context.reservation?.attemptAt
   const budgetAge = result.ageMs ?? (Number.isSafeInteger(observedSince) ? Math.max(0, now - observedSince) : null)
   const unknownFailure = result.ageMs === null && result.decision === 'error'

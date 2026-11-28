@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { endedLabel, formatRelative, remainingLabel, windowLabel } from '../app/composables/useEventWindow.ts'
+import { endedLabel, formatRelative, kickoffDelayed, remainingLabel, windowLabel } from '../app/composables/useEventWindow.ts'
 
 test('relative labels use compact units and expand them for assistive technology', () => {
   assert.equal(formatRelative(42 * 60), '42m')
@@ -22,4 +22,12 @@ test('24/7 channels take precedence over events without a start time', () => {
   const window = { startsAt: 0, endsAt: 0, now: 1000 }
   assert.equal(windowLabel(window).text, 'Event')
   assert.equal(windowLabel({ ...window, alwaysLive: 1 }).text, '24/7')
+})
+
+test('only a pre match this far past kickoff counts as delayed', () => {
+  assert.equal(kickoffDelayed('pre', 1000, 1899), false)
+  assert.equal(kickoffDelayed('pre', 1000, 1900), true)
+  assert.equal(kickoffDelayed('in', 1000, 2500), false)
+  assert.equal(kickoffDelayed('pre', 0, 2500), false)
+  assert.equal(kickoffDelayed('pre', 1000, undefined), false)
 })

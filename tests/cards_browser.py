@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 import tempfile
 import time
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout, expect, sync_playwright
 from click_under_browser import worker, CLS_OBSERVER, CLS_SCORE
 
 
@@ -406,7 +406,7 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
       return {
         card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
         bottomPad,
-        rowBottom:bounds('.banner-away-team').bottom + riseOf('away'),
+        rowBottom:bounds('.banner-home-team').bottom + riseOf('home'),
         tracks:getComputedStyle(lineup).gridTemplateRows.split(' ').map(parseFloat),
         wideScoreDetail:lineup.hasAttribute('data-wide-score-detail'),
         lowerHeight:getComputedStyle(lineup).gridTemplateRows.split(' ').slice(2).reduce((sum, track) => sum + parseFloat(track), 0),
@@ -440,9 +440,9 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
         middle:bounds('.banner-status-tier:first-child'),
         wideDetail:lineup.hasAttribute('data-wide-detail'),
         wideAudience:lineup.hasAttribute('data-wide-audience'),
-        logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
-        logoRise:['away', 'home'].map(riseOf),
-        labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
+        logoBoxes:['home', 'away'].map(side => bounds('.banner-' + side + '-team > *')),
+        logoRise:['home', 'away'].map(riseOf),
+        labels:['home', 'away'].map(side => bounds('.banner-' + side + '-label')),
         stateInk:inkBounds(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
         labelInk:[...banner.querySelectorAll('.banner-abbreviation .banner-fit-text')].map(inkBounds),
         scoreInk:[...banner.querySelectorAll('.banner-score')].map(inkBounds),
@@ -470,7 +470,7 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
 def banner_measurements(geometry):
     box, paint = geometry['card'], geometry['paint']
     detail = paint.get('tier-1', paint['tier-0'])
-    left, right = (paint.get(f'banner-{side}-score') for side in ('away', 'home'))
+    left, right = (paint.get(f'banner-{side}-score') for side in ('home', 'away'))
     score_gap = min(geometry['middle']['left'] - left['right'],
                     right['left'] - geometry['middle']['right']) if left else None
     centre = lambda box: (box['top'] + box['bottom']) / 2
@@ -482,8 +482,8 @@ def banner_measurements(geometry):
     state_position = (centre(geometry['banner']) - sum(geometry['stateInk']) / 2) / geometry['banner']['height']
     name_gaps = [(ink[0] - logo['bottom']) / logo['height'] for ink, logo in zip(geometry['labelInk'], geometry['logoBoxes'])]
     shares_row = 'tier-2' in paint and not geometry['wideAudience'] and not geometry['wideScoreDetail']
-    audience_gap = min(paint['tier-2']['left'] - paint['banner-away-label']['right'],
-                       paint['banner-home-label']['left'] - paint['tier-2']['right']) if shares_row else None
+    audience_gap = min(paint['tier-2']['left'] - paint['banner-home-label']['right'],
+                       paint['banner-away-label']['left'] - paint['tier-2']['right']) if shares_row else None
     return dict(row_offset=row_offset, bottom_gap=bottom_gap, bottom_pad=geometry['bottomPad'],
                 state_position=state_position, name_gaps=name_gaps, audience_gap=audience_gap,
                 wide_score_detail=geometry['wideScoreDetail'], wide_audience=geometry['wideAudience'],
@@ -577,8 +577,8 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     viewers = int(event['viewers'])
     compact = audience.split()[0]
     # The name is the banner's own content, in its words and order, one sentence each.
-    teams = (', '.join(f"{match[side]['name']} {match[side]['score']}" for side in ('away', 'home')) if scored
-             else f"{match['away']['name']} vs {match['home']['name']}")
+    teams = (', '.join(f"{match[side]['name']} {match[side]['score']}" for side in ('home', 'away')) if scored
+             else f"{match['home']['name']} vs {match['away']['name']}")
     spoken = audience if compact == f'{viewers:,}' else f'{audience} ({viewers:,})'
     parts = [teams, state, '' if detail in ('vs', state) else detail, spoken]
     kickoff = datetime.fromtimestamp(event['starts_at'], timezone.utc).strftime('%a, %d %b %Y %H:%M:%S UTC')
@@ -593,11 +593,11 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
     assert_rendered_segments(oracle, card, (state, detail, audience), event['uri_name'])
     assert banner.locator('.banner-score').all_text_contents() == (
-        [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
+        [str(match[side]['score']) for side in ('home', 'away')] if scored else [])
     # Never blank under a logo: an empty abbreviation falls back to the name's initials.
     shown = banner.locator('.banner-abbreviation').all_text_contents()
     assert shown == [match[side]['abbreviation'] or ''.join(word[0] for word in match[side]['name'].split()[:3]).upper()
-                     for side in ('away', 'home')], shown
+                     for side in ('home', 'away')], shown
     assert all(text.strip() for text in shown), shown
 
     geometry = banner_geometry(card)
@@ -630,7 +630,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         assert box['top'] <= ink['top'] <= ink['bottom'] <= box['bottom'], (event['uri_name'], name, ink, geometry)
     # Tight score leading lets the font's range box extend past the ink.
     vertical = {'tier-0': geometry['stateInk'], 'tier-1': geometry['detailInk']}
-    for side, index in (('away', 0), ('home', 1)):
+    for side, index in (('home', 0), ('away', 1)):
         vertical[f'banner-{side}-label'] = geometry['labelInk'][index]
         if geometry['scoreInk']:
             vertical[f'banner-{side}-score'] = geometry['scoreInk'][index]
@@ -667,14 +667,14 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         # Wide listings anchor both digits to the middle column's two gutters.
         # Longer detail can widen that column and move both anchors out.
         if not geometry['stacked']:
-            away, home = (paint[f'banner-{side}-score'] for side in ('away', 'home'))
-            gaps = (geometry['middle']['left'] - away['right'], home['left'] - geometry['middle']['right'])
+            home, away = (paint[f'banner-{side}-score'] for side in ('home', 'away'))
+            gaps = (geometry['middle']['left'] - home['right'], away['left'] - geometry['middle']['right'])
             assert all(abs(gap - geometry['gutter']) <= 1 for gap in gaps), (
                 'wide listing scores off middle gutters', event['uri_name'], gaps, geometry['gutter'])
         long_detail = event['uri_name'].endswith('/matched-long-status')
         if detail == 'Halftime' or long_detail:
             centres = [((paint[f'banner-{side}-score']['left'] + paint[f'banner-{side}-score']['right']) / 2 - box['left']) / box['width'] * 100
-                       for side in ('away', 'home')]
+                       for side in ('home', 'away')]
             # The long-detail fixture has a wider, three-digit pair. Its symmetric
             # anchors put the home digit farther from the original mockup mark.
             assert abs(centres[0] - 38.5) <= 3 and abs(centres[1] - 57.6) <= (5 if long_detail else 4), (
@@ -759,15 +759,18 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
                 'tier outside middle column', fixture, tier, middle, box)
     for tier in geometry['tiers']:
         assert box['top'] <= tier['top'] <= tier['bottom'] <= box['bottom'], (fixture, tier, box)
-    for side, index in (('away', 0), ('home', 1)):
+    for side, index in (('home', 0), ('away', 1)):
         logo = geometry['logoBoxes'][index]
         # The name margin removes the half-leading, so compare ink: the line box may reach into the row.
         assert logo['bottom'] <= geometry['labelInk'][index][0], ('logo above abbreviation', fixture, side, geometry)
         if paint.get(f'banner-{side}-score'):
             score = paint[f'banner-{side}-score']
             team = geometry['logoBoxes'][index]
-            gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
-            assert gap >= 0, ('score touches logo', fixture, side, gap, geometry)
+            # Home sits on the left, so its digit is left of its logo. At the narrowest widths the fit
+            # floor lets the box overflow its slot either way; a fraction of a pixel of box overlap is
+            # rounding, and the painted ink has its own clearance check.
+            gap = score['left'] - team['right'] if side == 'home' else team['left'] - score['right']
+            assert gap >= -1, ('score touches logo', fixture, side, gap, geometry)
     if progress := geometry['progress']:
         # A visible track in the bottom row, between the abbreviations, above the card's edge.
         assert progress['height'] >= 4 and progress['width'] >= progress['height'] * 4, (fixture, progress)
@@ -796,11 +799,11 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
         assert measurements['score_gap'] >= gutter - .02, (
             'score-to-middle gap below gutter', fixture, measurements['score_gap'], gutter)
     if has_detail and geometry['scoreInk']:
-        away, home, tier = paint['banner-away-score'], paint['banner-home-score'], paint['tier-1']
+        home, away, tier = paint['banner-home-score'], paint['banner-away-score'], paint['tier-1']
         if geometry['wideScoreDetail']:
             detail_gap = geometry['detailInk'][0] - max(ink[1] for ink in geometry['scoreInk'])
         else:
-            detail_gap = min(tier['left'] - away['right'], home['left'] - tier['right'])
+            detail_gap = min(tier['left'] - home['right'], away['left'] - tier['right'])
         assert detail_gap >= gutter - .02, ('score-to-detail gap below gutter', fixture, detail_gap, gutter)
     return measurements
 
@@ -1135,14 +1138,19 @@ def check_matches(browser, origin, assets, dest, text_modes, measure_only=False)
 
 
 def screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=False):
-    try:
-        return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
-    except AssertionError as error:
-        # WebKit occasionally serves a frame between a relayout and the image repaint.
-        if error.args[0][0] != 'no screenshot ink':
-            raise
-        line.page.wait_for_timeout(50)
-        return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
+    for attempt in range(2):
+        try:
+            return measure_screenshot_ink(line, dpr, check_parity=check_parity, include_horizontal=include_horizontal)
+        except PlaywrightTimeout:
+            # A loaded box can stall the compositor past the screenshot timeout; one retry usually paints.
+            if attempt:
+                raise
+            line.page.wait_for_timeout(100)
+        except AssertionError as error:
+            # WebKit occasionally serves a frame between a relayout and the image repaint.
+            if error.args[0][0] != 'no screenshot ink' or attempt:
+                raise
+            line.page.wait_for_timeout(50)
 
 
 def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=False):
@@ -1158,6 +1166,8 @@ def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=
     plate_style = """
       .match-banner { background: black !important }
       .match-banner * { visibility: hidden !important }
+      /* The team halo bleeds past the element box and would touch the clip edge; geometry is the mark. */
+      .match-banner .banner-team img, .match-banner .banner-initials { filter: none !important }
     """
     plate = page.screenshot(clip=clip, style=plate_style)
     line.evaluate("el => el.setAttribute('data-ink-target', '')")
@@ -1238,23 +1248,24 @@ def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=
 
 
 def score_ink_clearance(geometry, ink, cell, dpr):
-    state, away, home, detail = ink
+    # Dom order puts home first, so `home` is the left digit.
+    state, home, away, detail = ink
     gutter = geometry['trackGutter']
     # The 50%-coverage edges are quantized to device pixels.
     tolerance = 1 / dpr
-    state_gap = min(away[0], home[0]) - state[1]
+    state_gap = min(home[0], away[0]) - state[1]
     assert state_gap + tolerance >= gutter, ('painted score-to-state gap below gutter', cell, state_gap, gutter)
     if geometry['wideScoreDetail']:
-        detail_gap = detail[0] - max(away[1], home[1])
+        detail_gap = detail[0] - max(home[1], away[1])
     else:
-        detail_gap = min(detail[2] - away[3], home[2] - detail[3])
+        detail_gap = min(detail[2] - home[3], away[2] - detail[3])
     assert detail_gap + tolerance >= gutter, ('painted score-to-detail gap below gutter', cell, detail_gap, gutter)
     # Half-leading centres the font's content area on the line box, and the digits stay inside that area.
     # With leading below the content height, ink may pass each line-box edge by at most half the difference.
     overhang = max(0, *(max(box['top'] - score[0], score[1] - box['bottom'])
-                        for score, box in zip((away, home), geometry['scoreBoxes'])))
+                        for score, box in zip((home, away), geometry['scoreBoxes'])))
     half_leading = max(0, *((geometry['paint'][f'banner-{side}-score']['height'] - box['height']) / 2
-                            for side, box in zip(('away', 'home'), geometry['scoreBoxes'])))
+                            for side, box in zip(('home', 'away'), geometry['scoreBoxes'])))
     # Cap the theoretical allowance at the empirical limit for painted digits.
     limit = min(half_leading + tolerance, 2)
     assert overhang <= limit, ('painted score ink past the overhang limit', cell, overhang, limit)
@@ -1467,7 +1478,11 @@ def check_row_centre_paint(browser, engine, origin, widths, fixture='halftime', 
                         assert max(map(abs, offsets)) <= 2, ('painted logos off card centre', cell, offsets)
                     state_low, state_high = WIDE_STATE_POSITION if geometry['wideDetail'] else STATE_POSITION
                     assert state_low <= state_position <= state_high, ('painted state position', cell, state_position)
-                    assert .60 <= state_gap <= 1.20, ('painted state-to-score gap', cell, state_gap)
+                    # A wide tier keeps the band and gives up the gap ceiling: its score is too tall and
+                    # its support stack too deep to move the row, so the state lands on the band and the
+                    # disjointness check above is what keeps it off the digits.
+                    assert .60 <= state_gap <= (float('inf') if geometry['wideDetail'] else 1.20), (
+                        'painted state-to-score gap', cell, state_gap)
                     assert NAME_GAP[0] <= min(name_gaps) <= max(name_gaps) <= NAME_GAP[1], ('painted logo-to-name gap', cell, name_gaps)
                     low, high = SCORE_LOGO[scale]
                     if geometry['stacked']:
@@ -1543,12 +1558,13 @@ def check_fixture_ink(pw, origin, assets, fixture, centre_rows):
             for scale, path in variants:
                 assert page.goto(origin + path, wait_until='networkidle').ok
                 card = page.locator('a.event-card:has(.banner-score)').first
-                expect(card.locator('.banner-score')).to_have_text([str(away_score), str(home_score)])
+                expect(card.locator('.banner-score')).to_have_text([str(home_score), str(away_score)])
                 expect(card.locator('.banner-status-tier:nth-child(2) .banner-status-line')).to_have_text(detail)
                 page.evaluate('document.fonts.ready')
                 assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
                 if engine == 'chromium':
-                    assert_acumin_used(card, len(str(away_score)))
+                    # The rule reads the first score, which is now the home digit.
+                    assert_acumin_used(card, len(str(home_score)))
                 if scale == 'hero-element':
                     double_text(page)
                 elif scale == 'wrapped':
@@ -1612,10 +1628,93 @@ def check_wide_paint(pw, origin, assets):
     return rows
 
 
+LOGO_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="16" fill="white"/></svg>'
+
+
+def check_halo_paint(pw, origin, assets):
+    """A crest in its own team colour would vanish on that end of the field; the halo is the fix, so
+    read the painted ring against the plate on both a dark green and a crimson ground."""
+    asset = assets / 'fixtures/streams.json'
+    listing = json.loads(asset.read_text())
+    group = listing['streams'][0]
+    now = int(time.time())
+    event = dict(group['streams'][0], id=9000, uri_name='basketball/matched-live',
+                 name='Colorado State Rams at Arizona Wildcats', viewers='62', always_live=0,
+                 starts_at=now - 3600, ends_at=now + 3600,
+                 match=dict(state='in', detail="2'",
+                            away=dict(name='Colorado State Rams', abbreviation='CSU', color='#1e4d2b',
+                                      logo='/icon-32.png', score=1),
+                            home=dict(name='Arizona Wildcats', abbreviation='ARIZ', color='#cc0033',
+                                      logo='/icon-48.png', score=0)))
+    asset.write_text(json.dumps(dict(listing, timestamp=now + FRESH_TIMESTAMP_OFFSET, streams=[dict(group, streams=[event])])))
+    browser = pw.chromium.launch()
+    try:
+        context = browser.new_context(viewport={'width': 1280, 'height': 900}, device_scale_factor=1)
+        context.route(re.compile(r'/icon-(32|48)\.png$'),
+                      lambda route: route.fulfill(content_type='image/svg+xml', body=LOGO_SVG))
+        page = context.new_page()
+        assert page.goto(origin + '/', wait_until='networkidle').ok
+        card = page.locator('a.event-card:has(.banner-score)').first
+        card.scroll_into_view_if_needed()
+        page.wait_for_timeout(600)
+        banner = card.locator('.match-banner').bounding_box()
+        boxes = []
+        for side in ('home', 'away'):
+            box = card.locator(f'.banner-{side}-team img').bounding_box()
+            boxes.append((box['x'] - banner['x'], box['y'] - banner['y'], box['width'], box['height']))
+        shot = page.screenshot(clip=banner)
+        shot_result = page.evaluate("""async ({shot, boxes}) => {
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          const bytes = Uint8Array.from(atob(shot), value => value.charCodeAt(0));
+          const image = await createImageBitmap(new Blob([bytes], {type: 'image/png'}));
+          canvas.width = image.width;
+          canvas.height = image.height;
+          context.drawImage(image, 0, 0);
+          const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          const pixel = (x, y) => [...data.slice((Math.round(y) * canvas.width + Math.round(x)) * 4, (Math.round(y) * canvas.width + Math.round(x)) * 4 + 3)];
+          const lum = rgb => rgb.map(v => (v / 255) <= 0.04045 ? (v / 255) / 12.92 : (((v / 255) + 0.055) / 1.055) ** 2.4)
+            .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+          // The field runs home to away across the card; the ends must be the two colours and the
+          // middle a blend of them, not one colour flat across most of the banner. The bottom pad is
+          // below every line of text, so the sample rows only see the field and the scrim.
+          const row = canvas.height - 4;
+          const ends = [0.05, 0.5, 0.95].map(share => pixel(canvas.width * share, row));
+          return { ends, ratios: boxes.map(([x, y, w, h]) => {
+            const plate = pixel(x - 8, y + h / 2);
+            // The ring is a band, not one pixel: take its peak within three.
+            const near = [1, 2, 3].map(out => pixel(x - out, y + h / 2));
+            return Math.max(...near.map(ring => {
+              const [a, b] = [lum(plate), lum(ring)];
+              return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+            }));
+          }) };
+        }""", dict(shot=b64encode(shot).decode('ascii'), boxes=boxes))
+        ratios = shot_result['ratios']
+        target = 4
+        assert len(ratios) == 2, ratios
+        for side, ratio in zip(('home', 'away'), ratios):
+            assert ratio >= target - 0.1, (f'{side} logo halo only clears {ratio:.2f}', boxes)
+        # Home (#cc0033) is the left end and away (#1e4d2b) the right; a clamped or unswapped stop
+        # pair paints one of them flat across the banner.
+        left, middle, right = shot_result['ends']
+        toward = lambda rgb, channel: rgb[channel] - rgb[{0: 1, 1: 0}[channel]]
+        assert toward(left, 0) > 0, ('home colour not at the left end', left, middle, right)
+        assert toward(right, 1) > 0, ('away colour not at the right end', left, middle, right)
+        assert max(abs(a - b) for a, b in zip(left, middle)) > 8 and max(abs(a - b) for a, b in zip(right, middle)) > 8, (
+            'field is not a blend', left, middle, right)
+        context.close()
+        return ratios
+    finally:
+        asset.write_text(json.dumps(listing))
+        browser.close()
+
+
 def check_pixel_ink(pw, origin, assets, dest):
     centre_rows = []
     results = [row for fixture in PARITY_FIXTURES for row in check_fixture_ink(pw, origin, assets, fixture, centre_rows)]
     centre_rows.extend(check_wide_paint(pw, origin, assets))
+    print('Logo halo ring vs plate:', [round(ratio, 2) for ratio in check_halo_paint(pw, origin, assets)], flush=True)
     (dest / 'row-centre-report.json').write_text(json.dumps(centre_rows, indent=2))
     (dest / 'pixel-ink-report.json').write_text(json.dumps(results, indent=2))
     summary = [summarize_parity(results, engine, dpr)

@@ -1,7 +1,7 @@
 import { AwsClient } from 'aws4fetch'
 import { runAlerts } from './watchdog.mjs'
 
-const maxAgeMs = 12 * 60_000
+const maxAgeMs = 4 * 60_000
 const maxClockSkewMs = 60_000
 const stalledAfterTicks = 6
 const searchSliceMs = 5 * 60_000

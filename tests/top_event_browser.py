@@ -289,7 +289,9 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         if https_page:
             assert urlsplit(page.url).scheme == 'https'
             assert urlsplit(frame.get_attribute('src')).scheme == 'https'
-        assert box.bounding_box() == before
+        if box.bounding_box() != before:
+            print('player moved', box.bounding_box()['y'] - before['y'], width, variant, root_text)
+        assert box.bounding_box() == before, (before, box.bounding_box())
         assert plate.bounding_box() == plate_before
         assert before['y'] == plate_before['y'] + plate_before['height']
         assert card.bounding_box()['width'] == plate_before['width'] == before['width']
@@ -345,7 +347,9 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
             expect(frame).to_have_attribute('src', sound_url)
             assert not original.evaluate('el => el.isConnected')
             expect(button).to_be_focused()
-            assert box.bounding_box() == before
+            if box.bounding_box() != before:
+                print('player moved', box.bounding_box()['y'] - before['y'], width, variant, root_text)
+            assert box.bounding_box() == before, (before, box.bounding_box())
             assert button.bounding_box() == target
             assert not ad_requests and page.evaluate("sessionStorage.getItem('ads:click-under') === null")
             button.click()
@@ -381,8 +385,10 @@ def check(browser, oracle, origin, feed, listing, event, width, variant, root_te
         page.evaluate('window.scrollTo(0, 0)')
         page.wait_for_function('document.querySelector(".hero-player").getBoundingClientRect().top < innerHeight')
         expect(frame).to_have_attribute('src', expected, timeout=8000)
-        assert box.bounding_box() == before
-        assert page.evaluate(CLS_SCORE) == 0
+        if box.bounding_box() != before:
+            print('player moved', box.bounding_box()['y'] - before['y'], width, variant, root_text)
+        assert box.bounding_box() == before, (before, box.bounding_box())
+        assert page.evaluate(CLS_SCORE) == 0, (width, variant, page.evaluate(CLS_SCORE))
         assert not errors, errors
         if variant == 'zlive' and not root_text:
             mounted_frame = frame.element_handle()

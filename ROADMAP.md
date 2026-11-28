@@ -8,6 +8,33 @@ The Worker cannot reach the provider, so the directory only refreshes on deploy.
 
 **Shipped.** The [freshness design](docs/freshness-design.md) recommended a five-minute GitHub Actions pilot that publishes complete feed snapshots to private Cloudflare R2 independently of Worker deploys. The Worker keeps the bundled snapshot as a fallback and the browser continues to refresh directly. The pilot is running from GitHub Actions every 15 minutes against the production bucket, with the Worker serving the newest generation and an edge cache keyed to it. Still owed: an independent alert for a missed or `paused` refresh, and a provider answer on the permitted interval.
 
+**Fixed 2026-11-27. A live score stops being a quarter-hour old.** The owner saw 0-0 at 2' on a Chelsea match that
+was 1-0 at 23'. The ESPN scoreboard enrichment was right; the generation under it was twenty minutes old, because
+the pinger only dispatched once the manifest passed twelve minutes and a run takes about two. The pinger now
+refreshes at four minutes, so a live score is at most roughly seven to eleven minutes behind the provider. The
+"Unconfirmed" notice moved from ten to fifteen minutes for the same reason: at ten it fired on healthy publishes,
+and fifteen is the pinger's own alert grace. The provider stripped every `match` from its
+own listing that evening, so publish-time enrichment is currently the only score path — per-request enrichment of
+live matches, already queued, is the durable fix. A bare soccer minute also ticks locally between publishes, derived
+from kickoff with the interval taken back out, so a card is never frozen on the provider's last word; halftime,
+stoppage and every other sport's clock stay exactly as the provider wrote them. The minute advances from the
+provider's own number, so a late kickoff does not run ahead of it and stoppage keeps counting (45+2 → 45+3).
+
+`tests/detail_poll_browser.py` was intermittently failing its poll assertions with correct-looking markup: `wrangler
+dev` drops a JS chunk about once in six loads (`ERR_INCOMPLETE_CHUNKED_ENCODING`), so the page renders from SSR and
+never hydrates. `app.vue` now marks `html[data-hydrated]` on mount and the suite waits for it, reloading once; six
+consecutive runs were green.
+
+A team crest painted in its own colour disappeared on that team's end of the gradient — TEX measured 1.04 contrast
+against the plate. Each mark now carries a halo of the opposite polarity, mixed in `logoHalo` to at least four
+against its field; on the TEX card that moved the median edge contrast of the orange ink from 1.0 to 1.89 and left
+4 blind outline pixels of 77. A changed score also drops in with a 260 ms `translate`/opacity
+entrance (frozen by reduced motion), keyed on the value so it replays only on a real change. The ink suites strip the filter, since the halo bleeds past the element box.
+
+Open from the review of this round, both invisible: `placeState`'s 0.0015 tolerance sits below the device snap grid at
+1× so the correction loop can exhaust both attempts up to 0.5 px short, and a null canvas leaves the state at its
+layout position after the offset has been cleared.
+
 ## 2. Sourcing
 
 Today's provider is the best found so far, but it is one provider with one failure mode and one CDN. Goals:
@@ -207,6 +234,48 @@ Cloudflare IPs aborted the handshake with alert 40 for that SNI while `kwip.fyi`
 manual `publish:feed --bucket kwip-feed-prod` failed with `fetch failed` after one provider request; production kept
 serving the last snapshot and marked it with the notice and "Unconfirmed · Last listed" on every card. Separately,
 the stale notice reads "more than 20 minutes ago" while the cut is ten — copy bug, fix with the padded-logo round.
+
+**Shipped 2026-11-27. The logo rise.** `6a748af`, merged `1f62b71` (CI run 45958063504, artifact
+`verify-log-ff15dcfb06b3b00066dab07afa2e49f2a24f0d0a`), deployed `2e8bb488`. `--banner-logo-rise: 0.1` lifts
+`.banner-team` by a tenth of the drawn logo with `translate` while the names stay put, so the paint rises and the
+ink gap narrows without moving the layout row. `NAME_GAP` moved to (.22, .32) to hold the mockup band plus the
+rise. Local gate on the branch: tests 208/208, top-event and full card matrix green, dry run clean, row centre
+-0.0078 px. Production at 1440/1280/390, logo paint against the card centre: -0.20 / -0.20 / -0.45 px; rise 4 px
+on a 40 px mark; state ink 0.285 / 0.285 / 0.288 of card height; score ink 1.14-1.23 x the paint. Measured with a
+white plate and dark-ink threshold for logos, because production marks are dark navy and the harness's black plate
+and 0.5 min-channel threshold return nothing for them. Painted logo-to-name gap on real ESPN padding is 0.57-0.65
+of the mark (0.71-0.79 before the rise); the mockup's 0.47-0.56 is a box-relative fraction, so the two are not yet
+directly comparable — that is the padded-logo round below. The owner judged it good at 0.1 on the live site; 0.14
+stays the lever if the padded-logo round does not land.
+
+The full pixel sweep died once at the 845th cell on a 30 s `Page.screenshot` timeout with no assertion failure.
+`screenshot_ink` now retries a screenshot timeout once, the same way it already retries an empty WebKit frame.
+
+**Fixed 2026-11-27. A detail page that opens inside the pre-kickoff margin now polls at once.** The predicate
+returned a bare `true` once the margin had opened, so the page sat a full 60 s cadence before its first fetch and a
+page opened after kickoff could wait a minute for anything. It now always returns `{ resumeAt }`; a past instant
+clamps to a zero-delay alarm, which refreshes immediately and then starts the interval. Because the predicate builds
+a fresh object per evaluation, `schedule` also remembers the armed decision and leaves an armed timer alone — without
+that, a zero-delay alarm re-armed itself from its own refresh and looped (742 requests in one case). `detail_poll_browser`
+is green with sane counts: nothing before the margin, one poll when a past-kickoff `pre` page opens, one at the final.
+
+**Fixed 2026-11-27. Live updates keep running when the tab is not being watched.** A hidden tab already skipped its
+beats but nothing refreshed on return, so the first thing a returning reader saw could be a minute old. `useFeed` now
+refreshes once on `visibilitychange` to visible whenever a beat is armed. Alongside it, a `pre` match more than fifteen
+minutes past kickoff reads **Delayed** on the pill and as the banner state (`kickoffDelayed`, rule 30) instead of a
+stuck "Upcoming"; it keeps polling and the provider's own state still wins the moment it changes.
+
+**Fixed 2026-11-27. The banner state sits on the live band whatever the card carries.** The state hangs a fixed
+ink gap above the score ink, and two things broke that: a card with no score (pre or final) has no ink to hang from
+and sat about 5 px high (0.323 against the live 0.279), and a listing row stretched by a taller neighbour pushed the
+whole grid down while the state stayed put. The fit pass now measures a hidden zero in the score row for the gap when
+there are no digits, then lands the state itself on `--banner-state-position` from its painted centre. The solve is a
+transform only, so it cannot move the centred row, change any card's height, or add shift (a padding solve made the
+hero's player jump 91 px when the state word changed), and it re-reads on the second pass and on resize. The moved
+baseline lands on the device grid so WebKit cannot paint it a device pixel off. Two ink bounds keep the band honest:
+never closer to the digits than the gutter, never more than a line's clearance (a wide tier, whose score is drawn too
+large for that ceiling, keeps only the gutter). Production reads 0.28 on live and
+upcoming cards at 1440, 1280 and 390.
 
 **Superseded 2026-11-25 12:45, kept for history.** Round three passed, 60 merged and deployed, then production
 showed the row sitting

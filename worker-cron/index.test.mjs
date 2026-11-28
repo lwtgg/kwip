@@ -19,11 +19,11 @@ const env = {
 
 for (const [label, verifiedAt, statuses, decision] of [
   ['missing manifest', null, [], 'dispatch'],
-  ['11 minutes', timestamp(11), [], 'fresh'],
-  ['12 minutes exactly', timestamp(12), [], 'fresh'],
-  ['13 minutes', timestamp(13), [], 'dispatch'],
-  ['queued run', timestamp(13), ['completed', 'queued'], 'active-run'],
-  ['running run', timestamp(13), ['in_progress'], 'active-run'],
+  ['3 minutes', timestamp(3), [], 'fresh'],
+  ['4 minutes exactly', timestamp(4), [], 'fresh'],
+  ['5 minutes', timestamp(5), [], 'dispatch'],
+  ['queued run', timestamp(5), ['completed', 'queued'], 'active-run'],
+  ['running run', timestamp(5), ['in_progress'], 'active-run'],
 ]) {
   test(`decision for ${label}`, () => {
     assert.equal(decideRefresh(verifiedAt, now, statuses).decision, decision)
@@ -45,9 +45,9 @@ function fixture(...responses) {
 }
 
 test('a fresh tick checks for an outstanding reservation', async () => {
-  const http = fixture(Response.json({ listsVerifiedAt: timestamp(11) }), missing())
+  const http = fixture(Response.json({ listsVerifiedAt: timestamp(3) }), missing())
   assert.deepEqual(await runTick(env, now, http.fetch), {
-    ageMs: 11 * minute, decision: 'fresh', dispatch: 'skipped',
+    ageMs: 3 * minute, decision: 'fresh', dispatch: 'skipped',
   })
   assert.equal(http.requests.length, 2)
   const [read] = http.requests

@@ -1,7 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bannerAbbreviation, bannerColor, bannerScrim, matchBannerContent, mixBannerColor, teamInitials } from '../app/composables/matchBanner.ts'
-import { hexRGB, fieldContrast } from '../app/composables/cardTint.ts'
+import {
+  bannerAbbreviation, bannerColor, bannerScrim, detailClock, logoHalo, matchBannerContent, matchMinute, mixBannerColor,
+  teamInitials,
+} from '../app/composables/matchBanner.ts'
+import { hexRGB, fieldContrast, luminance } from '../app/composables/cardTint.ts'
 
 test('unplayed colours are independently mixed at twelve percent in sRGB', () => {
   assert.equal(mixBannerColor('#00ff00', '#272624', .12), '#224020')
@@ -24,6 +27,27 @@ test('the contrast guard preserves dark colours and protects bright and interior
 })
 
 
+test('a crest on its own colour gets a halo that clears the field, in whichever polarity does', () => {
+  // The browser composites the shadow channel-wise in sRGB, and the offset shadows stack; the solve
+  // must hold on that rendered value, not on a luminance mix.
+  const halo = (field: string, target: number) => {
+    const ground = hexRGB(field)!
+    const css = logoHalo(ground, [0, 0, 0], [1, 1, 1], target, 1)
+    const [, r, , , alpha] = /rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)/.exec(css)!
+    const rendered = ground.map((c, i) => c + ((Number(r) / 255) - c) * Math.min(1, Number(alpha) * 1)) as RGB
+    const [a, b] = [luminance(rendered), luminance(ground)]
+    return { css, ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) }
+  }
+  // The TEX plate (orange on orange), a dark plate, a mid plate and near-black all clear the target.
+  for (const field of ['#a95935', '#0b1020', '#7a7a7a', '#101010', '#ffffff']) {
+    const { ratio } = halo(field, 4)
+    assert.ok(ratio >= 4 - 1e-9, `${field} halo is only ${ratio.toFixed(2)}`)
+  }
+  // A dark plate takes the light ink and a light plate the dark one.
+  assert.ok(halo('#101010', 4).css.startsWith('rgb(255 255 255'))
+  assert.ok(halo('#f2f2f2', 4).css.startsWith('rgb(0 0 0'))
+})
+
 const away = { name: 'Colorado State Rams', abbreviation: 'CSU', score: 150, color: null, logo: null }
 const home = { name: 'Arizona Wildcats', abbreviation: 'ARIZ', score: 197, color: null, logo: null }
 
@@ -32,7 +56,7 @@ test('live banner tiers order the state, provider detail and compact audience', 
   assert.deepEqual(matchBannerContent(live, '123456', 'viewers', false), {
     hasScores: true,
     tiers: ['Live', 'Halftime', '123.5k Viewers'],
-    label: 'Colorado State Rams 150, Arizona Wildcats 197. Live. Halftime. 123.5k Viewers (123,456).',
+    label: 'Arizona Wildcats 197, Colorado State Rams 150. Live. Halftime. 123.5k Viewers (123,456).',
   })
 })
 
@@ -41,7 +65,7 @@ test('the matchup uses vs for an incomplete pregame score, and the name says wha
   assert.deepEqual(matchBannerContent(upcoming, '1', 'viewers', false), {
     hasScores: false,
     tiers: ['Upcoming', 'vs', '1 Viewer'],
-    label: 'Colorado State Rams vs Arizona Wildcats. Upcoming. 1 Viewer.',
+    label: 'Arizona Wildcats vs Colorado State Rams. Upcoming. 1 Viewer.',
   })
 })
 
@@ -51,13 +75,40 @@ test('final and stale banners retain their tiers without repeating the state or 
   assert.deepEqual(matchBannerContent(final, '250', 'views', true).tiers, ['Final', '', ''])
 })
 
+test('a bare minute advances from when the provider showed it, and only while the match is live', () => {
+  const shownAt = 1_000_000
+  const at = (minutes: number) => shownAt + minutes * 60
+  // Counted from the provider's own number, so a late kickoff needs no correction.
+  assert.equal(matchMinute("2'", 'in', shownAt, at(.4)), "2'")
+  assert.equal(matchMinute("2'", 'in', shownAt, at(23)), "25'")
+  // Stoppage keeps a stoppage minute: 45+2 becomes 45+3, never 48.
+  assert.equal(matchMinute("45+2'", 'in', shownAt, at(1)), "45+3'")
+  assert.equal(matchMinute("90+1'", 'in', shownAt, at(3)), "90+4'")
+  assert.equal(matchMinute('Halftime', 'in', shownAt, at(5)), 'Halftime')
+  assert.equal(matchMinute('Q2 05:12', 'in', shownAt, at(40)), 'Q2 05:12')
+  assert.equal(matchMinute("2'", 'post', shownAt, at(140)), "2'")
+  assert.equal(matchMinute("2'", 'in', undefined, at(40)), "2'")
+  // A stale beat still has the ticked minute in it: the flag, not the clock, marks it unconfirmed.
+  const live = { state: 'in', detail: "2'", away, home } as const
+  assert.deepEqual(matchBannerContent(live, '1', 'viewers', true, false,
+    { observedAt: shownAt, now: at(23) }).tiers, ['Live', "25'", ''])
+})
+
+test('the detail clock only restarts when the provider says something new', () => {
+  const clock = detailClock()
+  assert.equal(clock("2'", 1000), 1000)
+  assert.equal(clock("2'", 1060), 1000)
+  assert.equal(clock("3'", 1120), 1120)
+  assert.equal(clock("", 1180), 1180)
+})
+
 test('the name carries the visible state, detail and audience in the banner\'s words, separated', () => {
   const live = { state: 'in', detail: 'Halftime', away: { ...away, score: 50 }, home: { ...home, score: 97 } } as const
-  assert.equal(matchBannerContent(live, '62', 'viewers', false).label, 'Colorado State Rams 50, Arizona Wildcats 97. Live. Halftime. 62 Viewers.')
+  assert.equal(matchBannerContent(live, '62', 'viewers', false).label, 'Arizona Wildcats 97, Colorado State Rams 50. Live. Halftime. 62 Viewers.')
   const final = { ...live, state: 'post', detail: 'Final' } as const
-  assert.equal(matchBannerContent(final, '1', 'views', false).label, 'Colorado State Rams 50, Arizona Wildcats 97. Final. 1 View.')
+  assert.equal(matchBannerContent(final, '1', 'views', false).label, 'Arizona Wildcats 97, Colorado State Rams 50. Final. 1 View.')
   // Stale rows show no audience, so the name has none either.
-  assert.equal(matchBannerContent(final, '250', 'views', true).label, 'Colorado State Rams 50, Arizona Wildcats 97. Final.')
+  assert.equal(matchBannerContent(final, '250', 'views', true).label, 'Arizona Wildcats 97, Colorado State Rams 50. Final.')
   // Every visible tier appears in the name, in order, so voice control can say what it reads.
   const { tiers, label } = matchBannerContent(live, '1234567', 'viewers', false)
   let from = 0
@@ -75,4 +126,13 @@ test('an empty abbreviation falls back to the name so nothing under a logo is bl
   assert.equal(bannerAbbreviation({ ...home, abbreviation: '  ' }), 'AW')
   assert.equal(teamInitials('west washington'), 'WW')
   assert.equal(teamInitials('Colorado State Rams'), 'CS')
+})
+
+test('a pre match well past kickoff reads as delayed, on screen and in the name', () => {
+  const late = { state: 'pre', detail: 'Scheduled', away: { ...away, score: null }, home } as const
+  const content = matchBannerContent(late, '1', 'viewers', false, true)
+  assert.deepEqual(content.tiers, ['Delayed', 'vs', '1 Viewer'])
+  assert.equal(content.label, 'Arizona Wildcats vs Colorado State Rams. Kickoff delayed. 1 Viewer.')
+  const finished = { state: 'post', detail: 'Final', away, home } as const
+  assert.equal(matchBannerContent(finished, '1', 'viewers', false, true).tiers[0], 'Final')
 })

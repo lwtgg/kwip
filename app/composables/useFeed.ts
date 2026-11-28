@@ -250,18 +250,33 @@ function useFeedEndpoint<T extends { success: boolean }>(
   if (import.meta.client && hasLiveMatch) {
     let timer: ReturnType<typeof setInterval> | undefined
     let alarm: ReturnType<typeof setTimeout> | undefined
+    let running = false
     const stopPolling = () => {
       clearInterval(timer)
       clearTimeout(alarm)
       timer = undefined
       alarm = undefined
+      running = false
     }
     const startPolling = () => {
+      running = true
       timer = setInterval(() => {
         if (!document.hidden) void feed.refresh({ dedupe: 'defer' })
       }, FEED_CACHE_WINDOW_MS)
     }
+    const onVisible = () => {
+      // Also covers a pre-margin page whose alarm already became an interval: `armed` stays the past
+      // instant, so it alone would miss exactly the case rule 30 is about.
+      if (!document.hidden && (running || armed === true)) void feed.refresh({ dedupe: 'defer' })
+    }
+    // The predicate builds a fresh object per evaluation, so the watch fires on every payload even
+    // when the decision is unchanged. Remember the armed decision and leave the armed timer alone.
+    let armed: boolean | number | undefined
+    const decision = (poll: FeedPoll | undefined) => poll === true ? true : poll ? poll.resumeAt : undefined
     const schedule = (poll: FeedPoll | undefined) => {
+      const next = decision(poll)
+      if (next === armed) return
+      armed = next
       stopPolling()
       if (!poll) return
       if (poll === true) return startPolling()
@@ -273,8 +288,13 @@ function useFeedEndpoint<T extends { success: boolean }>(
     }
     onMounted(() => {
       watch(() => hasLiveMatch(feed.data.value as T | undefined), schedule, { immediate: true })
+      // A hidden tab skips its beats; catch up the moment it is looked at again.
+      document.addEventListener('visibilitychange', onVisible)
     })
-    onScopeDispose(stopPolling)
+    onScopeDispose(() => {
+      document.removeEventListener('visibilitychange', onVisible)
+      stopPolling()
+    })
   }
 
   return feed
@@ -338,8 +358,9 @@ export function useStream(uriName: MaybeRefOrGetter<string>) {
       if (item.match?.state !== 'pre') return false
       const start = Number(item.starts_at ?? item.start_timestamp)
       if (!Number.isFinite(start) || start <= 0) return false
-      const opensAt = start - DETAIL_POLL_MARGIN_SECONDS
-      return Math.floor(Date.now() / 1000) >= opensAt ? true : { resumeAt: opensAt }
+      // Always an alarm, even when the margin has already opened: a zero delay polls at once, and a
+      // page that mounts inside the margin is not left waiting a full cadence for its first fetch.
+      return { resumeAt: start - DETAIL_POLL_MARGIN_SECONDS }
     },
   )
   let adopted: { uri: string; id: string; generation: string } | undefined

@@ -8,7 +8,8 @@ import { sourceHealth, type SourceHealthEntry } from '~/utils/sourceHealth'
 import { playerShieldSandbox, sourceHost, sourceKey, sourceLabel } from '~/utils/sourceIdentity'
 import type { SelectableSourceOption } from '~/components/SourceSelect.vue'
 import { isCachedSupplement, isSupplementHost, loadSupplementSources, type SupplementSource } from '~/utils/strmfree'
-import { matchBannerContent } from '~/composables/matchBanner'
+import { detailClock, matchBannerContent } from '~/composables/matchBanner'
+import { kickoffDelayed } from '~/composables/useEventWindow'
 import { slugifyCategory } from '~/utils/supplementMatch'
 import { formatViewersExact } from '~/utils/viewers'
 import { canClickUnder, isClickUnderEligible, openClickUnder } from '~/utils/clickUnder'
@@ -84,13 +85,18 @@ function humanizeUri(uri: string): string {
 const pageHeading = computed(() => {
   const match = detail.value?.match ?? matchingListItem.value?.match
   return match
-    ? `${match.away.name} vs. ${match.home.name}`
+    ? `${match.home.name} vs. ${match.away.name}`
     : detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value)
 })
 
+// One tick a minute is all the banner needs from the clock; the player's own beats stay per second.
+const minute = computed(() => Math.floor(nowSeconds.value / 60) * 60)
+const seenDetail = detailClock()
 const heroMatchContent = computed(() => {
   const event = detail.value
-  if (event?.match) return matchBannerContent(event.match, event.viewers, 'viewers', isStale.value)
+  if (event?.match) return matchBannerContent(event.match, event.viewers, 'viewers', isStale.value,
+    kickoffDelayed(event.match.state, event.starts_at, minute.value),
+    { observedAt: seenDetail(event.match.detail, minute.value), now: minute.value })
 })
 
 type SupplementState =
@@ -637,7 +643,7 @@ const sportsEventJsonLd = computed(() => {
     ld.endDate = new Date(d.ends_at * 1000).toISOString()
   }
   const competitors = d.match
-    ? [d.match.away, d.match.home].map(side => ({ '@type': 'SportsTeam', name: side.name }))
+    ? [d.match.home, d.match.away].map(side => ({ '@type': 'SportsTeam', name: side.name }))
     : parseMatchupCompetitors(d.name)
   if (competitors.length > 0) {
     ld.competitor = competitors

@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from click_under_browser import worker  # noqa: E402
@@ -69,10 +69,25 @@ class DetailPage:
         self.page.on('request', self._count)
         # The Python binding passes the instant in seconds; Playwright fakes `Date` from it.
         self.page.clock.install(time=base)
-        self.page.goto(f'{origin}/live/{URI}', wait_until='networkidle')
+        self._load(origin)
         self.hero = self.page.locator('.match-banner[data-scale=hero]')
         self.pill = self.page.locator('h1 + div > span').first
+        # The zero-delay arm fires during load, so it is already spent by the time goto returns;
+        # keep that count or the assertion after it only ever proves the interval.
+        self.loaded = self.requests[ITEM]
         self.requests.clear()
+
+    def _load(self, origin):
+        """`wrangler dev` occasionally drops a JS chunk (`ERR_INCOMPLETE_CHUNKED_ENCODING`); the SSR
+        markup then looks correct while nothing polls, so wait for the client and reload once."""
+        for attempt in range(3):
+            self.page.goto(f'{origin}/live/{URI}', wait_until='networkidle')
+            try:
+                self.page.wait_for_selector('html[data-hydrated]', timeout=8000)
+                return
+            except PlaywrightTimeout:
+                if attempt == 2:
+                    raise
 
     def _count(self, request):
         path = request.url.split('?')[0]
@@ -91,6 +106,23 @@ class DetailPage:
             self.page.wait_for_timeout(25)
         self.page.wait_for_load_state('networkidle')
         self.page.wait_for_timeout(100)
+
+    def tick_until(self, predicate, seconds):
+        """Advance in sub-second steps so a change is seen mid-animation, not after it settled."""
+        for _ in range(seconds * 4):
+            self.page.clock.run_for(250)
+            self.page.wait_for_timeout(25)
+            if predicate():
+                return True
+        return False
+
+    def state_ratio(self):
+        """The state line's centre as a share of the banner's height, which is what the fit targets."""
+        return self.hero.evaluate("""b => {
+          const line = b.querySelector('.banner-status-tier:first-child .banner-status-line');
+          const box = b.getBoundingClientRect(), lb = line.getBoundingClientRect();
+          return (lb.top + lb.height / 2 - (box.top + box.height / 2)) / box.height;
+        }""")
 
     def scores(self):
         return self.hero.locator('.banner-score').all_inner_texts()
@@ -119,6 +151,7 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'pre: hero reads Upcoming', 'Upcoming' in page.tiers(), page.tiers())
         check(failures, 'pre: pill reads Upcoming', page.pill.inner_text().startswith('Upcoming'), page.pill.inner_text())
+        check(failures, 'pre, outside the margin: item not fetched on load', page.loaded == 0, page.loaded)
 
         page.tick(61)  # t0+61: the 120 s margin opens at t0+80
         check(failures, 'pre, before the margin: item not polled', page.requests[ITEM] == 0, dict(page.requests))
@@ -130,7 +163,7 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         fixtures.write('in', 1, 0, "2'", starts, ends)
         page.tick(60)  # t0+205: tick at t0+200 reads the kickoff
         expect(page.hero.locator('.banner-score')).to_have_count(2, timeout=5000)
-        check(failures, 'pre -> in: hero shows its own score', page.scores() == ['1', '0'], page.scores())
+        check(failures, 'pre -> in: hero shows its own score', page.scores() == ['0', '1'], page.scores())
         check(failures, 'pre -> in: hero reads Live', 'Live' in page.tiers(), page.tiers())
         check(failures, 'pre -> in: pill reads Live', page.pill.inner_text() == 'Live', page.pill.inner_text())
         evidence['pre -> in (t0+61 .. t0+205)'] = dict(page.requests)
@@ -138,11 +171,26 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         check(failures, 'pre -> in: item polled from the margin', page.requests[ITEM] == 3, dict(page.requests))
         page.requests.clear()
 
+        page.page.wait_for_timeout(400)
+        placed = page.state_ratio()
         fixtures.write('post', 2, 1, 'Final', starts, ends)
-        page.tick(60)  # t0+265: tick at t0+260 reads the final
+        # t0+265: tick at t0+260 reads the final; stop as soon as the digits swap so the band is
+        # sampled while the entrance is still running.
+        assert page.tick_until(lambda: page.scores() == ['1', '2'], 70), page.scores()
+        raised = page.state_ratio()
+        page.tick(2)
+        page.page.wait_for_timeout(600)
         check(failures, 'in -> post: hero reads Final', 'Final' in page.tiers(), page.tiers())
-        check(failures, 'in -> post: hero score moved', page.scores() == ['2', '1'], page.scores())
+        check(failures, 'in -> post: hero score moved', page.scores() == ['1', '2'], page.scores())
         check(failures, 'in -> post: pill reads Final', page.pill.inner_text() == 'Final', page.pill.inner_text())
+        # The score's entrance is a translate, so the fit that ran on the change saw a raised digit;
+        # the band has to come back to where it was once the animation settles.
+        check(failures, 'in -> post: the score entrance moves the band', raised != placed,
+              (round(placed, 3), round(raised, 3)))
+        # The state lands 0.28 of the banner above the centre; a raised digit must not keep it elsewhere.
+        check(failures, 'in -> post: state band settles after the score animation',
+              abs(page.state_ratio() + 0.28) <= 0.02,
+              (round(placed, 3), round(raised, 3), round(page.state_ratio(), 3)))
         evidence['in -> post, the final tick (60 s)'] = dict(page.requests)
         page.requests.clear()
 
@@ -163,9 +211,39 @@ def pill_contradictions(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'pre past kickoff: hero reads Upcoming', 'Upcoming' in page.tiers(), page.tiers())
         check(failures, 'pre past kickoff: pill reads Upcoming, not Live', page.pill.inner_text() == 'Upcoming', page.pill.inner_text())
+        # Well under the 60 s cadence, so this is the zero-delay arm and not a beat. Wait for it
+        # rather than sampling once: the arm is set after hydration, which races `networkidle`.
+        page.page.wait_for_timeout(500)
+        for _ in range(20):
+            if page.loaded + page.requests[ITEM]:
+                break
+            page.page.wait_for_timeout(100)
+        check(failures, 'pre past kickoff: item fetched at once', page.loaded + page.requests[ITEM] >= 1,
+              page.loaded + page.requests[ITEM])
         page.tick(61)
-        check(failures, 'pre past kickoff: item polled', page.requests[ITEM] == 1, dict(page.requests))
+        check(failures, 'pre past kickoff: item keeps polling', page.requests[ITEM] >= 1, dict(page.requests))
         evidence['pre past kickoff (61 s)'] = dict(page.requests)
+    finally:
+        page.close()
+
+    fixtures.write('pre', None, None, '', t0 - 1200, t0 + 7200)
+    page = DetailPage(browser, origin, t0, fixtures.assets)
+    try:
+        expect(page.hero).to_be_visible()
+        check(failures, 'pre long past kickoff: hero reads Delayed', 'Delayed' in page.tiers(), page.tiers())
+        check(failures, 'pre long past kickoff: pill reads Delayed', page.pill.inner_text() == 'Delayed', page.pill.inner_text())
+        # Well under the 60 s cadence, so this is the zero-delay arm and not a beat. Wait for it
+        # rather than sampling once: the arm is set after hydration, which races `networkidle`.
+        page.page.wait_for_timeout(500)
+        for _ in range(20):
+            if page.loaded + page.requests[ITEM]:
+                break
+            page.page.wait_for_timeout(100)
+        check(failures, 'pre long past kickoff: item fetched at once', page.loaded + page.requests[ITEM] >= 1,
+              page.loaded + page.requests[ITEM])
+        page.tick(61)
+        check(failures, 'pre long past kickoff: item keeps polling', page.requests[ITEM] >= 1, dict(page.requests))
+        evidence['pre long past kickoff (61 s)'] = dict(page.requests)
     finally:
         page.close()
 
@@ -175,8 +253,9 @@ def pill_contradictions(browser, origin, fixtures, failures, evidence):
         expect(page.hero).to_be_visible()
         check(failures, 'in past the window: hero reads Live', 'Live' in page.tiers(), page.tiers())
         check(failures, 'in past the window: pill reads Live, not Ended', page.pill.inner_text() == 'Live', page.pill.inner_text())
+        # Already live: polling starts on mount and the first beat is the cadence, not a zero-delay arm.
         page.tick(61)
-        check(failures, 'in past the window: item polled', page.requests[ITEM] == 1, dict(page.requests))
+        check(failures, 'in past the window: item polls on the cadence', page.requests[ITEM] == 1, dict(page.requests))
         evidence['in past the window (61 s)'] = dict(page.requests)
     finally:
         page.close()

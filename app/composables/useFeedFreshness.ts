@@ -1,6 +1,8 @@
 import type { MaybeRefOrGetter, Ref } from 'vue'
 
-const staleAfterSeconds = 600
+// Two dispatch runs plus two runs' execution. The pinger ticks every five minutes and a publish takes
+// about two, so a healthy generation reaches eleven minutes old; ten fired on healthy publishes.
+const staleAfterSeconds = 15 * 60
 const currentSeconds = () => Math.floor(Date.now() / 1000)
 
 type RefreshPayload = { timestamp?: number; fromCache?: boolean } | null | undefined
