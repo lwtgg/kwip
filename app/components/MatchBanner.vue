@@ -13,6 +13,12 @@ const failed = ref<Record<string, boolean>>({})
 const match = computed(() => props.stream.match!)
 const initialNow = useState('ui:card-now', () => Math.floor(Date.now() / 1000))
 const art = computed(() => matchBannerStyle(match.value, props.scale))
+// A score is remounted when it changes so its entrance replays; the count keeps the first paint quiet.
+const scoreEpoch = ref([0, 0])
+watch(() => [match.value.away.score, match.value.home.score], ([away, home], [oldAway, oldHome]) => {
+  if (away !== oldAway && oldAway !== undefined) scoreEpoch.value[0]!++
+  if (home !== oldHome && oldHome !== undefined) scoreEpoch.value[1]!++
+})
 const cssNumber = (style: CSSStyleDeclaration, name: string, fallback: number) => Number.parseFloat(style.getPropertyValue(name)) || fallback
 /** Width available inside a slot, excluding its gutters. */
 function room(slot: HTMLElement) {
@@ -331,7 +337,8 @@ onBeforeUnmount(() => observer?.disconnect())
         </div>
         <span class="banner-abbreviation" :class="index === 0 ? 'banner-away-label' : 'banner-home-label'"><span class="banner-fit-text">{{ bannerAbbreviation(side) }}</span></span>
         <span v-if="content.hasScores" class="banner-score-slot" :class="index === 0 ? 'banner-away-score' : 'banner-home-score'">
-          <span class="banner-fit-text banner-score">{{ side.score }}</span>
+          <span :key="scoreEpoch[index]" class="banner-fit-text banner-score"
+            :class="{ 'banner-score-changed': scoreEpoch[index]! }">{{ side.score }}</span>
         </span>
       </template>
       <div class="banner-status">

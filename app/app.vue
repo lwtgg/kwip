@@ -42,7 +42,12 @@ function revealHorizontalFocus(event: FocusEvent) {
   })
 }
 
-onMounted(() => document.addEventListener('focusin', revealHorizontalFocus))
+onMounted(() => {
+  document.addEventListener('focusin', revealHorizontalFocus)
+  // A suite can wait on this to know the client script actually ran; a dropped chunk leaves SSR
+  // markup that looks right and never polls.
+  document.documentElement.dataset.hydrated = ''
+})
 onBeforeUnmount(() => document.removeEventListener('focusin', revealHorizontalFocus))
 </script>
 

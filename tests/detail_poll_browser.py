@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout, expect, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from click_under_browser import worker  # noqa: E402
@@ -69,13 +69,25 @@ class DetailPage:
         self.page.on('request', self._count)
         # The Python binding passes the instant in seconds; Playwright fakes `Date` from it.
         self.page.clock.install(time=base)
-        self.page.goto(f'{origin}/live/{URI}', wait_until='networkidle')
+        self._load(origin)
         self.hero = self.page.locator('.match-banner[data-scale=hero]')
         self.pill = self.page.locator('h1 + div > span').first
         # The zero-delay arm fires during load, so it is already spent by the time goto returns;
         # keep that count or the assertion after it only ever proves the interval.
         self.loaded = self.requests[ITEM]
         self.requests.clear()
+
+    def _load(self, origin):
+        """`wrangler dev` occasionally drops a JS chunk (`ERR_INCOMPLETE_CHUNKED_ENCODING`); the SSR
+        markup then looks correct while nothing polls, so wait for the client and reload once."""
+        for attempt in range(3):
+            self.page.goto(f'{origin}/live/{URI}', wait_until='networkidle')
+            try:
+                self.page.wait_for_selector('html[data-hydrated]', timeout=8000)
+                return
+            except PlaywrightTimeout:
+                if attempt == 2:
+                    raise
 
     def _count(self, request):
         path = request.url.split('?')[0]

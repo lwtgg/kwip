@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  bannerAbbreviation, bannerColor, bannerScrim, detailClock, matchBannerContent, matchMinute, mixBannerColor, teamInitials,
+  bannerAbbreviation, bannerColor, bannerScrim, detailClock, logoHalo, matchBannerContent, matchMinute, mixBannerColor,
+  teamInitials,
 } from '../app/composables/matchBanner.ts'
-import { hexRGB, fieldContrast } from '../app/composables/cardTint.ts'
+import { hexRGB, fieldContrast, luminance } from '../app/composables/cardTint.ts'
 
 test('unplayed colours are independently mixed at twelve percent in sRGB', () => {
   assert.equal(mixBannerColor('#00ff00', '#272624', .12), '#224020')
@@ -25,6 +26,27 @@ test('the contrast guard preserves dark colours and protects bright and interior
   }
 })
 
+
+test('a crest on its own colour gets a halo that clears the field, in whichever polarity does', () => {
+  const halo = (field: string, target: number) => {
+    const css = logoHalo(field, '#000', '#fff', target)
+    const [, r, g, b, alpha] = /rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)/.exec(css)!
+    // The composable mixes channel-wise in sRGB, then compares luminance.
+    const end = luminance([r, g, b].map(v => Number(v) / 255) as RGB)
+    return { alpha: Number(alpha), css, at: end }
+  }
+  // The TEX card: orange ink on an orange plate. Either polarity is fine (an orange mark is mid-tone),
+  // so long as the ring clears the field. A mid plate gets one too; the darkest gets a light ring.
+  for (const field of ['#a95935', '#7a7a7a', '#101010']) {
+    const { at, alpha } = halo(field, 4)
+    const ground = luminance(hexRGB(field)!)
+    const mixed = ground + (at - ground) * alpha
+    assert.ok((Math.max(mixed, ground) + 0.05) / (Math.min(mixed, ground) + 0.05) >= 4 - 1e-9)
+  }
+  // A field no ring can rescue at the requested ratio falls back to a nearly solid one.
+  assert.ok(halo('#7a7a7a', 30).alpha >= 0.9)
+  assert.ok(halo('#101010', 4).css.startsWith('rgb(255 255 255'))
+})
 
 const away = { name: 'Colorado State Rams', abbreviation: 'CSU', score: 150, color: null, logo: null }
 const home = { name: 'Arizona Wildcats', abbreviation: 'ARIZ', score: 197, color: null, logo: null }

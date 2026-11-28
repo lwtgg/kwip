@@ -36,7 +36,10 @@ authenticates on its own `GITHUB_ALERT_TOKEN` so the alarm survives the credenti
 best-effort and must never change a tick's refresh outcome, and it is bounded to five extra subrequests, six
 on a cleanup tick. Supersedes the alerting clause of rule 21.
 24. **The artwork is ours.** Every event's visual is built in CSS from its own team colours plus the two team
-logos from the score match (rule 25) — a two-team gradient, the logos, and `vs`. Provider thumbnails are no
+logos from the score match (rule 25) — a two-team gradient, the logos, and `vs`. A crest is painted in its own
+team's colour, so on that end of the gradient the mark can vanish (measured at 1.04 contrast); every logo carries a
+halo of the opposite polarity, mixed to `--banner-logo-halo-contrast` (4) against the field it sits on, so the
+silhouette always has a ring to read against. Provider thumbnails are no
 longer the default art and are not fetched. Home/away decides the sides: away on the left, home on the right.
 No match, no logos, a missing colour or a failed logo all degrade to the gradient and the existing
 `PosterFallback` monogram — never to a hole. Logos are hotlinked from the score provider's CDN with an

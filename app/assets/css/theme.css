@@ -455,6 +455,11 @@
   --banner-contrast-headroom: 0.05;
   --banner-unplayed-alpha: 0.12;
   --banner-edge-alpha: 0.45;
+  /* A crest on its own team colour vanishes; the mark carries a halo of the opposite polarity, at the
+     least opacity that reaches this ratio against the field. */
+  --banner-logo-halo-ink: #000000;
+  --banner-logo-halo-paper: #ffffff;
+  --banner-logo-halo-contrast: 4;
   --banner-away-stop: 30%;
   --banner-home-stop: 71%;
   --font-score: "Acumin Pro Extra Condensed", "Arial Narrow", var(--font-sans);
@@ -502,6 +507,9 @@
   /* Logos align to the score row's bottom, then rise by this share of the drawn logo so a real mark sits on the
      digits rather than under them (its padding and the line's half-leading would otherwise drop it). */
   --banner-logo-rise: 0.1;
+  /* A changed score drops in; `translate` is free because the fit's own transform owns `transform`. */
+  --banner-score-in-duration: 260ms;
+  --banner-score-in-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
   --banner-track-height: var(--spacing-1);
   --banner-track-gap: var(--spacing-1);
 }
@@ -578,7 +586,13 @@
   aspect-ratio: 1;
   height: auto;
   object-fit: contain;
+  /* Two radii so the halo reads as an outline at the silhouette, not a single soft glow. */
+  filter:
+    drop-shadow(0 0 calc(var(--banner-logo) * 0.06) var(--banner-logo-halo))
+    drop-shadow(0 0 calc(var(--banner-logo) * 0.14) var(--banner-logo-halo));
 }
+.banner-away-team :is(img, .banner-initials) { --banner-logo-halo: var(--banner-away-logo-halo); }
+.banner-home-team :is(img, .banner-initials) { --banner-logo-halo: var(--banner-home-logo-halo); }
 .banner-initials {
   display: grid;
   align-items: center;
@@ -663,6 +677,12 @@
 
 .banner-fit-text.banner-score {
   transform: translateX(-50%) scaleX(var(--banner-line-fit, var(--banner-score-compression)));
+}
+@keyframes banner-score-in {
+  from { translate: 0 -0.32em; opacity: 0.15; }
+}
+.banner-score-changed {
+  animation: banner-score-in var(--banner-score-in-duration) var(--banner-score-in-ease) both;
 }
 
 /* At tight widths each abbreviation spans its team and score tracks and the logo may shrink to the

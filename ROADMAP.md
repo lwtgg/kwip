@@ -17,7 +17,23 @@ and fifteen is the pinger's own alert grace. The provider stripped every `match`
 own listing that evening, so publish-time enrichment is currently the only score path — per-request enrichment of
 live matches, already queued, is the durable fix. A bare soccer minute also ticks locally between publishes, derived
 from kickoff with the interval taken back out, so a card is never frozen on the provider's last word; halftime,
-stoppage and every other sport's clock stay exactly as the provider wrote them.
+stoppage and every other sport's clock stay exactly as the provider wrote them. The minute advances from the
+provider's own number, so a late kickoff does not run ahead of it and stoppage keeps counting (45+2 → 45+3).
+
+`tests/detail_poll_browser.py` was intermittently failing its poll assertions with correct-looking markup: `wrangler
+dev` drops a JS chunk about once in six loads (`ERR_INCOMPLETE_CHUNKED_ENCODING`), so the page renders from SSR and
+never hydrates. `app.vue` now marks `html[data-hydrated]` on mount and the suite waits for it, reloading once; six
+consecutive runs were green.
+
+A team crest painted in its own colour disappeared on that team's end of the gradient — TEX measured 1.04 contrast
+against the plate. Each mark now carries a halo of the opposite polarity, mixed in `logoHalo` to at least four
+against its field; on the TEX card that moved the median edge contrast of the orange ink from 1.0 to 1.89 and left
+4 blind outline pixels of 77. A changed score also drops in with a 260 ms `translate`/opacity
+entrance (frozen by reduced motion), keyed on the value so it replays only on a real change. The ink suites strip the filter, since the halo bleeds past the element box.
+
+Open from the review of this round, both invisible: `placeState`'s 0.0015 tolerance sits below the device snap grid at
+1× so the correction loop can exhaust both attempts up to 0.5 px short, and a null canvas leaves the state at its
+layout position after the offset has been cleared.
 
 ## 2. Sourcing
 

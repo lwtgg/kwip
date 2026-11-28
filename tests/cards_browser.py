@@ -1163,6 +1163,8 @@ def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=
     plate_style = """
       .match-banner { background: black !important }
       .match-banner * { visibility: hidden !important }
+      /* The team halo bleeds past the element box and would touch the clip edge; geometry is the mark. */
+      .match-banner .banner-team img, .match-banner .banner-initials { filter: none !important }
     """
     plate = page.screenshot(clip=clip, style=plate_style)
     line.evaluate("el => el.setAttribute('data-ink-target', '')")

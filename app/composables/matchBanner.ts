@@ -1,4 +1,4 @@
-import { hexRGB } from './cardTint.ts'
+import { hexRGB, luminance } from './cardTint.ts'
 import type { FeedStreamItem } from './useFeed.ts'
 import { formatViewersCompact, formatViewersExact } from '../utils/viewers.ts'
 
@@ -74,6 +74,29 @@ export function mixBannerColor(color: string | null | undefined, base: string, o
 
 export function bannerColor(color: string | null | undefined, base: string): string {
   return hexRGB(color) ? color! : base
+}
+
+/**
+ * A crest painted in its own team colour disappears when it sits on the same colour (an orange mark on
+ * the orange end of the field). Return a halo of the opposite polarity at the least opacity that clears
+ * `target` against the field, so the mark keeps a readable silhouette whatever it is drawn in.
+ */
+export function logoHalo(field: string, ink: string, paper: string, target: number): string {
+  const ground = luminance(hexRGB(field) ?? [0, 0, 0])
+  const ratio = (lightness: number) => (Math.max(ground, lightness) + 0.05) / (Math.min(ground, lightness) + 0.05)
+  const [dark, light] = [hexRGB(ink)!, hexRGB(paper)!]
+  const halo = ratio(1) >= ratio(0) ? light : dark
+  const end = luminance(halo)
+  const at = (alpha: number) => ground + (end - ground) * alpha
+  if (ratio(end) <= target) return `rgb(${halo.map(c => Math.round(c * 255)).join(' ')} / .9)`
+  let low = 0, high = 1
+  for (let i = 0; i < 20; i++) {
+    const middle = (low + high) / 2
+    if (ratio(at(middle)) >= target) high = middle
+    else low = middle
+  }
+  // Round outward so the printed opacity never lands under the target.
+  return `rgb(${halo.map(c => Math.round(c * 255)).join(' ')} / ${Math.min(1, high + 0.005).toFixed(2)})`
 }
 
 /** Black scrim needed at the brightest (unshaded) point for opaque white AA text. */
