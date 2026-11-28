@@ -617,10 +617,10 @@
   min-width: 0;
   margin-block-start: var(--banner-name-offset);
 }
-.banner-away-team, .banner-away-label { grid-column: 1; }
-.banner-home-team, .banner-home-label { grid-column: 5; }
-.banner-away-score { grid-column: 2; padding-inline-end: var(--banner-gutter); }
-.banner-home-score { grid-column: 4; padding-inline-start: var(--banner-gutter); }
+.banner-home-team, .banner-home-label { grid-column: 1; }
+.banner-away-team, .banner-away-label { grid-column: 5; }
+.banner-home-score { grid-column: 2; padding-inline-end: var(--banner-gutter); }
+.banner-away-score { grid-column: 4; padding-inline-start: var(--banner-gutter); }
 .banner-score-slot { grid-row: 2; min-width: 0; }
 .banner-score {
   font-family: var(--font-score);
@@ -706,8 +706,8 @@
     minmax(0, 1fr);
   padding-inline: calc(var(--banner-pad-inline) / 2);
 }
-.banner-lineup[data-stacked] .banner-away-label { grid-column: 1 / 3; }
-.banner-lineup[data-stacked] .banner-home-label { grid-column: 4 / 6; }
+.banner-lineup[data-stacked] .banner-home-label { grid-column: 1 / 3; }
+.banner-lineup[data-stacked] .banner-away-label { grid-column: 4 / 6; }
 .banner-lineup[data-stacked] .banner-progress { grid-column: var(--banner-middle); }
 /* Expand only the tier whose word would otherwise break at the fit floor. */
 .banner-lineup[data-wide-detail] .banner-status {
@@ -728,13 +728,13 @@
     --banner-status-width: 16%;
   }
   .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-score-slot { display: flex; }
-  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-away-score { justify-content: flex-end; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-home-score { justify-content: flex-end; }
   .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-fit-text.banner-score {
     left: auto;
     transform: scaleX(var(--banner-line-fit, var(--banner-score-compression)));
   }
-  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-away-score .banner-score { transform-origin: right center; }
-  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-home-score .banner-score { transform-origin: left center; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-home-score .banner-score { transform-origin: right center; }
+  .match-banner[data-scale='listing'] .banner-lineup:not([data-stacked]) .banner-away-score .banner-score { transform-origin: left center; }
 }
 
 /* The timeline follows the audience and team names. */

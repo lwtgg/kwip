@@ -53,8 +53,8 @@ export function matchBannerContent(match: Match, viewers: string | number, metri
   // The name says what the banner shows, in its words and order: matchup, state, detail, audience.
   // The exact count follows the compact one only when they differ.
   const teams = hasScores
-    ? `${match.away.name} ${match.away.score}, ${match.home.name} ${match.home.score}`
-    : `${match.away.name} vs ${match.home.name}`
+    ? `${match.home.name} ${match.home.score}, ${match.away.name} ${match.away.score}`
+    : `${match.home.name} vs ${match.away.name}`
   const spoken = audience && (exact === compact ? audience : `${audience} (${exact})`)
   const spokenState = delayed && match.state === 'pre' ? 'Kickoff delayed' : state
   const label = [teams, spokenState, detail === 'vs' ? '' : detail, spoken].filter(Boolean).join('. ') + '.'

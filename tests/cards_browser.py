@@ -406,7 +406,7 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
       return {
         card:rect(el.getBoundingClientRect()), banner:rect(banner.getBoundingClientRect()),
         bottomPad,
-        rowBottom:bounds('.banner-away-team').bottom + riseOf('away'),
+        rowBottom:bounds('.banner-home-team').bottom + riseOf('home'),
         tracks:getComputedStyle(lineup).gridTemplateRows.split(' ').map(parseFloat),
         wideScoreDetail:lineup.hasAttribute('data-wide-score-detail'),
         lowerHeight:getComputedStyle(lineup).gridTemplateRows.split(' ').slice(2).reduce((sum, track) => sum + parseFloat(track), 0),
@@ -440,9 +440,9 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
         middle:bounds('.banner-status-tier:first-child'),
         wideDetail:lineup.hasAttribute('data-wide-detail'),
         wideAudience:lineup.hasAttribute('data-wide-audience'),
-        logoBoxes:['away', 'home'].map(side => bounds('.banner-' + side + '-team > *')),
-        logoRise:['away', 'home'].map(riseOf),
-        labels:['away', 'home'].map(side => bounds('.banner-' + side + '-label')),
+        logoBoxes:['home', 'away'].map(side => bounds('.banner-' + side + '-team > *')),
+        logoRise:['home', 'away'].map(riseOf),
+        labels:['home', 'away'].map(side => bounds('.banner-' + side + '-label')),
         stateInk:inkBounds(banner.querySelector('.banner-status-tier:first-child .banner-status-line')),
         labelInk:[...banner.querySelectorAll('.banner-abbreviation .banner-fit-text')].map(inkBounds),
         scoreInk:[...banner.querySelectorAll('.banner-score')].map(inkBounds),
@@ -470,7 +470,7 @@ def banner_geometry(card, snap_paint_baseline=False, model_font_family=None):
 def banner_measurements(geometry):
     box, paint = geometry['card'], geometry['paint']
     detail = paint.get('tier-1', paint['tier-0'])
-    left, right = (paint.get(f'banner-{side}-score') for side in ('away', 'home'))
+    left, right = (paint.get(f'banner-{side}-score') for side in ('home', 'away'))
     score_gap = min(geometry['middle']['left'] - left['right'],
                     right['left'] - geometry['middle']['right']) if left else None
     centre = lambda box: (box['top'] + box['bottom']) / 2
@@ -482,8 +482,8 @@ def banner_measurements(geometry):
     state_position = (centre(geometry['banner']) - sum(geometry['stateInk']) / 2) / geometry['banner']['height']
     name_gaps = [(ink[0] - logo['bottom']) / logo['height'] for ink, logo in zip(geometry['labelInk'], geometry['logoBoxes'])]
     shares_row = 'tier-2' in paint and not geometry['wideAudience'] and not geometry['wideScoreDetail']
-    audience_gap = min(paint['tier-2']['left'] - paint['banner-away-label']['right'],
-                       paint['banner-home-label']['left'] - paint['tier-2']['right']) if shares_row else None
+    audience_gap = min(paint['tier-2']['left'] - paint['banner-home-label']['right'],
+                       paint['banner-away-label']['left'] - paint['tier-2']['right']) if shares_row else None
     return dict(row_offset=row_offset, bottom_gap=bottom_gap, bottom_pad=geometry['bottomPad'],
                 state_position=state_position, name_gaps=name_gaps, audience_gap=audience_gap,
                 wide_score_detail=geometry['wideScoreDetail'], wide_audience=geometry['wideAudience'],
@@ -577,8 +577,8 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     viewers = int(event['viewers'])
     compact = audience.split()[0]
     # The name is the banner's own content, in its words and order, one sentence each.
-    teams = (', '.join(f"{match[side]['name']} {match[side]['score']}" for side in ('away', 'home')) if scored
-             else f"{match['away']['name']} vs {match['home']['name']}")
+    teams = (', '.join(f"{match[side]['name']} {match[side]['score']}" for side in ('home', 'away')) if scored
+             else f"{match['home']['name']} vs {match['away']['name']}")
     spoken = audience if compact == f'{viewers:,}' else f'{audience} ({viewers:,})'
     parts = [teams, state, '' if detail in ('vs', state) else detail, spoken]
     kickoff = datetime.fromtimestamp(event['starts_at'], timezone.utc).strftime('%a, %d %b %Y %H:%M:%S UTC')
@@ -593,11 +593,11 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
     assert banner.locator('.banner-lineup').get_attribute('aria-hidden') == 'true'
     assert_rendered_segments(oracle, card, (state, detail, audience), event['uri_name'])
     assert banner.locator('.banner-score').all_text_contents() == (
-        [str(match[side]['score']) for side in ('away', 'home')] if scored else [])
+        [str(match[side]['score']) for side in ('home', 'away')] if scored else [])
     # Never blank under a logo: an empty abbreviation falls back to the name's initials.
     shown = banner.locator('.banner-abbreviation').all_text_contents()
     assert shown == [match[side]['abbreviation'] or ''.join(word[0] for word in match[side]['name'].split()[:3]).upper()
-                     for side in ('away', 'home')], shown
+                     for side in ('home', 'away')], shown
     assert all(text.strip() for text in shown), shown
 
     geometry = banner_geometry(card)
@@ -630,7 +630,7 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         assert box['top'] <= ink['top'] <= ink['bottom'] <= box['bottom'], (event['uri_name'], name, ink, geometry)
     # Tight score leading lets the font's range box extend past the ink.
     vertical = {'tier-0': geometry['stateInk'], 'tier-1': geometry['detailInk']}
-    for side, index in (('away', 0), ('home', 1)):
+    for side, index in (('home', 0), ('away', 1)):
         vertical[f'banner-{side}-label'] = geometry['labelInk'][index]
         if geometry['scoreInk']:
             vertical[f'banner-{side}-score'] = geometry['scoreInk'][index]
@@ -667,14 +667,14 @@ def assert_clean_banner(card, event, oracle, listing_row, allow_growth=False, ro
         # Wide listings anchor both digits to the middle column's two gutters.
         # Longer detail can widen that column and move both anchors out.
         if not geometry['stacked']:
-            away, home = (paint[f'banner-{side}-score'] for side in ('away', 'home'))
-            gaps = (geometry['middle']['left'] - away['right'], home['left'] - geometry['middle']['right'])
+            home, away = (paint[f'banner-{side}-score'] for side in ('home', 'away'))
+            gaps = (geometry['middle']['left'] - home['right'], away['left'] - geometry['middle']['right'])
             assert all(abs(gap - geometry['gutter']) <= 1 for gap in gaps), (
                 'wide listing scores off middle gutters', event['uri_name'], gaps, geometry['gutter'])
         long_detail = event['uri_name'].endswith('/matched-long-status')
         if detail == 'Halftime' or long_detail:
             centres = [((paint[f'banner-{side}-score']['left'] + paint[f'banner-{side}-score']['right']) / 2 - box['left']) / box['width'] * 100
-                       for side in ('away', 'home')]
+                       for side in ('home', 'away')]
             # The long-detail fixture has a wider, three-digit pair. Its symmetric
             # anchors put the home digit farther from the original mockup mark.
             assert abs(centres[0] - 38.5) <= 3 and abs(centres[1] - 57.6) <= (5 if long_detail else 4), (
@@ -759,14 +759,15 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
                 'tier outside middle column', fixture, tier, middle, box)
     for tier in geometry['tiers']:
         assert box['top'] <= tier['top'] <= tier['bottom'] <= box['bottom'], (fixture, tier, box)
-    for side, index in (('away', 0), ('home', 1)):
+    for side, index in (('home', 0), ('away', 1)):
         logo = geometry['logoBoxes'][index]
         # The name margin removes the half-leading, so compare ink: the line box may reach into the row.
         assert logo['bottom'] <= geometry['labelInk'][index][0], ('logo above abbreviation', fixture, side, geometry)
         if paint.get(f'banner-{side}-score'):
             score = paint[f'banner-{side}-score']
             team = geometry['logoBoxes'][index]
-            gap = score['left'] - team['right'] if side == 'away' else team['left'] - score['right']
+            # Home sits on the left, so its digit is left of its logo.
+            gap = score['left'] - team['right'] if side == 'home' else team['left'] - score['right']
             assert gap >= 0, ('score touches logo', fixture, side, gap, geometry)
     if progress := geometry['progress']:
         # A visible track in the bottom row, between the abbreviations, above the card's edge.
@@ -796,11 +797,11 @@ def assert_scoreboard_layout(geometry, fixture, has_detail):
         assert measurements['score_gap'] >= gutter - .02, (
             'score-to-middle gap below gutter', fixture, measurements['score_gap'], gutter)
     if has_detail and geometry['scoreInk']:
-        away, home, tier = paint['banner-away-score'], paint['banner-home-score'], paint['tier-1']
+        home, away, tier = paint['banner-home-score'], paint['banner-away-score'], paint['tier-1']
         if geometry['wideScoreDetail']:
             detail_gap = geometry['detailInk'][0] - max(ink[1] for ink in geometry['scoreInk'])
         else:
-            detail_gap = min(tier['left'] - away['right'], home['left'] - tier['right'])
+            detail_gap = min(tier['left'] - home['right'], away['left'] - tier['right'])
         assert detail_gap >= gutter - .02, ('score-to-detail gap below gutter', fixture, detail_gap, gutter)
     return measurements
 
@@ -1245,23 +1246,24 @@ def measure_screenshot_ink(line, dpr, *, check_parity=False, include_horizontal=
 
 
 def score_ink_clearance(geometry, ink, cell, dpr):
-    state, away, home, detail = ink
+    # Dom order puts home first, so `home` is the left digit.
+    state, home, away, detail = ink
     gutter = geometry['trackGutter']
     # The 50%-coverage edges are quantized to device pixels.
     tolerance = 1 / dpr
-    state_gap = min(away[0], home[0]) - state[1]
+    state_gap = min(home[0], away[0]) - state[1]
     assert state_gap + tolerance >= gutter, ('painted score-to-state gap below gutter', cell, state_gap, gutter)
     if geometry['wideScoreDetail']:
-        detail_gap = detail[0] - max(away[1], home[1])
+        detail_gap = detail[0] - max(home[1], away[1])
     else:
-        detail_gap = min(detail[2] - away[3], home[2] - detail[3])
+        detail_gap = min(detail[2] - home[3], away[2] - detail[3])
     assert detail_gap + tolerance >= gutter, ('painted score-to-detail gap below gutter', cell, detail_gap, gutter)
     # Half-leading centres the font's content area on the line box, and the digits stay inside that area.
     # With leading below the content height, ink may pass each line-box edge by at most half the difference.
     overhang = max(0, *(max(box['top'] - score[0], score[1] - box['bottom'])
-                        for score, box in zip((away, home), geometry['scoreBoxes'])))
+                        for score, box in zip((home, away), geometry['scoreBoxes'])))
     half_leading = max(0, *((geometry['paint'][f'banner-{side}-score']['height'] - box['height']) / 2
-                            for side, box in zip(('away', 'home'), geometry['scoreBoxes'])))
+                            for side, box in zip(('home', 'away'), geometry['scoreBoxes'])))
     # Cap the theoretical allowance at the empirical limit for painted digits.
     limit = min(half_leading + tolerance, 2)
     assert overhang <= limit, ('painted score ink past the overhang limit', cell, overhang, limit)
@@ -1554,12 +1556,13 @@ def check_fixture_ink(pw, origin, assets, fixture, centre_rows):
             for scale, path in variants:
                 assert page.goto(origin + path, wait_until='networkidle').ok
                 card = page.locator('a.event-card:has(.banner-score)').first
-                expect(card.locator('.banner-score')).to_have_text([str(away_score), str(home_score)])
+                expect(card.locator('.banner-score')).to_have_text([str(home_score), str(away_score)])
                 expect(card.locator('.banner-status-tier:nth-child(2) .banner-status-line')).to_have_text(detail)
                 page.evaluate('document.fonts.ready')
                 assert page.evaluate("[...document.fonts].some(face => face.family.includes('Acumin Pro Extra Condensed') && face.status === 'loaded')")
                 if engine == 'chromium':
-                    assert_acumin_used(card, len(str(away_score)))
+                    # The rule reads the first score, which is now the home digit.
+                    assert_acumin_used(card, len(str(home_score)))
                 if scale == 'hero-element':
                     double_text(page)
                 elif scale == 'wrapped':

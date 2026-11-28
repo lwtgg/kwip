@@ -40,7 +40,8 @@ logos from the score match (rule 25) — a two-team gradient, the logos, and `vs
 team's colour, so on that end of the gradient the mark can vanish (measured at 1.04 contrast); every logo carries a
 halo of the opposite polarity, mixed to `--banner-logo-halo-contrast` (4) against the field it sits on, so the
 silhouette always has a ring to read against. Provider thumbnails are no
-longer the default art and are not fetched. Home/away decides the sides: away on the left, home on the right.
+longer the default art and are not fetched. Home/away decides the sides: home on the left, away on the right. The provider's order is not the display
+order (soccer lists home first, US sports away first), and the fixture name is not either.
 No match, no logos, a missing colour or a failed logo all degrade to the gradient and the existing
 `PosterFallback` monogram — never to a hole. Logos are hotlinked from the score provider's CDN with an
 explicit box, `loading="lazy"` and `decoding="async"`, and no image proxy. Supersedes rule 8.
@@ -109,7 +110,7 @@ and the window has opened, so a page opened a minute before kickoff cannot stay 
 maps `match.state` — `post` to Final, `in` to Live, `pre` to Upcoming while the window is open — instead of
 comparing `now` to `endsAt`. A `pre` match more than fifteen minutes past its kickoff says **Delayed** instead, on
 the pill and in the banner state, while it keeps polling: the provider lag is real and "Upcoming" beside a kickoff
-that has gone is the contradiction. The page title and `<h1>` take the same away-first order as the banner, in the
+that has gone is the contradiction. The page title and `<h1>` take the same home-first order as the banner, in the
 heading fallback and the seed document too, so the title and the digits can never read the result opposite ways.
 A hidden tab skips its beats; on becoming visible it refreshes once so the first thing seen is current.
 

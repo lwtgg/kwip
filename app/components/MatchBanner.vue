@@ -134,6 +134,7 @@ function fitText() {
   const natural = new Map(lines.map(line => [line, line.offsetWidth + 1]))
   const widestScore = Math.max(0, ...scores.map(line => natural.get(line)!))
   const scoreMin = Math.ceil(widestScore * floor)
+  // The home score is on the left, so it is the one with the trailing gutter.
   const gutter = scores.length ? parseFloat(getComputedStyle(scores[0]!.parentElement!).paddingInlineEnd) : 0
   const labelMin = Math.ceil(Math.max(...labels.map(line => natural.get(line)!)) * floor)
   const logo = lineup.querySelector('.banner-team > *')!.getBoundingClientRect().width
@@ -318,7 +319,7 @@ function refitAfterScore(event: AnimationEvent) {
   if (event.animationName === 'banner-score-in') fitText()
 }
 onMounted(() => {
-  for (const [index, side] of [match.value.away, match.value.home].entries()) {
+  for (const [index, side] of [match.value.home, match.value.away].entries()) {
     const image = logoImages[index]
     if (side.logo && image?.complete && image.naturalWidth === 0) failed.value[side.logo] = true
   }
@@ -340,14 +341,14 @@ onBeforeUnmount(() => {
 <template>
   <div class="match-banner" :style="art" :data-scale="scale">
     <div ref="lineupElement" class="banner-lineup" aria-hidden="true">
-      <template v-for="(side, index) in [match.away, match.home]" :key="index">
-        <div class="banner-team" :class="index === 0 ? 'banner-away-team' : 'banner-home-team'">
+      <template v-for="(side, index) in [match.home, match.away]" :key="index">
+        <div class="banner-team" :class="`banner-${index === 0 ? 'home' : 'away'}-team`">
           <img v-if="side.logo && !failed[side.logo]" :ref="el => { if (el) logoImages[index] = el as HTMLImageElement }" :src="side.logo" alt="" width="116" height="116"
             loading="lazy" decoding="async" @error="failed[side.logo!] = true">
           <span v-else class="banner-initials"><span class="banner-fit-text">{{ teamInitials(side.name) }}</span></span>
         </div>
-        <span class="banner-abbreviation" :class="index === 0 ? 'banner-away-label' : 'banner-home-label'"><span class="banner-fit-text">{{ bannerAbbreviation(side) }}</span></span>
-        <span v-if="content.hasScores" class="banner-score-slot" :class="index === 0 ? 'banner-away-score' : 'banner-home-score'">
+        <span class="banner-abbreviation" :class="`banner-${index === 0 ? 'home' : 'away'}-label`"><span class="banner-fit-text">{{ bannerAbbreviation(side) }}</span></span>
+        <span v-if="content.hasScores" class="banner-score-slot" :class="`banner-${index === 0 ? 'home' : 'away'}-score`">
           <span :key="scoreEpoch[index]" class="banner-fit-text banner-score"
             :class="{ 'banner-score-changed': scoreEpoch[index]! }">{{ side.score }}</span>
         </span>

@@ -60,7 +60,8 @@ export default defineEventHandler(async event => {
         const away = seed.data?.match?.away?.name
         const home = seed.data?.match?.home?.name
         const heading = typeof away === 'string' && typeof home === 'string'
-          ? `${away} vs. ${home}`
+          // Same home-first order as the banner and the page heading.
+          ? `${home} vs. ${away}`
           : seed.data?.name
         if (typeof heading === 'string' && heading) {
           return fallbackDocument(canonical, heading, 'Saved event details are available. The full page took too long to load.')

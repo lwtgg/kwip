@@ -85,7 +85,7 @@ function humanizeUri(uri: string): string {
 const pageHeading = computed(() => {
   const match = detail.value?.match ?? matchingListItem.value?.match
   return match
-    ? `${match.away.name} vs. ${match.home.name}`
+    ? `${match.home.name} vs. ${match.away.name}`
     : detail.value?.name || matchingListItem.value?.name || humanizeUri(uriName.value)
 })
 
@@ -643,7 +643,7 @@ const sportsEventJsonLd = computed(() => {
     ld.endDate = new Date(d.ends_at * 1000).toISOString()
   }
   const competitors = d.match
-    ? [d.match.away, d.match.home].map(side => ({ '@type': 'SportsTeam', name: side.name }))
+    ? [d.match.home, d.match.away].map(side => ({ '@type': 'SportsTeam', name: side.name }))
     : parseMatchupCompetitors(d.name)
   if (competitors.length > 0) {
     ld.competitor = competitors

@@ -29,6 +29,6 @@ export function matchBannerStyle(match: NonNullable<FeedStreamItem['match']>, sc
     '--banner-scrim': bannerScrim(colors, contrast),
     '--banner-edge': pre ? '0' : token('banner-edge-alpha'),
     '--banner-team-field': pre
-      ? 'linear-gradient(to right, var(--banner-away), var(--banner-base), var(--banner-home))'
-      : 'linear-gradient(to right, var(--banner-away) var(--banner-away-stop), var(--banner-home) var(--banner-home-stop))' }
+      ? 'linear-gradient(to right, var(--banner-home), var(--banner-base), var(--banner-away))'
+      : 'linear-gradient(to right, var(--banner-home) var(--banner-home-stop), var(--banner-away) var(--banner-away-stop))' }
 }

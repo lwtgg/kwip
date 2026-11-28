@@ -211,7 +211,7 @@ for (const fallback of ['cache', 'seed', '503', 'authoritative omission'] as con
   })
 }
 
-test('a seed timeout fallback takes the away-first match order', async context => {
+test('a seed timeout fallback takes the home-first match order', async context => {
   const { run, advance, moveClock } = setup(context, {
     seed: {
       name: 'Juventus vs. Omonia Nicosia',
@@ -234,8 +234,8 @@ test('a seed timeout fallback takes the away-first match order', async context =
   assert.ok(body instanceof Response)
   assert.equal(body.status, 200)
   const html = await body.text()
-  assert.match(html, /<title>Omonia Nicosia vs\. Juventus<\/title>/)
-  assert.match(html, /<h1>Omonia Nicosia vs\. Juventus<\/h1>/)
+  assert.match(html, /<title>Juventus vs\. Omonia Nicosia<\/title>/)
+  assert.match(html, /<h1>Juventus vs\. Omonia Nicosia<\/h1>/)
 })
 
 test('Nuxt payload requests bypass page logging', async context => {

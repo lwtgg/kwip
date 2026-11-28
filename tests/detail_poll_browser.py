@@ -163,7 +163,7 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         fixtures.write('in', 1, 0, "2'", starts, ends)
         page.tick(60)  # t0+205: tick at t0+200 reads the kickoff
         expect(page.hero.locator('.banner-score')).to_have_count(2, timeout=5000)
-        check(failures, 'pre -> in: hero shows its own score', page.scores() == ['1', '0'], page.scores())
+        check(failures, 'pre -> in: hero shows its own score', page.scores() == ['0', '1'], page.scores())
         check(failures, 'pre -> in: hero reads Live', 'Live' in page.tiers(), page.tiers())
         check(failures, 'pre -> in: pill reads Live', page.pill.inner_text() == 'Live', page.pill.inner_text())
         evidence['pre -> in (t0+61 .. t0+205)'] = dict(page.requests)
@@ -176,12 +176,12 @@ def kickoff_and_whistle(browser, origin, fixtures, failures, evidence):
         fixtures.write('post', 2, 1, 'Final', starts, ends)
         # t0+265: tick at t0+260 reads the final; stop as soon as the digits swap so the band is
         # sampled while the entrance is still running.
-        assert page.tick_until(lambda: page.scores() == ['2', '1'], 70), page.scores()
+        assert page.tick_until(lambda: page.scores() == ['1', '2'], 70), page.scores()
         raised = page.state_ratio()
         page.tick(2)
         page.page.wait_for_timeout(600)
         check(failures, 'in -> post: hero reads Final', 'Final' in page.tiers(), page.tiers())
-        check(failures, 'in -> post: hero score moved', page.scores() == ['2', '1'], page.scores())
+        check(failures, 'in -> post: hero score moved', page.scores() == ['1', '2'], page.scores())
         check(failures, 'in -> post: pill reads Final', page.pill.inner_text() == 'Final', page.pill.inner_text())
         # The score's entrance is a translate, so the fit that ran on the change saw a raised digit;
         # the band has to come back to where it was once the animation settles.

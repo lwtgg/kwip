@@ -56,7 +56,7 @@ test('live banner tiers order the state, provider detail and compact audience', 
   assert.deepEqual(matchBannerContent(live, '123456', 'viewers', false), {
     hasScores: true,
     tiers: ['Live', 'Halftime', '123.5k Viewers'],
-    label: 'Colorado State Rams 150, Arizona Wildcats 197. Live. Halftime. 123.5k Viewers (123,456).',
+    label: 'Arizona Wildcats 197, Colorado State Rams 150. Live. Halftime. 123.5k Viewers (123,456).',
   })
 })
 
@@ -65,7 +65,7 @@ test('the matchup uses vs for an incomplete pregame score, and the name says wha
   assert.deepEqual(matchBannerContent(upcoming, '1', 'viewers', false), {
     hasScores: false,
     tiers: ['Upcoming', 'vs', '1 Viewer'],
-    label: 'Colorado State Rams vs Arizona Wildcats. Upcoming. 1 Viewer.',
+    label: 'Arizona Wildcats vs Colorado State Rams. Upcoming. 1 Viewer.',
   })
 })
 
@@ -104,11 +104,11 @@ test('the detail clock only restarts when the provider says something new', () =
 
 test('the name carries the visible state, detail and audience in the banner\'s words, separated', () => {
   const live = { state: 'in', detail: 'Halftime', away: { ...away, score: 50 }, home: { ...home, score: 97 } } as const
-  assert.equal(matchBannerContent(live, '62', 'viewers', false).label, 'Colorado State Rams 50, Arizona Wildcats 97. Live. Halftime. 62 Viewers.')
+  assert.equal(matchBannerContent(live, '62', 'viewers', false).label, 'Arizona Wildcats 97, Colorado State Rams 50. Live. Halftime. 62 Viewers.')
   const final = { ...live, state: 'post', detail: 'Final' } as const
-  assert.equal(matchBannerContent(final, '1', 'views', false).label, 'Colorado State Rams 50, Arizona Wildcats 97. Final. 1 View.')
+  assert.equal(matchBannerContent(final, '1', 'views', false).label, 'Arizona Wildcats 97, Colorado State Rams 50. Final. 1 View.')
   // Stale rows show no audience, so the name has none either.
-  assert.equal(matchBannerContent(final, '250', 'views', true).label, 'Colorado State Rams 50, Arizona Wildcats 97. Final.')
+  assert.equal(matchBannerContent(final, '250', 'views', true).label, 'Arizona Wildcats 97, Colorado State Rams 50. Final.')
   // Every visible tier appears in the name, in order, so voice control can say what it reads.
   const { tiers, label } = matchBannerContent(live, '1234567', 'viewers', false)
   let from = 0
@@ -132,7 +132,7 @@ test('a pre match well past kickoff reads as delayed, on screen and in the name'
   const late = { state: 'pre', detail: 'Scheduled', away: { ...away, score: null }, home } as const
   const content = matchBannerContent(late, '1', 'viewers', false, true)
   assert.deepEqual(content.tiers, ['Delayed', 'vs', '1 Viewer'])
-  assert.equal(content.label, 'Colorado State Rams vs Arizona Wildcats. Kickoff delayed. 1 Viewer.')
+  assert.equal(content.label, 'Arizona Wildcats vs Colorado State Rams. Kickoff delayed. 1 Viewer.')
   const finished = { state: 'post', detail: 'Final', away, home } as const
   assert.equal(matchBannerContent(finished, '1', 'viewers', false, true).tiers[0], 'Final')
 })
